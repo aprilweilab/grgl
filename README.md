@@ -1,2 +1,3 @@
-# grgl
-Genotype Representation Graph Library
+# Genotype Representation Graph Library
+
+Placeholder until code is released.
