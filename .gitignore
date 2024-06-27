@@ -7,8 +7,8 @@ __pycache__
 build.log
 *.so
 *.grg
-gconverter
-gindexer
-grg-merge
-grgl
-grgp
+/gconverter
+/gindexer
+/grg-merge
+/grgl
+/grgp
