@@ -1,0 +1,13 @@
+[submodule "third-party/tskit"]
+	path = third-party/tskit
+	url = https://github.com/tskit-dev/tskit.git
+[submodule "third-party/args"]
+	path = third-party/args
+	url = https://github.com/Taywee/args
+[submodule "third-party/pybind11"]
+	path = third-party/pybind11
+	url = ../../pybind/pybind11
+	branch = stable
+[submodule "third-party/bgen"]
+	path = third-party/bgen
+	url = ../../dcdehaas/bgen

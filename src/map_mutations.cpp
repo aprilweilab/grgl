@@ -1,0 +1,368 @@
+/* Genotype Representation Graph Library (GRGL)
+ * Copyright (C) 2024 April Wei
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * should have received a copy of the GNU General Public License
+ * with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+#include "grgl/map_mutations.h"
+#include "grg_helpers.h"
+#include "grgl/grgnode.h"
+#include "grgl/mutation.h"
+#include "grgl/visitor.h"
+#include "gthash_index.h"
+#include "util.h"
+
+#include <algorithm>
+#include <iostream>
+#include <unordered_map>
+#include <vector>
+
+// When enabled: garbage collects unneeded sample sets
+#define CLEANUP_SAMPLE_SETS_MAPPING 1
+
+// Every 10% we'll emit some stats about current size of the GRG.
+#define EMIT_STATS_AT_PERCENT (10)
+// Every 5% we compact the GRG edge lists.
+#define COMPACT_EDGES_AT_PERCENT (5)
+#define ONE_HUNDRED_PERCENT      (100)
+
+// Histogram size for statistics
+#define STATS_HIST_SIZE (200)
+
+namespace grgl {
+
+using NodeSamples = std::tuple<NodeID, size_t>;
+
+static bool cmpNodeSamples(const NodeSamples& ns1, const NodeSamples& ns2) {
+    const size_t samplesCount1 = std::get<1>(ns1);
+    const size_t& samplesCount2 = std::get<1>(ns2);
+    return samplesCount1 < samplesCount2;
+}
+
+class TopoCandidateCollectorVisitor : public grgl::GRGVisitor {
+public:
+    explicit TopoCandidateCollectorVisitor(const std::vector<NodeIDSizeT>& sampleCounts)
+        : m_sampleCounts(sampleCounts) {}
+
+    bool visit(const grgl::ConstGRGPtr& grg,
+               const grgl::NodeID nodeId,
+               const grgl::TraversalDirection direction,
+               const grgl::DfsPass dfsPass = grgl::DfsPass::DFS_PASS_NONE) override {
+        release_assert(direction == TraversalDirection::DIRECTION_UP);
+        release_assert(dfsPass == DfsPass::DFS_PASS_NONE);
+
+#if CLEANUP_SAMPLE_SETS_MAPPING
+        if (m_refCounts.empty()) {
+            m_refCounts.resize(grg->numNodes());
+        }
+#endif
+
+        bool isRoot = grg->numUpEdges(nodeId) == 0;
+
+        const auto& alreadySeeded = m_nodeToSamples.find(nodeId);
+        if (alreadySeeded != m_nodeToSamples.end()) {
+            m_collectedNodes.emplace_back(nodeId, m_nodeToSamples[nodeId].size());
+            return true;
+        }
+
+        NodeIDList candidateNodes;
+        NodeIDList samplesBeneath;
+        if (grg->isSample(nodeId)) {
+            samplesBeneath.emplace_back(nodeId);
+        }
+#if CLEANUP_SAMPLE_SETS_MAPPING
+        m_refCounts[nodeId] = grg->numUpEdges(nodeId);
+#endif
+        for (const auto& childId : grg->getDownEdges(nodeId)) {
+            const auto& childSampleIt = m_nodeToSamples.find(childId);
+            if (childSampleIt != m_nodeToSamples.end()) {
+                auto childSamples = childSampleIt->second;
+                if (childSamples.size() > 1) {
+                    candidateNodes.emplace_back(childId);
+                }
+                for (const auto childSampleId : childSamples) {
+                    samplesBeneath.emplace_back(childSampleId);
+                }
+            }
+        }
+
+        // We had a mismatch.
+        release_assert(nodeId < m_sampleCounts.size());
+        release_assert(m_sampleCounts[nodeId] <= grg->numSamples());
+        bool keepGoing = true;
+        NodeIDSizeT missing = (m_sampleCounts[nodeId] - samplesBeneath.size());
+        if (missing > 0 || isRoot) {
+            for (const auto& candidate : candidateNodes) {
+                m_collectedNodes.emplace_back(candidate, m_nodeToSamples[candidate].size());
+#if CLEANUP_SAMPLE_SETS_MAPPING
+                // Prevent candidates from having their samplesets garbage collected.
+                m_refCounts[candidate] = MAX_GRG_NODES + 1;
+#endif
+            }
+            keepGoing = false;
+        }
+
+        if (keepGoing) {
+            m_nodeToSamples.emplace(nodeId, std::move(samplesBeneath));
+        }
+
+#if CLEANUP_SAMPLE_SETS_MAPPING
+        for (const auto& childId : grg->getDownEdges(nodeId)) {
+            // Skip children that aren't part of our search.
+            if (m_refCounts[childId] == 0) {
+                continue;
+            }
+            if (--m_refCounts[childId] == 0) {
+                m_nodeToSamples.erase(childId);
+            }
+        }
+#endif
+        return keepGoing;
+    }
+
+    std::vector<NodeSamples> m_collectedNodes;
+    std::unordered_map<NodeID, NodeIDList> m_nodeToSamples;
+
+private:
+    const std::vector<NodeIDSizeT>& m_sampleCounts;
+#if CLEANUP_SAMPLE_SETS_MAPPING
+    std::vector<NodeIDSizeT> m_refCounts;
+#endif
+};
+
+static bool setsOverlap(const NodeIDSet& set1, const NodeIDList& set2) {
+    for (auto nodeId : set2) {
+        if (set1.find(nodeId) != set1.end()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
+                                    const std::vector<NodeID>& topoOrder,
+                                    const std::vector<NodeIDSizeT>& sampleCounts,
+                                    const Mutation& newMutation,
+                                    const NodeIDList& mutSamples,
+                                    MutationMappingStats& stats,
+                                    const NodeID shapeNodeIdMax) {
+    // The set of nodes that we have covered so far (greedily extended)
+    NodeIDSet covered;
+
+    TopoCandidateCollectorVisitor collector(sampleCounts);
+    if (mutSamples.size() > 1) {
+        NodeIDList seeds;
+        for (const NodeID nodeId : mutSamples) {
+            seeds.push_back(nodeId);
+        }
+        grg->visitTopo(collector, grgl::TraversalDirection::DIRECTION_UP, seeds, &topoOrder);
+    }
+    std::vector<NodeSamples>& candidates = collector.m_collectedNodes;
+    std::sort(candidates.begin(), candidates.end(), cmpNodeSamples);
+
+    if (candidates.empty()) {
+        stats.mutationsWithNoCandidates++;
+    } else {
+        // Exact match scenario. Return early.
+        const auto& candidate = candidates.back();
+        const size_t candidateSetSize = std::get<1>(candidate);
+        if (candidateSetSize == mutSamples.size()) {
+            const auto candidateId = std::get<0>(candidate);
+            stats.reusedExactly++;
+            grg->addMutation(newMutation, candidateId);
+            if (candidateId >= shapeNodeIdMax) {
+                stats.reusedMutNodes++;
+            }
+            return {};
+        }
+    }
+
+    const NodeID mutNodeId = grg->makeNode();
+    grg->addMutation(newMutation, mutNodeId);
+    NodeIDList addedNodes;
+    while (!candidates.empty()) {
+        const auto& candidate = candidates.back();
+        const auto candidateId = std::get<0>(candidate);
+        const NodeIDList& candidateSet = collector.m_nodeToSamples.at(candidateId);
+        // Different candidates may cover different subsets of the sample set that
+        // we are currently trying to cover. Those sample sets MUST be non-overlapping
+        // or we will introduce a diamond into the graph:
+        //  m-->n1-->s0
+        //  m-->n2-->s0
+        // However, there is no guarantee that there does not exist nodes (n1, n2)
+        // that both point to a sample (or samples) that we care about, so we have to
+        // track that here. We do that by only considering candidates that have no overlap
+        // with our already-covered set.
+        if (!setsOverlap(covered, candidateSet)) {
+            NodeIDSet usedNodes;
+            // Mark all the sample nodes as covered.
+            for (const auto nodeId : candidateSet) {
+                covered.emplace(nodeId);
+                usedNodes.emplace(nodeId);
+            }
+            if (candidateId >= shapeNodeIdMax) {
+                stats.reusedMutNodes++;
+            }
+
+            // Use this candidate (or the nodes below it) to cover the sample subset.
+            stats.reusedNodes++;
+            grg->connect(mutNodeId, candidateId);
+            stats.reusedNodeCoverage += candidateSet.size();
+            if (candidateSet.size() >= stats.reuseSizeHist.size()) {
+                stats.reuseSizeBiggerThanHistMax++;
+            } else {
+                stats.reuseSizeHist[candidateSet.size()]++;
+            }
+        }
+        candidates.pop_back();
+    }
+
+    // Any leftovers, we just connect directly from the new mutation node to the
+    // samples.
+    NodeIDSet uncovered;
+    for (const NodeID sampleNodeId : mutSamples) {
+        const auto coveredIt = covered.find(sampleNodeId);
+        if (coveredIt == covered.end()) {
+            uncovered.emplace(sampleNodeId);
+        }
+    }
+    if (!uncovered.empty()) {
+        stats.numWithSingletons++;
+    }
+    if (uncovered.size() > stats.maxSingletons) {
+        stats.maxSingletons = uncovered.size();
+    }
+
+    for (auto sampleNodeId : uncovered) {
+        grg->connect(mutNodeId, sampleNodeId);
+        stats.singletonSampleEdges++;
+    }
+    // This nodes needs to be last, for the way we update things.
+    addedNodes.push_back(mutNodeId);
+    return addedNodes;
+}
+
+MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations) {
+    auto operationStartTime = std::chrono::high_resolution_clock::now();
+#define START_TIMING_OPERATION() operationStartTime = std::chrono::high_resolution_clock::now();
+#define EMIT_TIMING_MESSAGE(msg)                                                                                       \
+    do {                                                                                                               \
+        std::cout << msg                                                                                               \
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - \
+                                                                           operationStartTime)                         \
+                         .count()                                                                                      \
+                  << " ms" << std::endl;                                                                               \
+    } while (0)
+
+    const size_t mutationCount = mutations.countMutations();
+    // Note: if we change the algorithm to add more than just |mutations| nodes, we need to
+    // increase this to avoid re-doubling the vector sizes.
+    const size_t extraNodeCapacity = 0;
+    const size_t extraReserveCount = (mutationCount + extraNodeCapacity);
+
+    MutationMappingStats stats;
+    stats.reuseSizeHist.resize(STATS_HIST_SIZE, 0);
+    stats.totalMutations = mutationCount;
+
+    // For the whole graph, count the number of samples under each node.
+    DfsSampleCountVisitor countVisitor;
+    grg->visitDfs(countVisitor, grgl::TraversalDirection::DIRECTION_DOWN, grg->getRootNodes());
+    std::vector<NodeIDSizeT>& sampleCounts = countVisitor.m_sampleCounts;
+    sampleCounts.reserve(sampleCounts.size() + extraReserveCount);
+
+    // Now get a topological order for the entire graph. We'll update this order
+    // later as we add new mutation nodes.
+    std::vector<NodeID> topoOrder = grg->topologicalSort(DIRECTION_DOWN);
+    topoOrder.reserve(topoOrder.size() + extraReserveCount);
+
+    std::cout << "Mapping " << stats.totalMutations << " mutations\n";
+    size_t onePercent = (stats.totalMutations / ONE_HUNDRED_PERCENT) + 1;
+    size_t completed = 0;
+
+    // The low-water mark for nodes. If a NodeID is greater than or equal to this, then it
+    // is a newly added (mutation) node.
+    const NodeID shapeNodeIdMax = grg->numNodes();
+
+    // For each mutation, perform a topological bottom-up traversal from the sample
+    // nodes of interest, and collect all nodes that reach a subset of those nodes.
+    size_t _ignored = 0;
+    MutationAndSamples unmapped = {Mutation(0.0, ""), NodeIDList()};
+    while (mutations.next(unmapped, _ignored)) {
+        bool tracing = false;
+        const NodeIDList& mutSamples = unmapped.second;
+        if (!mutSamples.empty()) {
+            if (tracing) {
+                std::cout << ">>> Has " << mutSamples.size() << " samples\n";
+            }
+            stats.samplesProcessed += mutSamples.size();
+            if (mutSamples.size() == 1) {
+                stats.mutationsWithOneSample++;
+            }
+            // Step 1: Add mutation node and create edges to existing nodes.
+            NodeIDList addedNodes =
+                greedyAddMutation(grg, topoOrder, sampleCounts, unmapped.first, mutSamples, stats, shapeNodeIdMax);
+
+            // Step 2: Add the new mutation node to the topological order.
+            topoOrder.resize(topoOrder.size() + addedNodes.size());
+            sampleCounts.resize(sampleCounts.size() + addedNodes.size());
+            for (const auto& nodeId : addedNodes) {
+                NodeIDSizeT maxOrder = 0;
+                NodeIDSizeT sumSamples = 0;
+                for (const auto& childId : grg->getDownEdges(nodeId)) {
+                    maxOrder = std::max<NodeIDSizeT>(maxOrder, topoOrder[childId]);
+                    release_assert(sampleCounts[childId] > 0);
+                    sumSamples += sampleCounts[childId];
+                }
+                topoOrder[nodeId] = maxOrder;
+
+                // Step 3: Update sample count for the new node.
+                sampleCounts[nodeId] = sumSamples;
+            }
+        } else {
+            stats.emptyMutations++;
+            grg->addMutation(unmapped.first, INVALID_NODE_ID);
+        }
+        completed++;
+        const size_t percentCompleted = (completed / onePercent);
+        if ((completed % onePercent == 0)) {
+            std::cout << percentCompleted << "% done" << std::endl;
+        }
+        if ((completed % (EMIT_STATS_AT_PERCENT * onePercent) == 0)) {
+            std::cout << "Last mutation sampleset size: " << mutSamples.size() << std::endl;
+            std::cout << "GRG nodes: " << grg->numNodes() << std::endl;
+            std::cout << "GRG edges: " << grg->numEdges() << std::endl;
+            std::cout << "singletonSampleEdges: " << stats.singletonSampleEdges << std::endl;
+            std::cout << "samplesProcessed: " << stats.samplesProcessed << std::endl;
+            std::cout << "reusedNodes: " << stats.reusedNodes << std::endl;
+            std::cout << "reusedExactly: " << stats.reusedExactly << std::endl;
+            std::cout << "reusedNodeCoverage: " << stats.reusedNodeCoverage << std::endl;
+            std::cout << "reusedMutNodes: " << stats.reusedMutNodes << std::endl;
+            std::cout << "reuseSizeBiggerThanHistMax: " << stats.reuseSizeBiggerThanHistMax << std::endl;
+            std::cout << "mutationsWithNoCandidates: " << stats.mutationsWithNoCandidates << std::endl;
+            std::cout << "mutationsWithOneSample: " << stats.mutationsWithOneSample << std::endl;
+            std::cout << "newTreeNodes: " << stats.newTreeNodes << std::endl;
+            std::cout << "numWithSingletons: " << stats.numWithSingletons << std::endl;
+            std::cout << "maxSingletons: " << stats.maxSingletons << std::endl;
+            std::cout << "avgSingletons: " << (double)stats.singletonSampleEdges / (double)stats.numWithSingletons
+                      << std::endl;
+        }
+        if ((completed % (COMPACT_EDGES_AT_PERCENT * onePercent) == 0)) {
+            START_TIMING_OPERATION();
+            grg->compact();
+            EMIT_TIMING_MESSAGE("Compacting GRG edges took ");
+        }
+    }
+    return stats;
+}
+
+}; // namespace grgl

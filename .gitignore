@@ -1,0 +1,14 @@
+dist/
+build/
+.vscode/
+.cache/
+*.egg-info/
+__pycache__
+build.log
+*.so
+*.grg
+gconverter
+gindexer
+grg-merge
+grgl
+grgp

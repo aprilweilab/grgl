@@ -1,0 +1,14 @@
+---
+AccessModifierOffset: -4
+AlignConsecutiveMacros: 'true'
+AllowShortCaseLabelsOnASingleLine: 'true'
+AllowShortIfStatementsOnASingleLine: 'Never'
+AllowShortLoopsOnASingleLine: 'false'
+BinPackArguments: 'false'
+BinPackParameters: 'false'
+ColumnLimit: 120
+IndentWidth: 4
+NamespaceIndentation: None
+PointerAlignment: Left
+PackConstructorInitializers: Never
+...

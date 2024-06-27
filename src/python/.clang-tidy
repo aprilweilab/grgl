@@ -1,0 +1,2 @@
+# Disable checks for the Python<-->C code.
+Checks: '-*'

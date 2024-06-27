@@ -1,0 +1,6 @@
+---
+Checks: '*,-fuchsia-*,-google-*,-zircon-*,-abseil-*,-modernize-use-trailing-return-type,-llvm-*,-llvmlibc-*,-bugprone-easily-swappable-parameters,-readability-function-cognitive-complexity,-cppcoreguidelines-macro-usage,-altera-unroll-loops,-altera-id-dependent-backward-branch,-cppcoreguidelines-pro-bounds-pointer-arithmetic,-misc-no-recursion,-modernize-loop-convert,-bugprone-exception-escape,-concurrency-mt-unsafe,-cppcoreguidelines-non-private-member-variables-in-classes,-misc-non-private-member-variables-in-classes,-altera-struct-pack-align,-modernize-use-auto,-hicpp-use-auto,-cppcoreguidelines-avoid-c-arrays,-hicpp-avoid-c-arrays,-modernize-avoid-c-arrays'
+CheckOptions: [{ key: misc-non-private-member-variables-in-classes, value: IgnoreClassesWithAllMemberVariablesBeingPublic }]
+WarningsAsErrors: '*'
+HeaderFilterRegex: ''
+FormatStyle: none
