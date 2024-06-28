@@ -340,20 +340,7 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
             std::cout << "Last mutation sampleset size: " << mutSamples.size() << std::endl;
             std::cout << "GRG nodes: " << grg->numNodes() << std::endl;
             std::cout << "GRG edges: " << grg->numEdges() << std::endl;
-            std::cout << "singletonSampleEdges: " << stats.singletonSampleEdges << std::endl;
-            std::cout << "samplesProcessed: " << stats.samplesProcessed << std::endl;
-            std::cout << "reusedNodes: " << stats.reusedNodes << std::endl;
-            std::cout << "reusedExactly: " << stats.reusedExactly << std::endl;
-            std::cout << "reusedNodeCoverage: " << stats.reusedNodeCoverage << std::endl;
-            std::cout << "reusedMutNodes: " << stats.reusedMutNodes << std::endl;
-            std::cout << "reuseSizeBiggerThanHistMax: " << stats.reuseSizeBiggerThanHistMax << std::endl;
-            std::cout << "mutationsWithNoCandidates: " << stats.mutationsWithNoCandidates << std::endl;
-            std::cout << "mutationsWithOneSample: " << stats.mutationsWithOneSample << std::endl;
-            std::cout << "newTreeNodes: " << stats.newTreeNodes << std::endl;
-            std::cout << "numWithSingletons: " << stats.numWithSingletons << std::endl;
-            std::cout << "maxSingletons: " << stats.maxSingletons << std::endl;
-            std::cout << "avgSingletons: " << (double)stats.singletonSampleEdges / (double)stats.numWithSingletons
-                      << std::endl;
+            stats.print(std::cout);
         }
         if ((completed % (COMPACT_EDGES_AT_PERCENT * onePercent) == 0)) {
             START_TIMING_OPERATION();
