@@ -298,7 +298,7 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
     MutationAndSamples unmapped = {Mutation(0.0, ""), NodeIDList()};
     while (mutations.next(unmapped, _ignored)) {
         bool tracing = false;
-        const NodeIDList& mutSamples = unmapped.second;
+        const NodeIDList& mutSamples = unmapped.samples;
         if (!mutSamples.empty()) {
             if (tracing) {
                 std::cout << ">>> Has " << mutSamples.size() << " samples\n";
@@ -309,7 +309,7 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
             }
             // Step 1: Add mutation node and create edges to existing nodes.
             NodeIDList addedNodes =
-                greedyAddMutation(grg, topoOrder, sampleCounts, unmapped.first, mutSamples, stats, shapeNodeIdMax);
+                greedyAddMutation(grg, topoOrder, sampleCounts, unmapped.mutation, mutSamples, stats, shapeNodeIdMax);
 
             // Step 2: Add the new mutation node to the topological order.
             topoOrder.resize(topoOrder.size() + addedNodes.size());
@@ -329,7 +329,7 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
             }
         } else {
             stats.emptyMutations++;
-            grg->addMutation(unmapped.first, INVALID_NODE_ID);
+            grg->addMutation(unmapped.mutation, INVALID_NODE_ID);
         }
         completed++;
         const size_t percentCompleted = (completed / onePercent);

@@ -137,7 +137,7 @@ static void getMutStats(MutationIterator& iterator,
     iterator.reset();
     MutationAndSamples mutAndSamples;
     while (iterator.next(mutAndSamples, numSamples)) {
-        const size_t mutRefs = mutAndSamples.second.size();
+        const size_t mutRefs = mutAndSamples.samples.size();
         if (mutRefs < dropBelowCount) {
             continue;
         }
@@ -174,7 +174,7 @@ bool genotypeHashIndex(MutationIterator& mutIterator,
 
     size_t dropBelowCount = 0;
     if (dropBelowThreshold < 1.0) {
-        dropBelowCount = numSamples * dropBelowThreshold;
+        dropBelowCount = (size_t)((double)numSamples * dropBelowThreshold);
     } else {
         dropBelowCount = (size_t)dropBelowThreshold;
     }
@@ -200,14 +200,14 @@ bool genotypeHashIndex(MutationIterator& mutIterator,
     size_t dropped = 0;
     size_t numVariants = 0;
     while (mutIterator.next(mutAndSamples, _ignore)) {
-        if (mutAndSamples.second.size() < dropBelowCount) {
+        if (mutAndSamples.samples.size() < dropBelowCount) {
             dropped++;
             continue;
         }
-        const size_t position = static_cast<size_t>(mutAndSamples.first.getPosition());
+        const size_t position = static_cast<size_t>(mutAndSamples.mutation.getPosition());
         PosAndAllele hashInput = {position, {}};
-        strncpy(&hashInput.allele[0], mutAndSamples.first.getAllele().c_str(), MAX_ALLELE_SIZE_FOR_HASH);
-        for (auto sampleId : mutAndSamples.second) {
+        strncpy(&hashInput.allele[0], mutAndSamples.mutation.getAllele().c_str(), MAX_ALLELE_SIZE_FOR_HASH);
+        for (auto sampleId : mutAndSamples.samples) {
             bloomFilters.at(sampleId).addItem(hashInput);
         }
         numVariants++;

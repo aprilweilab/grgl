@@ -127,13 +127,13 @@ static void mutationIteratorToIGD(const std::string& inFilename,
     double fpLeftovers = 0.0;
     double fnLeftovers = 0.0;
     while (iterator->next(mutAndSamples, totalSamples)) {
-        const size_t position = (size_t)mutAndSamples.first.getPosition();
-        const auto& refAllele = mutAndSamples.first.getRefAllele();
-        const auto& altAllele = mutAndSamples.first.getAllele();
+        const size_t position = (size_t)mutAndSamples.mutation.getPosition();
+        const auto& refAllele = mutAndSamples.mutation.getRefAllele();
+        const auto& altAllele = mutAndSamples.mutation.getAllele();
         if (altAllele == grgl::Mutation::ALLELE_MISSING) {
-            missingCount += mutAndSamples.second.size();
+            missingCount += mutAndSamples.samples.size();
         }
-        trim(mutAndSamples.second, trimToSamples);
+        trim(mutAndSamples.samples, trimToSamples);
         if (fpPerVariant + fnPerVariant > 0) {
             const double fp = fpPerVariant + fpLeftovers;
             const size_t fpThisVariant = (size_t)fp;
@@ -145,9 +145,9 @@ static void mutationIteratorToIGD(const std::string& inFilename,
             if ((double)fnThisVariant != fn) {
                 fnLeftovers = fn - (double)fnThisVariant;
             }
-            addNoise(mutAndSamples.second, effectiveSamples, fpThisVariant, fnThisVariant);
+            addNoise(mutAndSamples.samples, effectiveSamples, fpThisVariant, fnThisVariant);
         }
-        writer.writeVariantSamples(outFile, (uint64_t)position, refAllele, altAllele, mutAndSamples.second);
+        writer.writeVariantSamples(outFile, (uint64_t)position, refAllele, altAllele, mutAndSamples.samples);
         variantCount++;
         if (verbose && (variantCount % EMIT_EVERY == 0)) {
             std::cout << "Variants completed: " << variantCount << " (" << missingCount << " missing items)"
