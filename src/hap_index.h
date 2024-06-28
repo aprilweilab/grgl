@@ -1,5 +1,5 @@
-#ifndef GRG_GTHASH_INDEX_H
-#define GRG_GTHASH_INDEX_H
+#ifndef GRG_HAP_INDEX_H
+#define GRG_HAP_INDEX_H
 
 #include <vector>
 #include <unordered_map>
@@ -18,15 +18,15 @@
 
 namespace grgl {
 
-using GtHashT = uint32_t;
-using GenotypeHash = std::vector<GtHashT>;
+using HapVectorT = uint32_t;
+using HaplotypeVector = std::vector<HapVectorT>;
 using MutationList = std::vector<Mutation>;
 
-void dumpHash(const GenotypeHash& hash);
+void dumpHash(const HaplotypeVector& hash);
 
-inline GenotypeHash bitwiseIntersect(std::list<GenotypeHash>& gtHashList) {
+inline HaplotypeVector bitwiseIntersect(std::list<HaplotypeVector>& gtHashList) {
     release_assert(gtHashList.size() > 1);
-    GenotypeHash result = gtHashList.front();
+    HaplotypeVector result = gtHashList.front();
     for (const auto& gtHash : gtHashList) {
         release_assert(result.size() == gtHash.size());
         for (size_t bucket = 0; bucket < gtHash.size(); bucket++) {
@@ -36,11 +36,11 @@ inline GenotypeHash bitwiseIntersect(std::list<GenotypeHash>& gtHashList) {
     return std::move(result);
 }
 
-inline size_t bitwiseHamming(const GenotypeHash& hash1, const GenotypeHash& hash2) {
+inline size_t bitwiseHamming(const HaplotypeVector& hash1, const HaplotypeVector& hash2) {
     size_t dist = 0;
     release_assert(hash1.size() == hash2.size());
     for (size_t i = 0; i < hash1.size(); i++) {
-        static_assert(sizeof(GtHashT) == 4,
+        static_assert(sizeof(HapVectorT) == 4,
                       "Optimization for counting set bits assumes 32-bit ints");
         uint32_t xorValue = hash1[i] ^ hash2[i];
         // Fun times: https://graphics.stanford.edu/~seander/bithacks.htm
@@ -52,23 +52,23 @@ inline size_t bitwiseHamming(const GenotypeHash& hash1, const GenotypeHash& hash
     return dist;
 }
 
-using NodeToGtHash = std::vector<GenotypeHash>;
+using NodeToHapVect = std::vector<HaplotypeVector>;
 
 /**
- * Index a dataset based on their genotype hashes (hash of mutations).
+ * Index a dataset based on a vector representing each haplotype.
  */
-class GenotypeHashIndex {
+class HaplotypeIndex {
 public:
-    explicit GenotypeHashIndex(std::function<size_t(const NodeID&, const NodeID&)> distFunc)
+    explicit HaplotypeIndex(std::function<size_t(const NodeID&, const NodeID&)> distFunc)
         : m_bkTree(std::move(distFunc)) {
     }
 
-    virtual ~GenotypeHashIndex() = default;
+    virtual ~HaplotypeIndex() = default;
 
-    GenotypeHashIndex(GenotypeHashIndex&) = delete;
-    GenotypeHashIndex(GenotypeHashIndex&&) = default;
-    GenotypeHashIndex& operator=(GenotypeHashIndex&) = delete;
-    GenotypeHashIndex& operator=(GenotypeHashIndex&&) = default;
+    HaplotypeIndex(HaplotypeIndex&) = delete;
+    HaplotypeIndex(HaplotypeIndex&&) = default;
+    HaplotypeIndex& operator=(HaplotypeIndex&) = delete;
+    HaplotypeIndex& operator=(HaplotypeIndex&&) = default;
 
     /**
      * Add a new (hash, node) pair to the index.
@@ -98,4 +98,4 @@ private:
 
 }
 
-#endif /* GRG_GTHASH_INDEX_H */
+#endif /* GRG_HAP_INDEX_H */

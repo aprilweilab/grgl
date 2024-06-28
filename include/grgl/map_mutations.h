@@ -20,7 +20,7 @@
 #include "grgl/common.h"
 #include "grgl/mut_iterator.h"
 
-#include <fstream>
+#include <iosfwd>
 
 namespace grgl {
 
@@ -44,9 +44,27 @@ struct MutationMappingStats {
     size_t maxSingletons{};
     size_t reusedMutNodes{};
     std::vector<size_t> reuseSizeHist;
+
+    void print(std::ostream& outStream) const {
+        outStream << "mutations: " << this->totalMutations << std::endl;
+        outStream << "candidates: " << this->numCandidates << std::endl;
+        outStream << "emptyMutations: " << this->emptyMutations << std::endl;
+        outStream << "mutationsWithOneSample: " << this->mutationsWithOneSample << std::endl;
+        outStream << "singletonSampleEdges: " << this->singletonSampleEdges << std::endl;
+        outStream << "samplesProcessed: " << this->samplesProcessed << std::endl;
+        outStream << "reusedNodes: " << this->reusedNodes << std::endl;
+        outStream << "reusedExactly: " << this->reusedExactly << std::endl;
+        outStream << "reusedNodeCoverage: " << this->reusedNodeCoverage << std::endl;
+        outStream << "reusedMutNodes: " << this->reusedMutNodes << std::endl;
+        outStream << "reuseSizeBiggerThanHistMax: " << this->reuseSizeBiggerThanHistMax << std::endl;
+        outStream << "numWithSingletons: " << this->numWithSingletons << std::endl;
+        outStream << "maxSingletons: " << this->maxSingletons << std::endl;
+        outStream << "avgSingletons: " << (double)this->singletonSampleEdges / (double)this->numWithSingletons
+                  << std::endl;
+    }
 };
 
-class GenotypeHashIndex;
+class HaplotypeIndex;
 
 MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations);
 

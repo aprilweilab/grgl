@@ -14,7 +14,7 @@
  * should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#include "gthash_index.h"
+#include "hap_index.h"
 
 #include <limits>
 #include <unordered_map>
@@ -26,18 +26,18 @@
 
 namespace grgl {
 
-void dumpHash(const GenotypeHash& hash) {
+void dumpHash(const HaplotypeVector& hash) {
     for (auto part : hash) {
         std::cout << part << ", ";
     }
     std::cout << std::endl;
 }
 
-void GenotypeHashIndex::add(const NodeID nodeId) { m_bkTree.insert(nodeId, m_comparisons); }
+void HaplotypeIndex::add(const NodeID nodeId) { m_bkTree.insert(nodeId, m_comparisons); }
 
-void GenotypeHashIndex::remove(const NodeID nodeId) {}
+void HaplotypeIndex::remove(const NodeID nodeId) {}
 
-NodeIDList GenotypeHashIndex::getMostSimilarNodes(const NodeID nodeId, const bool collectAll) {
+NodeIDList HaplotypeIndex::getMostSimilarNodes(const NodeID nodeId, const bool collectAll) {
     /* There are a lot of considerations/parameters here:
      * - Only get nodes at the distance of the nearest neighbor, or allow a larger radius?
      * - Limit the number of neighbors? How do we choose the limit (is it per-level)?

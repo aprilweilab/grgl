@@ -20,13 +20,13 @@
 #include <string>
 #include <tskit.h>
 
+#include "build_shape.h"
 #include "calculations.h"
 #include "grg_helpers.h"
 #include "grgl/grg.h"
 #include "grgl/map_mutations.h"
 #include "grgl/serialize.h"
 #include "grgl/ts2grg.h"
-#include "gthash_build.h"
 #include "tskit_util.h"
 #include "util.h"
 
@@ -211,24 +211,7 @@ int main(int argc, char** argv) {
         EMIT_TIMING_MESSAGE("Mapping mutations took");
         std::cout << std::endl;
         std::cout << "=== Stats ===" << std::endl;
-        std::cout << "mutations: " << stats.totalMutations << std::endl;
-        std::cout << "candidates: " << stats.numCandidates << std::endl;
-        std::cout << "emptyMutations: " << stats.emptyMutations << std::endl;
-        std::cout << "mutationsWithOneSample: " << stats.mutationsWithOneSample << std::endl;
-        std::cout << "singletonSampleEdges: " << stats.singletonSampleEdges << std::endl;
-        std::cout << "samplesProcessed: " << stats.samplesProcessed << std::endl;
-        std::cout << "reusedNodes: " << stats.reusedNodes << std::endl;
-        std::cout << "reusedExactly: " << stats.reusedExactly << std::endl;
-        std::cout << "reusedNodeCoverage: " << stats.reusedNodeCoverage << std::endl;
-        std::cout << "reusedMutNodes: " << stats.reusedMutNodes << std::endl;
-        std::cout << "reuseSizeBiggerThanHistMax: " << stats.reuseSizeBiggerThanHistMax << std::endl;
-        std::cout << "reuseSizeTm25: " << trailingMean(stats.reuseSizeHist, 0.25) << std::endl;
-        std::cout << "reuseSizeTm50: " << trailingMean(stats.reuseSizeHist, 0.50) << std::endl;
-        std::cout << "reuseSizeTm75: " << trailingMean(stats.reuseSizeHist, 0.75) << std::endl;
-        std::cout << "numWithSingletons: " << stats.numWithSingletons << std::endl;
-        std::cout << "maxSingletons: " << stats.maxSingletons << std::endl;
-        std::cout << "avgSingletons: " << (double)stats.singletonSampleEdges / (double)stats.numWithSingletons
-                  << std::endl;
+        stats.print(std::cout);
         std::cout << "Final node count: " << theGRG->numNodes() << std::endl;
         std::cout << "Final edge count: " << theGRG->numEdges() << std::endl;
         std::cout << std::endl;
@@ -236,14 +219,6 @@ int main(int argc, char** argv) {
 
     if (showStats) {
         dumpStats(theGRG);
-    }
-    if (verbose) {
-        std::cout << "Mutations: ";
-        for (const auto& pair : theGRG->getNodeMutationPairs()) {
-            const grgl::Mutation& mut = theGRG->getMutationById(pair.second);
-            std::cout << "(" << mut.getPosition() << "," << mut.getAllele() << "), ";
-        }
-        std::cout << std::endl;
     }
 
     if (outfile) {

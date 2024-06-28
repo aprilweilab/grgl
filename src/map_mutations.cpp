@@ -19,7 +19,6 @@
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
 #include "grgl/visitor.h"
-#include "gthash_index.h"
 #include "util.h"
 
 #include <algorithm>
@@ -299,7 +298,7 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
     MutationAndSamples unmapped = {Mutation(0.0, ""), NodeIDList()};
     while (mutations.next(unmapped, _ignored)) {
         bool tracing = false;
-        const NodeIDList& mutSamples = unmapped.second;
+        const NodeIDList& mutSamples = unmapped.samples;
         if (!mutSamples.empty()) {
             if (tracing) {
                 std::cout << ">>> Has " << mutSamples.size() << " samples\n";
@@ -310,7 +309,7 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
             }
             // Step 1: Add mutation node and create edges to existing nodes.
             NodeIDList addedNodes =
-                greedyAddMutation(grg, topoOrder, sampleCounts, unmapped.first, mutSamples, stats, shapeNodeIdMax);
+                greedyAddMutation(grg, topoOrder, sampleCounts, unmapped.mutation, mutSamples, stats, shapeNodeIdMax);
 
             // Step 2: Add the new mutation node to the topological order.
             topoOrder.resize(topoOrder.size() + addedNodes.size());
@@ -330,7 +329,7 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
             }
         } else {
             stats.emptyMutations++;
-            grg->addMutation(unmapped.first, INVALID_NODE_ID);
+            grg->addMutation(unmapped.mutation, INVALID_NODE_ID);
         }
         completed++;
         const size_t percentCompleted = (completed / onePercent);
@@ -341,20 +340,7 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
             std::cout << "Last mutation sampleset size: " << mutSamples.size() << std::endl;
             std::cout << "GRG nodes: " << grg->numNodes() << std::endl;
             std::cout << "GRG edges: " << grg->numEdges() << std::endl;
-            std::cout << "singletonSampleEdges: " << stats.singletonSampleEdges << std::endl;
-            std::cout << "samplesProcessed: " << stats.samplesProcessed << std::endl;
-            std::cout << "reusedNodes: " << stats.reusedNodes << std::endl;
-            std::cout << "reusedExactly: " << stats.reusedExactly << std::endl;
-            std::cout << "reusedNodeCoverage: " << stats.reusedNodeCoverage << std::endl;
-            std::cout << "reusedMutNodes: " << stats.reusedMutNodes << std::endl;
-            std::cout << "reuseSizeBiggerThanHistMax: " << stats.reuseSizeBiggerThanHistMax << std::endl;
-            std::cout << "mutationsWithNoCandidates: " << stats.mutationsWithNoCandidates << std::endl;
-            std::cout << "mutationsWithOneSample: " << stats.mutationsWithOneSample << std::endl;
-            std::cout << "newTreeNodes: " << stats.newTreeNodes << std::endl;
-            std::cout << "numWithSingletons: " << stats.numWithSingletons << std::endl;
-            std::cout << "maxSingletons: " << stats.maxSingletons << std::endl;
-            std::cout << "avgSingletons: " << (double)stats.singletonSampleEdges / (double)stats.numWithSingletons
-                      << std::endl;
+            stats.print(std::cout);
         }
         if ((completed % (COMPACT_EDGES_AT_PERCENT * onePercent) == 0)) {
             START_TIMING_OPERATION();

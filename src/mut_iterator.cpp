@@ -47,12 +47,12 @@ void MutationIterator::reset() {
 bool MutationIterator::next(MutationAndSamples& mutAndSamples, size_t& totalSamples) {
     totalSamples = m_totalSamples;
     if (!m_alreadyLoaded.empty()) {
-        mutAndSamples.first = std::move(m_alreadyLoaded.back().first);
-        mutAndSamples.second = std::move(m_alreadyLoaded.back().second);
+        mutAndSamples.mutation = std::move(m_alreadyLoaded.back().mutation);
+        mutAndSamples.samples = std::move(m_alreadyLoaded.back().samples);
         m_alreadyLoaded.pop_back();
         return true;
     }
-    mutAndSamples.second.clear();
+    mutAndSamples.samples.clear();
 
     // If we have an alt allele with > 50% occurrence, make it the new reference allele.
     buffer_next(m_totalSamples);
@@ -60,8 +60,8 @@ bool MutationIterator::next(MutationAndSamples& mutAndSamples, size_t& totalSamp
     Mutation newRefAllele;
     if (m_flipRefMajor) {
         for (const auto& loadedMut : m_alreadyLoaded) {
-            if (loadedMut.second.size() > mafThreshold) {
-                newRefAllele = loadedMut.first;
+            if (loadedMut.samples.size() > mafThreshold) {
+                newRefAllele = loadedMut.mutation;
             }
         }
     }
@@ -71,7 +71,7 @@ bool MutationIterator::next(MutationAndSamples& mutAndSamples, size_t& totalSamp
         m_flippedAlleles++;
         std::vector<bool> oldAltAlleles(m_totalSamples);
         for (auto& mutAndSamples : m_alreadyLoaded) {
-            for (size_t sampleId : mutAndSamples.second) {
+            for (size_t sampleId : mutAndSamples.samples) {
                 oldAltAlleles.at(sampleId) = true;
             }
         }
@@ -83,25 +83,25 @@ bool MutationIterator::next(MutationAndSamples& mutAndSamples, size_t& totalSamp
         }
         for (auto& mutAndSamples : m_alreadyLoaded) {
             // Replace the old mutation with the new one (which used to be the ref allele)
-            if (mutAndSamples.first == newRefAllele) {
-                mutAndSamples.first =
+            if (mutAndSamples.mutation == newRefAllele) {
+                mutAndSamples.mutation =
                     Mutation(newRefAllele.getPosition(), newRefAllele.getRefAllele(), newRefAllele.getAllele());
-                mutAndSamples.second = std::move(newMutSamples);
+                mutAndSamples.samples = std::move(newMutSamples);
             } else {
-                mutAndSamples.first = Mutation(
-                    mutAndSamples.first.getPosition(), mutAndSamples.first.getAllele(), newRefAllele.getAllele());
+                mutAndSamples.mutation = Mutation(
+                    mutAndSamples.mutation.getPosition(), mutAndSamples.mutation.getAllele(), newRefAllele.getAllele());
             }
         }
     }
     if (m_binaryMutations && !m_alreadyLoaded.empty()) {
         auto& actualResult = m_alreadyLoaded.front();
         for (auto& mutAndSamples : m_alreadyLoaded) {
-            if (actualResult.first == mutAndSamples.first) {
-                actualResult.first =
-                    Mutation(mutAndSamples.first.getPosition(), Mutation::ALLELE_1, mutAndSamples.first.getRefAllele());
+            if (actualResult.mutation == mutAndSamples.mutation) {
+                actualResult.mutation = Mutation(
+                    mutAndSamples.mutation.getPosition(), Mutation::ALLELE_1, mutAndSamples.mutation.getRefAllele());
             } else {
-                for (auto sampleId : mutAndSamples.second) {
-                    actualResult.second.push_back(sampleId);
+                for (auto sampleId : mutAndSamples.samples) {
+                    actualResult.samples.push_back(sampleId);
                 }
             }
         }
@@ -110,8 +110,8 @@ bool MutationIterator::next(MutationAndSamples& mutAndSamples, size_t& totalSamp
 
     const bool foundMutations = !m_alreadyLoaded.empty();
     if (!m_alreadyLoaded.empty()) {
-        mutAndSamples.first = std::move(m_alreadyLoaded.back().first);
-        mutAndSamples.second = std::move(m_alreadyLoaded.back().second);
+        mutAndSamples.mutation = std::move(m_alreadyLoaded.back().mutation);
+        mutAndSamples.samples = std::move(m_alreadyLoaded.back().samples);
         m_alreadyLoaded.pop_back();
         totalSamples = m_totalSamples;
     }
@@ -219,18 +219,18 @@ void VCFMutationIterator::buffer_next(size_t& totalSamples) {
         for (size_t altAllele = 0; altAllele < altAlleleToSamples.size(); altAllele++) {
             if (m_binaryMutations && !m_alreadyLoaded.empty()) {
                 for (NodeID sampleId : altAlleleToSamples[altAllele]) {
-                    m_alreadyLoaded.back().second.push_back(sampleId);
+                    m_alreadyLoaded.back().samples.push_back(sampleId);
                 }
             } else {
-                m_alreadyLoaded.emplace_back(Mutation(variant.getPosition(),
-                                                      m_binaryMutations ? Mutation::ALLELE_1 : altAlleles.at(altAllele),
-                                                      refAllele),
-                                             std::move(altAlleleToSamples[altAllele]));
+                m_alreadyLoaded.push_back({Mutation(variant.getPosition(),
+                                                    m_binaryMutations ? Mutation::ALLELE_1 : altAlleles.at(altAllele),
+                                                    refAllele),
+                                           std::move(altAlleleToSamples[altAllele])});
             }
         }
         if (m_emitMissingData && !missingSamples.empty()) {
-            m_alreadyLoaded.emplace_back(Mutation(variant.getPosition(), Mutation::ALLELE_MISSING, refAllele),
-                                         std::move(missingSamples));
+            m_alreadyLoaded.push_back(
+                {Mutation(variant.getPosition(), Mutation::ALLELE_MISSING, refAllele), std::move(missingSamples)});
         }
     }
 }
@@ -478,19 +478,19 @@ void BGENMutationIterator::buffer_next(size_t& totalSamples) {
             }
             if (m_binaryMutations && !m_alreadyLoaded.empty()) {
                 for (NodeID sampleId : alleleToSamples[i]) {
-                    m_alreadyLoaded.back().second.push_back(sampleId);
+                    m_alreadyLoaded.back().samples.push_back(sampleId);
                 }
             } else {
-                m_alreadyLoaded.emplace_back(
-                    Mutation(variant->position,
-                             m_binaryMutations ? Mutation::ALLELE_1 : bgen_string_data(variant->allele_ids[i]),
-                             refAllele),
-                    std::move(alleleToSamples[i]));
+                m_alreadyLoaded.push_back(
+                    {Mutation(variant->position,
+                              m_binaryMutations ? Mutation::ALLELE_1 : bgen_string_data(variant->allele_ids[i]),
+                              refAllele),
+                     std::move(alleleToSamples[i])});
             }
         }
         if (m_emitMissingData && !missingSamples.empty()) {
-            m_alreadyLoaded.emplace_back(Mutation(variant->position, Mutation::ALLELE_MISSING, refAllele),
-                                         std::move(missingSamples));
+            m_alreadyLoaded.push_back(
+                {Mutation(variant->position, Mutation::ALLELE_MISSING, refAllele), std::move(missingSamples)});
         }
     }
 }

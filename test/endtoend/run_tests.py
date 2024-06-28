@@ -27,13 +27,13 @@ def get_freqs(lines: List[str]) -> Dict[Tuple[str, str, str], int]:
 
 class TestGrgConstruction(unittest.TestCase):
     def construct_grg(self, input_file:str) -> str:
-        subprocess.check_call(["grg-construct", "--no-maf-flip", "-p", "10", "-t", "2", "-j", str(JOBS),
+        subprocess.check_call(["grg", "construct", "--no-maf-flip", "-p", "10", "-t", "2", "-j", str(JOBS),
                                os.path.join(INPUT_DIR, input_file)])
         return os.path.basename(input_file) + ".final.grg"
 
     def test_construct_allele_freq(self):
         grg_filename = self.construct_grg("test-200-samples.vcf.gz")
-        af = subprocess.check_output(["grgl", "--freq", grg_filename])
+        af = subprocess.check_output(["grg", "process", "freq", grg_filename])
         saw_freqs = get_freqs(af.decode("utf-8").split("\n"))
         with open(os.path.join(EXPECT_DIR, "test-200-samples.freq.txt")) as f:
             expect_lines = [line for line in f]

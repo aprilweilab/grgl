@@ -37,7 +37,10 @@ namespace grgl {
 
 class Mutation;
 
-using MutationAndSamples = std::pair<Mutation, NodeIDList>;
+struct MutationAndSamples {
+    Mutation mutation;
+    NodeIDList samples;
+};
 
 /**
  * A MutationIterator provides sequential access to the _mutations_ (not variants) in an input
