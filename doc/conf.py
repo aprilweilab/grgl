@@ -24,9 +24,9 @@ html_theme = "sphinx_rtd_theme"
 
 # Breathe configuration
 breathe_projects = {
-    "GRGL": DOC_OUTPUT + "/xml/",
+    "grgl": DOC_OUTPUT + "/xml/",
 }
-breathe_default_project = "GRGL"
+breathe_default_project = "grgl"
 
 
 autosummary_generate = True  # Turn on sphinx.ext.autosummary
