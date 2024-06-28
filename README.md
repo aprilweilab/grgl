@@ -1,6 +1,7 @@
 # Genotype Representation Graph Library (GRGL)
 
 GRGL can be used as a library in both C++ and Python. Support is currently limited to Linux and MacOS.
+It contains both an API [(see docs)](https://grgl.readthedocs.io/) and a [set of command-line tools](https://github.com/aprilweilab/grgl/blob/main/GettingStarted.md).
 
 ## Building (non-Python)
 
@@ -65,7 +66,7 @@ docker run -v $PWD:/working -it grgl:latest bash -c "cd /working && grg construc
 ## Usage (Command line)
 
 There is a command line tool that is mostly for file format conversion and performing common computations on the GRG. For more flexibility, use the Python or C++ APIs.
-After building, run `./grgl --help` to see all the command options. Some examples are below.
+After building and installing the Python version, run `grg --help` to see all the command options. Some examples are below.
 
 Convert a [tskit](https://tskit.dev/software/tskit.html) tree-sequence into a GRG. This creates `my_arg_data.grg` from `my_arg_data.trees`:
 ```
@@ -82,8 +83,8 @@ To construct a GRG from a VCF file, use the `grg_from_vcf.py` script (after buil
 grg construct --parts 20 -j 1 path/to/foo.vcf
 ```
 
-Construction for small datasets (such as those included as tests in this repository) should be very fast, a few minutes at most. Large datasets (such as Biobank-scale) can take on the order of a day when using lots of threads (e.g., 70).
+Construction for small datasets (such as those included as tests in this repository) should be very fast, a few minutes at most. Really large datasets (such as Biobank-scale) can take on the order of a day when using lots of threads (e.g., 70).
 
 ## Usage (Python API)
 
-See the provided jupyter notebooks and GettingStarted.md for example.
+See the provided [jupyter notebooks](https://github.com/aprilweilab/grgl/tree/main/jupyter) and [GettingStarted.md](https://github.com/aprilweilab/grgl/blob/main/GettingStarted.md) for more examples.
