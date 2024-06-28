@@ -1,3 +1,6 @@
+![](https://github.com/aprilweilab/grgl/actions/workflows/cmake-multi-platform.yml/badge.svg)
+![](https://readthedocs.org/projects/grgl/badge/?version=latest)
+
 # Genotype Representation Graph Library (GRGL)
 
 GRGL can be used as a library in both C++ and Python. Support is currently limited to Linux and MacOS.
