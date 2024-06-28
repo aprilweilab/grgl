@@ -97,8 +97,8 @@ bool MutationIterator::next(MutationAndSamples& mutAndSamples, size_t& totalSamp
         auto& actualResult = m_alreadyLoaded.front();
         for (auto& mutAndSamples : m_alreadyLoaded) {
             if (actualResult.mutation == mutAndSamples.mutation) {
-                actualResult.mutation =
-                    Mutation(mutAndSamples.mutation.getPosition(), Mutation::ALLELE_1, mutAndSamples.mutation.getRefAllele());
+                actualResult.mutation = Mutation(
+                    mutAndSamples.mutation.getPosition(), Mutation::ALLELE_1, mutAndSamples.mutation.getRefAllele());
             } else {
                 for (auto sampleId : mutAndSamples.samples) {
                     actualResult.samples.push_back(sampleId);
@@ -225,12 +225,12 @@ void VCFMutationIterator::buffer_next(size_t& totalSamples) {
                 m_alreadyLoaded.push_back({Mutation(variant.getPosition(),
                                                     m_binaryMutations ? Mutation::ALLELE_1 : altAlleles.at(altAllele),
                                                     refAllele),
-                                             std::move(altAlleleToSamples[altAllele])});
+                                           std::move(altAlleleToSamples[altAllele])});
             }
         }
         if (m_emitMissingData && !missingSamples.empty()) {
-            m_alreadyLoaded.push_back({Mutation(variant.getPosition(), Mutation::ALLELE_MISSING, refAllele),
-                                       std::move(missingSamples)});
+            m_alreadyLoaded.push_back(
+                {Mutation(variant.getPosition(), Mutation::ALLELE_MISSING, refAllele), std::move(missingSamples)});
         }
     }
 }
@@ -481,16 +481,16 @@ void BGENMutationIterator::buffer_next(size_t& totalSamples) {
                     m_alreadyLoaded.back().samples.push_back(sampleId);
                 }
             } else {
-                m_alreadyLoaded.push_back({
-                    Mutation(variant->position,
-                             m_binaryMutations ? Mutation::ALLELE_1 : bgen_string_data(variant->allele_ids[i]),
-                             refAllele),
-                    std::move(alleleToSamples[i])});
+                m_alreadyLoaded.push_back(
+                    {Mutation(variant->position,
+                              m_binaryMutations ? Mutation::ALLELE_1 : bgen_string_data(variant->allele_ids[i]),
+                              refAllele),
+                     std::move(alleleToSamples[i])});
             }
         }
         if (m_emitMissingData && !missingSamples.empty()) {
-            m_alreadyLoaded.push_back({Mutation(variant->position, Mutation::ALLELE_MISSING, refAllele),
-                                       std::move(missingSamples)});
+            m_alreadyLoaded.push_back(
+                {Mutation(variant->position, Mutation::ALLELE_MISSING, refAllele), std::move(missingSamples)});
         }
     }
 }

@@ -59,7 +59,8 @@ struct MutationMappingStats {
         outStream << "reuseSizeBiggerThanHistMax: " << this->reuseSizeBiggerThanHistMax << std::endl;
         outStream << "numWithSingletons: " << this->numWithSingletons << std::endl;
         outStream << "maxSingletons: " << this->maxSingletons << std::endl;
-        outStream << "avgSingletons: " << (double)this->singletonSampleEdges/(double)this->numWithSingletons << std::endl;
+        outStream << "avgSingletons: " << (double)this->singletonSampleEdges / (double)this->numWithSingletons
+                  << std::endl;
     }
 };
 
