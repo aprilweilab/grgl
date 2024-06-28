@@ -46,7 +46,7 @@ struct MutationMappingStats {
     std::vector<size_t> reuseSizeHist;
 };
 
-class GenotypeHashIndex;
+class HaplotypeIndex;
 
 MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations);
 

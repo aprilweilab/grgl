@@ -20,13 +20,13 @@
 #include <string>
 #include <tskit.h>
 
+#include "build_shape.h"
 #include "calculations.h"
 #include "grg_helpers.h"
 #include "grgl/grg.h"
 #include "grgl/map_mutations.h"
 #include "grgl/serialize.h"
 #include "grgl/ts2grg.h"
-#include "gthash_build.h"
 #include "tskit_util.h"
 #include "util.h"
 

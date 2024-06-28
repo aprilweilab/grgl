@@ -19,7 +19,6 @@
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
 #include "grgl/visitor.h"
-#include "gthash_index.h"
 #include "util.h"
 
 #include <algorithm>

@@ -83,8 +83,8 @@ set(GRGL_PUBLIC_HEADERS
 
 set(GRGL_CORE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/calculations.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/gthash_build.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/gthash_index.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/build_shape.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/hap_index.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/grg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/grg_merge.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/map_mutations.cpp

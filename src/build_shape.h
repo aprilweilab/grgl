@@ -1,15 +1,12 @@
-#ifndef GRG_GTHASH_BUILD_H
-#define GRG_GTHASH_BUILD_H
+#ifndef GRG_BUILD_SHAPE_H
+#define GRG_BUILD_SHAPE_H
 
 #include <memory>
 
 #include "grgl/common.h"
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
-#include "gthash_index.h"
 #include "util.h"
-
-#define POSITION_KMER_SIZE (10)
 
 namespace grgl {
 
@@ -30,4 +27,4 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
 
 }
 
-#endif /* GRG_GTHASH_BUILD_H */
+#endif /* GRG_BUILD_SHAPE_H */

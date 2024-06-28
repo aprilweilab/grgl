@@ -14,7 +14,7 @@
  * should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#include "gthash_build.h"
+#include "build_shape.h"
 
 #include <array>
 #include <chrono>
@@ -25,7 +25,7 @@
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
 #include "grgl/mut_iterator.h"
-#include "gthash_index.h"
+#include "hap_index.h"
 #include "similarity/bf_hash.h"
 #include "similarity/mmh3.h"
 #include "util.h"
@@ -33,8 +33,8 @@
 namespace grgl {
 
 static NodeID
-createParentForNodes(const MutableGRGPtr& grg, NodeToGtHash& nodeHashes, NodeIDList& cluster, NodeIDSet& covered) {
-    std::list<GenotypeHash> similarHashes;
+createParentForNodes(const MutableGRGPtr& grg, NodeToHapVect& nodeHashes, NodeIDList& cluster, NodeIDSet& covered) {
+    std::list<HaplotypeVector> similarHashes;
     // Now create a node to represent this new cluster, and connect its children.
     const auto newNodeId = grg->makeNode();
     for (const NodeID similarId : cluster) {
@@ -50,7 +50,7 @@ createParentForNodes(const MutableGRGPtr& grg, NodeToGtHash& nodeHashes, NodeIDL
 }
 
 static NodeIDList addGrgShapeFromHashing(const MutableGRGPtr& grg,
-                                         NodeToGtHash& nodeHashes,
+                                         NodeToHapVect& nodeHashes,
                                          const NodeIDList& initialNodes,
                                          const bool binaryTrees) {
     // Lambda that does hamming distance between nodes. Instead of passing around the vectors contains the
@@ -58,7 +58,7 @@ static NodeIDList addGrgShapeFromHashing(const MutableGRGPtr& grg,
     auto compareNodeIds = [&](const NodeID& node1, const NodeID& node2) {
         return bitwiseHamming(nodeHashes.at(node1), nodeHashes.at(node2));
     };
-    GenotypeHashIndex hashIndex(compareNodeIds);
+    HaplotypeIndex hashIndex(compareNodeIds);
 
     NodeIDSet covered;
     NodeIDList levelNodes;
@@ -157,7 +157,7 @@ static void getMutStats(MutationIterator& iterator,
 }
 
 bool genotypeHashIndex(MutationIterator& mutIterator,
-                       grgl::NodeToGtHash& hashIndex,
+                       grgl::NodeToHapVect& hashIndex,
                        const size_t bitsPerMutation,
                        const double dropBelowThreshold) {
     constexpr size_t MAX_ALLELE_SIZE_FOR_HASH = 4;
@@ -183,7 +183,7 @@ bool genotypeHashIndex(MutationIterator& mutIterator,
     size_t avgMutsPerSample = 0;
     size_t mutCutoff25Percentile = 0;
     getMutStats(mutIterator, avgMutsPerSample, mutCutoff25Percentile, _ignore, dropBelowCount);
-    const size_t bitsPerElement = (8 * sizeof(GtHashT));
+    const size_t bitsPerElement = (8 * sizeof(HapVectorT));
     // TODO: there can be some really sparse scenarios, mostly with filtered data (like only the homozygous
     // mutations), and this helps. It would be better to compute this based on total variant count.
     constexpr size_t MIN_ELEMENTS = 10;
@@ -215,7 +215,7 @@ bool genotypeHashIndex(MutationIterator& mutIterator,
     std::cout << "Creating hash index with " << bloomFilters.size() << " entries for " << numVariants << " variants"
               << std::endl;
     std::cout << "Dropped " << dropped << " variants" << std::endl;
-    hashIndex = grgl::NodeToGtHash(bloomFilters.size());
+    hashIndex = grgl::NodeToHapVect(bloomFilters.size());
     for (size_t sampleId = 0; sampleId < bloomFilters.size(); sampleId++) {
         hashIndex[sampleId] = std::move(bloomFilters[sampleId].stealVector());
     }
@@ -234,7 +234,7 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
                                         const bool flipRefMajor,
                                         const double dropBelowThreshold) {
     MutableGRGPtr result;
-    NodeToGtHash hashIndex;
+    NodeToHapVect hashIndex;
     std::cout << "Building genotype hash index..." << std::endl;
     std::shared_ptr<grgl::MutationIterator> mutationIterator =
         makeMutationIterator(sampleFile, genomeRange, useBinaryMuts, emitMissingData, flipRefMajor);
