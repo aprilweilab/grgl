@@ -64,11 +64,13 @@ endif()
 
 set(GRGL_TEST_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_common.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_construct.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_bloom_filter.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_grg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_main.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_mutation.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_serialize.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_util.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_visitor.cpp
   )
 
@@ -201,6 +203,6 @@ if(ENABLE_TESTS)
 
   # Now simply link against gtest or gtest_main as needed. Eg
   add_executable(grgl_test ${GRGL_TEST_SOURCES})
-  target_link_libraries(grgl_test gtest_main tskit grgl)
+  target_link_libraries(grgl_test gtest_main tskit grgl z ${BGEN_LIBS})
   add_test(NAME grgl_test COMMAND grgl_test)
 endif()

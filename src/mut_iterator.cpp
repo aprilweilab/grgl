@@ -174,6 +174,8 @@ size_t VCFMutationIterator::countMutations() const {
     return mutations;
 }
 
+std::vector<std::string> VCFMutationIterator::getIndividualIds() { return m_vcf->getIndividualLabels(); }
+
 void VCFMutationIterator::buffer_next(size_t& totalSamples) {
     bool foundMutations = false;
     while (!foundMutations && m_vcf->hasNextVariant() && m_alreadyLoaded.empty()) {
@@ -264,6 +266,8 @@ size_t IGDMutationIterator::countMutations() const {
     }
     return mutations;
 }
+
+std::vector<std::string> IGDMutationIterator::getIndividualIds() { return m_igd->getIndividualIds(); }
 
 void IGDMutationIterator::buffer_next(size_t& totalSamples) {
     totalSamples = m_igd->numSamples();
@@ -396,6 +400,22 @@ size_t BGENMutationIterator::countMutations() const {
         mutations += (variant->nalleles - 1);
     }
     return mutations;
+}
+
+std::vector<std::string> BGENMutationIterator::getIndividualIds() {
+    if (bgen_file_contain_samples(m_file)) {
+        std::vector<std::string> result;
+        struct bgen_samples* samples = bgen_file_read_samples(m_file);
+        release_assert(samples != nullptr);
+        for (size_t i = 0; i < bgen_file_nsamples(m_file); i++) {
+            const bgen_string* bgStr = bgen_samples_get(samples, i);
+            release_assert(bgStr != nullptr);
+            result.emplace_back(bgen_string_data(bgStr));
+        }
+        bgen_samples_destroy(samples);
+        return std::move(result);
+    }
+    return {};
 }
 
 void BGENMutationIterator::buffer_next(size_t& totalSamples) {

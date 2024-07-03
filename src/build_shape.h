@@ -23,7 +23,8 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
                                         bool useBinaryMuts,
                                         bool emitMissingData,
                                         bool flipRefMajor,
-                                        double dropBelowThreshold);
+                                        double dropBelowThreshold,
+                                        const std::map<std::string, std::string>& indivIdToPop);
 
 }
 
