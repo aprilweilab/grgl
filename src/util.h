@@ -11,6 +11,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <map>
+#include <fstream>
 
 #define release_assert(condition) do { \
     if (!(condition)) { \
@@ -38,7 +40,7 @@ inline void split(const std::string &s, char delim, Out result) {
 inline std::vector<std::string> split(const std::string &s, char delim) {
     std::vector<std::string> elems;
     split(s, delim, std::back_inserter(elems));
-    return elems;
+    return std::move(elems);
 }
 
 template <typename T>
@@ -130,5 +132,55 @@ inline grgl::NodeIDList loadNodeIDs(const std::string& filename) {
     return std::move(result);
 }
 
+/**
+ * Helper to convert data from a tab-separate file into a string->string map.
+ */
+inline std::map<std::string, std::string> loadMapFromTSV(
+        const std::string& filename,
+        const std::string& lhsField,
+        const std::string& rhsField) {
+    release_assert(lhsField != rhsField);
+    std::ifstream infile(filename);
+    std::string line;
+    size_t numCols = 0;
+    size_t lineNum = 0;
+    size_t lhsIndex = std::numeric_limits<size_t>::max();
+    size_t rhsIndex = std::numeric_limits<size_t>::max();
+    std::map<std::string, std::string> result;
+    while (std::getline(infile, line)) {
+        auto tokens = split(line, '\t');
+        if (lineNum == 0) {
+            numCols = tokens.size();
+            for (size_t i = 0; i < tokens.size(); i++) {
+                if (tokens[i] == lhsField) {
+                    lhsIndex = i;
+                }
+                if (tokens[i] == rhsField) {
+                    rhsIndex = i;
+                }
+            }
+            std::stringstream ssErr;
+            if (lhsIndex >= numCols) {
+                ssErr << "Could not find TSV header named \"" << lhsField << "\". ";
+            }
+            if (rhsIndex >= numCols) {
+                ssErr << "Could not find TSV header named \"" << rhsField << "\". ";
+            }
+            auto errorString = ssErr.str();
+            if (!errorString.empty()) {
+                throw std::runtime_error(errorString);
+            }
+        } else {
+            if (numCols != tokens.size()) {
+                std::stringstream ssErr;
+                ssErr << "Malformed TSV file: wrong number of columns at line " << lineNum;
+                throw std::runtime_error(ssErr.str());
+            }
+            result.emplace(tokens.at(lhsIndex), tokens.at(rhsIndex));
+        }
+        lineNum++;
+    }
+    return std::move(result);
+}
 
 #endif /* GRGL_UTIL_H */

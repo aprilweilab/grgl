@@ -75,6 +75,8 @@ public:
 
     virtual void getMetadata(size_t& ploidy, size_t& numIndividuals, bool& isPhased) = 0;
 
+    virtual std::vector<std::string> getIndividualIds() = 0;
+
     virtual size_t countMutations() const = 0;
 
     bool next(MutationAndSamples& mutAndSamples, size_t& totalSamples);
@@ -114,6 +116,7 @@ public:
 
     void getMetadata(size_t& ploidy, size_t& numIndividuals, bool& isPhased) override;
     size_t countMutations() const override;
+    std::vector<std::string> getIndividualIds() override;
 
 protected:
     void buffer_next(size_t& totalSamples) override;
@@ -132,8 +135,8 @@ public:
         const char* filename, FloatRange genomeRange, bool binaryMutations, bool emitMissingData, bool flipRefMajor);
 
     void getMetadata(size_t& ploidy, size_t& numIndividuals, bool& isPhased) override;
-
     size_t countMutations() const override;
+    std::vector<std::string> getIndividualIds() override;
 
 protected:
     void buffer_next(size_t& totalSamples) override;
@@ -157,8 +160,8 @@ public:
     ~BGENMutationIterator() override;
 
     void getMetadata(size_t& ploidy, size_t& numIndividuals, bool& isPhased) override;
-
     size_t countMutations() const override;
+    std::vector<std::string> getIndividualIds() override;
 
 protected:
     void buffer_next(size_t& totalSamples) override;

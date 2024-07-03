@@ -99,6 +99,11 @@ int main(int argc, char** argv) {
                            "ts-node-times",
                            "When converting tree-seq, use node times instead of mutation times",
                            {"ts-node-times"});
+    args::ValueFlag<std::string> populationIds(parser,
+                                               "population-ids",
+                                               "Format: \"filename:fieldname\". Read population ids from the given "
+                                               "tab-separate file, using the given fieldname.",
+                                               {"population-ids"});
     try {
         parser.ParseCLI(argc, argv);
     } catch (args::Help&) {
@@ -155,6 +160,17 @@ int main(int argc, char** argv) {
         restrictRange = grgl::FloatRange(gStart, gEnd);
     }
 
+    std::map<std::string, std::string> indivIdToPop;
+    if (populationIds) {
+        std::vector<std::string> parts = split(*populationIds, ':');
+        if (parts.size() != 2) {
+            std::cerr << "Must specify \"filename:fieldname\" for --population-ids" << std::endl;
+            return 1;
+        }
+        indivIdToPop = loadMapFromTSV(parts[0], "sample", parts[1]);
+    }
+    std::cout << "loaded " << indivIdToPop.size() << " id->pops\n";
+
     grgl::GRGPtr theGRG;
     START_TIMING_OPERATION();
     if (ends_with(*infile, ".trees")) {
@@ -185,7 +201,8 @@ int main(int argc, char** argv) {
                                                  binaryMutations,
                                                  missingDataHandling == MDH_ADD_TO_GRG,
                                                  !noMAFFlip,
-                                                 lfFilter ? *lfFilter : 0.0);
+                                                 lfFilter ? *lfFilter : 0.0,
+                                                 indivIdToPop);
         dumpStats(theGRG);
     } else {
         std::cerr << "Unsupported/undetected filetype for " << *infile << std::endl;

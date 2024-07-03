@@ -32,6 +32,26 @@
 #include "picovcf.hpp"
 #include "util.h"
 
+static grgl::NodeIDList trimIndividuals(grgl::NodeIDList sampleList,
+                                        const size_t ploidy,
+                                        const std::unordered_map<grgl::NodeID, grgl::NodeID>& keepIndividuals) {
+    if (!keepIndividuals.empty()) {
+        grgl::NodeIDList newList;
+        newList.reserve(keepIndividuals.size() * ploidy);
+        for (auto sampleId : sampleList) {
+            const auto extra = sampleId % ploidy;
+            const auto indivId = sampleId / ploidy;
+            const auto& findIt = keepIndividuals.find(indivId);
+            if (findIt != keepIndividuals.end()) {
+                grgl::NodeID newID = (findIt->second * ploidy) + extra;
+                newList.emplace_back(newID);
+            }
+        }
+        return std::move(newList);
+    }
+    return std::move(sampleList);
+}
+
 static void trim(grgl::NodeIDList& sampleList, size_t newNumSamples) {
     if (0 != newNumSamples) {
         size_t trimTo = sampleList.size();
@@ -90,6 +110,7 @@ static void mutationIteratorToIGD(const std::string& inFilename,
                                   const double fpPerVariant = 0,
                                   const double fnPerVariant = 0,
                                   const size_t trimToSamples = 0,
+                                  std::string keepIndividualFile = "",
                                   bool verbose = true) {
     constexpr size_t EMIT_EVERY = 10000;
 
@@ -114,7 +135,39 @@ static void mutationIteratorToIGD(const std::string& inFilename,
 
     const size_t numSamples = numIndividuals * ploidy;
     release_assert(trimToSamples == 0 || (trimToSamples % ploidy == 0));
-    const size_t effectiveSamples = (0 == trimToSamples) ? numSamples : trimToSamples;
+    size_t effectiveSamples = (0 == trimToSamples) ? numSamples : trimToSamples;
+
+    std::unordered_map<grgl::NodeID, grgl::NodeID> keepIndividuals;
+    auto individualIds = iterator->getIndividualIds();
+    if (!keepIndividualFile.empty()) {
+        if (individualIds.empty()) {
+            throw grgl::BadInputFileFailure("Individual filtering requires the input file to contain individual IDs");
+        }
+        std::map<std::string, grgl::NodeID> idToNodeId;
+        for (size_t i = 0; i < individualIds.size(); i++) {
+            idToNodeId.emplace(individualIds[i], i);
+        }
+        std::vector<std::string> newIndividualIds;
+        std::ifstream filterFile(keepIndividualFile);
+        std::string indivId;
+        size_t count = 0;
+        while (std::getline(filterFile, indivId)) {
+            release_assert(!indivId.empty());
+            const auto& findIt = idToNodeId.find(indivId);
+            if (findIt == idToNodeId.end()) {
+                std::stringstream ssErr;
+                ssErr << "Could not find individual with id " << indivId;
+                throw grgl::BadInputFileFailure(ssErr.str().c_str());
+            }
+            keepIndividuals.emplace(findIt->second, count++);
+            newIndividualIds.push_back(indivId);
+        }
+        individualIds = std::move(newIndividualIds);
+        size_t newSamples = individualIds.size() * ploidy;
+        if (newSamples < effectiveSamples) {
+            effectiveSamples = newSamples;
+        }
+    }
 
     std::ofstream outFile(outFilename, std::ios::binary);
     picovcf::IGDWriter writer(ploidy, effectiveSamples / ploidy, isPhased);
@@ -134,6 +187,7 @@ static void mutationIteratorToIGD(const std::string& inFilename,
             missingCount += mutAndSamples.samples.size();
         }
         trim(mutAndSamples.samples, trimToSamples);
+        mutAndSamples.samples = trimIndividuals(std::move(mutAndSamples.samples), ploidy, keepIndividuals);
         if (fpPerVariant + fnPerVariant > 0) {
             const double fp = fpPerVariant + fpLeftovers;
             const size_t fpThisVariant = (size_t)fp;
@@ -156,7 +210,7 @@ static void mutationIteratorToIGD(const std::string& inFilename,
     }
     writer.writeIndex(outFile);
     writer.writeVariantInfo(outFile);
-    writer.writeIndividualIds(outFile, {});
+    writer.writeIndividualIds(outFile, individualIds);
     outFile.seekp(0);
     writer.writeHeader(outFile, inFilename, "");
 }
@@ -179,6 +233,11 @@ int main(int argc, char* argv[]) {
         "genomeRange",
         "Only convert for the given genome range: 'x:y' means [x, y) (x inclusive, y exclusive)",
         {'r', "range"});
+    args::ValueFlag<std::string> keepIndivs(
+        parser,
+        "keepIndivs",
+        "Only retain the individuals with the IDs given in this file (one ID per line).",
+        {'i', "keep-indivs"});
     try {
         parser.ParseCLI(argc, argv);
     } catch (args::Help&) {
@@ -231,6 +290,7 @@ int main(int argc, char* argv[]) {
                           restrictRange,
                           falseNegPerVariant ? *falseNegPerVariant : 0,
                           falsePosPerVariant ? *falsePosPerVariant : 0,
-                          trimTo ? *trimTo : 0);
+                          trimTo ? *trimTo : 0,
+                          keepIndivs ? *keepIndivs : "");
     return 0;
 }

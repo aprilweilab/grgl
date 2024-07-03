@@ -20,6 +20,7 @@
 #include <chrono>
 #include <deque>
 #include <limits>
+#include <stdexcept>
 #include <unordered_map>
 
 #include "grgl/grg.h"
@@ -232,7 +233,8 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
                                         const bool useBinaryMuts,
                                         const bool emitMissingData,
                                         const bool flipRefMajor,
-                                        const double dropBelowThreshold) {
+                                        const double dropBelowThreshold,
+                                        const std::map<std::string, std::string>& indivIdToPop) {
     MutableGRGPtr result;
     NodeToHapVect hashIndex;
     std::cout << "Building genotype hash index..." << std::endl;
@@ -252,6 +254,39 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
 
     std::cout << "Done" << std::endl;
     result = std::make_shared<MutableGRG>(hashIndex.size());
+    if (!indivIdToPop.empty()) {
+        size_t ploidy = 0;
+        size_t numIndividuals = 0;
+        bool isPhased = false;
+        mutationIterator->getMetadata(ploidy, numIndividuals, isPhased);
+        std::vector<std::string> indivIds = mutationIterator->getIndividualIds();
+        release_assert(indivIds.size() == numIndividuals);
+        std::map<std::string, size_t> popDescriptionMap;
+        for (NodeID individual = 0; individual < indivIds.size(); individual++) {
+            const auto& stringId = indivIds[individual];
+            const auto& findIt = indivIdToPop.find(stringId);
+            if (findIt == indivIdToPop.end()) {
+                std::stringstream ssErr;
+                ssErr << "Could not find population mapping for individual " << stringId;
+                throw std::runtime_error(ssErr.str());
+            }
+            const auto& popDescription = findIt->second;
+            const size_t nextPopId = popDescriptionMap.size();
+            const auto& findPopIt = popDescriptionMap.emplace(popDescription, nextPopId);
+            const auto popId = findPopIt.first->second;
+            if (findPopIt.second) {
+                release_assert(popId == nextPopId);
+                result->addPopulation(popDescription);
+            } else {
+                release_assert(popId != nextPopId);
+            }
+            for (NodeID offset = 0; offset < ploidy; offset++) {
+                const NodeID sampleId = (individual * ploidy) + offset;
+                release_assert(sampleId < result->numSamples());
+                result->getNodeData(sampleId).populationId = popId;
+            }
+        }
+    }
     std::cout << "Adding GRG shape from genotype hashes..." << std::endl;
     const bool buildBinaryTrees = true;
     addGrgShapeFromHashing(result, hashIndex, result->getSampleNodes(), buildBinaryTrees);

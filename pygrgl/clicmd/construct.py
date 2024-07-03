@@ -15,20 +15,23 @@ def add_options(subparser):
     subparser.add_argument("--parts", "-p", type=int, default=8,
         help="The number of parts to split the sequence into; defaults to 8")
     subparser.add_argument("--jobs", "-j", type=int, default=1,
-                        help="Number of jobs (threads/cores) to use. Defaults to 1.")
+        help="Number of jobs (threads/cores) to use. Defaults to 1.")
     subparser.add_argument("--trees", "-t", type=int, default=1,
-                        help="Number of trees to use during shape construction. Defaults to 1.")
+        help="Number of trees to use during shape construction. Defaults to 1.")
     subparser.add_argument("--binary-muts", "-b", action="store_true",
-                        help="Use binary mutations (don't track specific alternate alleles).")
+        help="Use binary mutations (don't track specific alternate alleles).")
     subparser.add_argument("--no-file-cleanup", "-c", action="store_true",
-                        help="Do not cleanup intermediate files (for debugging, e.g.).")
+        help="Do not cleanup intermediate files (for debugging, e.g.).")
     subparser.add_argument("--no-maf-flip", action="store_true",
-                        help="Do not switch the reference allele with the major allele")
+        help="Do not switch the reference allele with the major allele")
     subparser.add_argument("--shape-lf-filter", "-f", type=float, default=10.0,
-                        help="During shape construction ignore mutations with counts less than this."
-                             "If value is <1.0 then it is treated as a frequency. Defaults to 10 (count).")
+        help="During shape construction ignore mutations with counts less than this."
+             "If value is <1.0 then it is treated as a frequency. Defaults to 10 (count).")
+    subparser.add_argument("--population-ids", default=None,
+        help="Format: \"filename:fieldname\". Read population ids from the given "
+             "tab-separate file, using the given fieldname.")
     subparser.add_argument("--verbose", "-v", action="store_true",
-                        help="Verbose output, including timing information.")
+        help="Verbose output, including timing information.")
 
 grgl_exe = which("grgl")
 grg_merge_exe = which("grg-merge")
@@ -56,6 +59,8 @@ def build_shape(range_triple, args, input_file):
         command = [grgl_exe, input_file]
         if args.no_maf_flip:
             command.append("--no-maf-flip")
+        if args.population_ids:
+            command.extend(["--population-ids", args.population_ids])
         command.extend(["--lf-filter", str(args.shape_lf_filter)])
         command.extend(["-l", "-s", "-r", f"{base}:{base+pspans}",
                         "-o", out_filename_tree(input_file, part, tnum)])
