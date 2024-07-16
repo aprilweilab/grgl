@@ -22,6 +22,7 @@
 #include "calculations.h"
 #include "grg_helpers.h"
 #include "grgl/grg.h"
+#include "grgl/grgnode.h"
 #include "util.h"
 
 int main(int argc, char** argv) {
@@ -43,6 +44,10 @@ int main(int argc, char** argv) {
     args::Flag alleleFrequency(parser, "allele-frequency", "Calculate allele frequencies", {'f', "freq"});
     args::ValueFlag<std::string> compareGrg(
         parser, "compare", "Compare the input GRG to the given GRG", {'c', "compare"});
+    args::ValueFlag<std::string> sampleSubset(
+        parser, "sample-subset", "Use only the given file to restrict the subset of samples", {'i', "sample-subset"});
+    args::ValueFlag<std::string> region(
+        parser, "region", "Use only the given region of the genome, lower-upper.", {'r', "region"});
     try {
         parser.ParseCLI(argc, argv);
     } catch (args::Help&) {
@@ -79,13 +84,33 @@ int main(int argc, char** argv) {
     }
     EMIT_TIMING_MESSAGE("Construction took ");
 
+    std::pair<uint32_t, uint32_t> bpRange = {0, 0};
+    if (region) {
+        auto tokens = split(*region, '-');
+        release_assert(tokens.size() == 2);
+        if (!parseExactUint32(tokens[0], bpRange.first)) {
+            std::cerr << "Could not parse range arg as int value." << std::endl;
+            return 1;
+        }
+        if (!parseExactUint32(tokens[1], bpRange.second)) {
+            std::cerr << "Could not parse range arg as int value." << std::endl;
+            return 1;
+        }
+        release_assert(bpRange.second > bpRange.first);
+    }
+
+    grgl::NodeIDList onlySamples;
+    if (sampleSubset) {
+        onlySamples = loadNodeIDs(*sampleSubset);
+    }
+
     if (showStats) {
         dumpStats(theGRG);
     }
 
     if (alleleFrequency) {
         START_TIMING_OPERATION();
-        emitAlleleFrequency(theGRG, std::cout);
+        emitAlleleFrequency(theGRG, std::cout, bpRange, onlySamples);
         EMIT_TIMING_MESSAGE("Top-down DFS (allele frequency) took");
     }
 

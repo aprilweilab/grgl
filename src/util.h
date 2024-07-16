@@ -1,11 +1,14 @@
 #ifndef GRGL_UTIL_H
 #define GRGL_UTIL_H
 
+#include "grgl/grgnode.h"
 #include <cmath>
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -106,6 +109,25 @@ inline int32_t getEnvInt(const char* varName, int32_t defaultValue) {
         std::cerr << "Could not parse \"" << varName << "\" as integer" << std::endl;
     }
     return result;
+}
+
+inline grgl::NodeIDList loadNodeIDs(const std::string& filename) {
+    grgl::NodeIDList result;
+    std::ifstream infile(filename);
+    std::string line;
+    while (std::getline(infile, line)) {
+        if (line.empty()) {
+            continue;
+        }
+        uint32_t value = 0;
+        if (!parseExactUint32(line, value)) {
+            std::stringstream ssErr;
+            ssErr << "Invalid unsigned integer in file" << std::endl;
+            throw std::runtime_error(ssErr.str().c_str());
+        }
+        result.emplace_back(value);
+    }
+    return std::move(result);
 }
 
 
