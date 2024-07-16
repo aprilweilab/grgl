@@ -33,7 +33,7 @@ public:
     NodeNumberingIterator(grgl::DfsPass pass)
         : m_dfsPass(pass) {}
 
-    bool visit(const grgl::ConstGRGPtr& grg,
+    bool visit(const grgl::GRGPtr& grg,
                grgl::NodeID nodeId,
                grgl::TraversalDirection direction,
                grgl::DfsPass dfsPass = grgl::DFS_PASS_NONE) override {
@@ -48,7 +48,7 @@ public:
     grgl::DfsPass m_dfsPass;
 };
 
-std::vector<grgl::NodeID> getBfsOrder(const grgl::ConstGRGPtr& grg,
+std::vector<grgl::NodeID> getBfsOrder(const grgl::GRGPtr& grg,
                                       grgl::TraversalDirection direction,
                                       const grgl::NodeIDList& seedList,
                                       ssize_t maxQueueWidth = -1) {
@@ -57,7 +57,7 @@ std::vector<grgl::NodeID> getBfsOrder(const grgl::ConstGRGPtr& grg,
     return std::move(iterator.m_nodeIds);
 }
 
-std::vector<grgl::NodeID> getDfsOrder(const grgl::ConstGRGPtr& grg,
+std::vector<grgl::NodeID> getDfsOrder(const grgl::GRGPtr& grg,
                                       grgl::TraversalDirection direction,
                                       const grgl::NodeIDList& seedList,
                                       bool forwardOnly = false) {
@@ -67,7 +67,7 @@ std::vector<grgl::NodeID> getDfsOrder(const grgl::ConstGRGPtr& grg,
 }
 
 std::vector<grgl::NodeID>
-getTopoOrder(const grgl::ConstGRGPtr& grg, grgl::TraversalDirection direction, const grgl::NodeIDList& seedList) {
+getTopoOrder(const grgl::GRGPtr& grg, grgl::TraversalDirection direction, const grgl::NodeIDList& seedList) {
     NodeNumberingIterator iterator(grgl::DFS_PASS_NONE);
     grg->visitTopo(iterator, direction, seedList);
     return std::move(iterator.m_nodeIds);
@@ -75,7 +75,7 @@ getTopoOrder(const grgl::ConstGRGPtr& grg, grgl::TraversalDirection direction, c
 
 size_t hashMutation(const grgl::Mutation* self) { return std::hash<grgl::Mutation>()(*self); }
 
-std::vector<std::pair<grgl::NodeID, grgl::MutationId>> getNodeMutationPairs(const grgl::ConstGRGPtr& grg) {
+std::vector<std::pair<grgl::NodeID, grgl::MutationId>> getNodeMutationPairs(const grgl::GRGPtr& grg) {
     std::vector<std::pair<grgl::NodeID, grgl::MutationId>> result;
     for (const auto& nodeAndMutId : grg->getNodeMutationPairs()) {
         result.emplace_back(nodeAndMutId.first, nodeAndMutId.second);
@@ -90,9 +90,13 @@ PYBIND11_MODULE(_grgl, m) {
             [](const grgl::GRG::NodeListIterator& nli) { return py::make_iterator(nli.begin(), nli.end()); },
             py::keep_alive<0, 1>() /* Essential: keep object alive while iterator exists */);
 
-    py::class_<grgl::NodeData>(m, "NodeData").def_readwrite("population_id", &grgl::NodeData::populationId, R"^(
-        The population ID (integer) for the population associated with this node.
-        )^");
+    py::class_<grgl::NodeData>(m, "NodeData")
+        .def_readonly("num_individual_coals", &grgl::NodeData::numIndividualCoals, R"^(
+            The number of individuals that coalesce at this node.
+            )^")
+        .def_readwrite("population_id", &grgl::NodeData::populationId, R"^(
+            The population ID (integer) for the population associated with this node.
+            )^");
 
     py::class_<grgl::Mutation>(m, "Mutation")
         .def(py::init<double, std::string, const std::string&, double>(),
@@ -438,6 +442,7 @@ PYBIND11_MODULE(_grgl, m) {
     )^");
 
     m.attr("INVALID_NODE") = INVALID_NODE_ID;
+    m.attr("COAL_COUNT_NOT_SET") = grgl::NodeData::COAL_COUNT_NOT_SET;
 
     m.attr("__version__") = "dev";
 }

@@ -144,7 +144,7 @@ public:
     void visitBfs(GRGVisitor& visitor,
                   TraversalDirection direction,
                   const NodeIDList& seedList,
-                  ssize_t maxQueueWidth = -1) const;
+                  ssize_t maxQueueWidth = -1);
 
     /**
      * Visit nodes depth-first, starting at the given nodes and following up or
@@ -166,14 +166,14 @@ public:
     void visitDfs(GRGVisitor& visitor,
                   TraversalDirection direction,
                   const NodeIDList& seedList,
-                  bool forwardOnly = false) const;
+                  bool forwardOnly = false);
 
-    virtual std::vector<NodeIDSizeT> topologicalSort(TraversalDirection direction) const = 0;
+    virtual std::vector<NodeIDSizeT> topologicalSort(TraversalDirection direction) = 0;
 
     virtual void visitTopo(GRGVisitor& visitor,
                            TraversalDirection direction,
                            const NodeIDList& seedList,
-                           const std::vector<NodeIDSizeT>* sortOrder = nullptr) const = 0;
+                           const std::vector<NodeIDSizeT>* sortOrder = nullptr) = 0;
 
     /**
      * Add a population to the GRG.
@@ -314,12 +314,12 @@ public:
         return this->m_nodes.at(checkId);
     }
 
-    std::vector<NodeIDSizeT> topologicalSort(TraversalDirection direction) const override;
+    std::vector<NodeIDSizeT> topologicalSort(TraversalDirection direction) override;
 
     void visitTopo(GRGVisitor& visitor,
                    TraversalDirection direction,
                    const NodeIDList& seedList,
-                   const std::vector<NodeIDSizeT>* sortOrder = nullptr) const override;
+                   const std::vector<NodeIDSizeT>* sortOrder = nullptr) override;
 
     /**
      * Compact the edge vectors in the GRG. If done infrequently won't affect the amortized edge addition
@@ -377,12 +377,12 @@ public:
 
     NodeData& getNodeData(NodeID nodeId) override { return m_nodeData.at(nodeId); }
 
-    std::vector<NodeIDSizeT> topologicalSort(TraversalDirection direction) const override;
+    std::vector<NodeIDSizeT> topologicalSort(TraversalDirection direction) override;
 
     void visitTopo(GRGVisitor& visitor,
                    TraversalDirection direction,
                    const NodeIDList& seedList,
-                   const std::vector<NodeIDSizeT>* sortOrder = nullptr) const override;
+                   const std::vector<NodeIDSizeT>* sortOrder = nullptr) override;
 
 private:
     std::vector<NodeIDSizeT> m_downPositions;

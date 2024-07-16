@@ -34,7 +34,7 @@ class AlleleFreqVisitor : public grgl::GRGVisitor {
 public:
     AlleleFreqVisitor() = default;
 
-    bool visit(const grgl::ConstGRGPtr& grg,
+    bool visit(const grgl::GRGPtr& grg,
                const grgl::NodeID nodeId,
                const grgl::TraversalDirection direction,
                const grgl::DfsPass dfsPass) override {

@@ -39,7 +39,7 @@ class DfsSampleCountVisitor : public grgl::GRGVisitor {
 public:
     DfsSampleCountVisitor() = default;
 
-    bool visit(const ConstGRGPtr& grg,
+    bool visit(const GRGPtr& grg,
                const NodeID nodeId,
                const TraversalDirection direction,
                const DfsPass dfsPass) override {
@@ -135,7 +135,7 @@ public:
         : m_skipRecurrent(skipRecurrent) {
     }
 
-    void processNode(const ConstGRGPtr& grg,
+    void processNode(const GRGPtr& grg,
                      const NodeIDList& samplesBeneath,
                      const NodeID nodeId) override {
         for (const auto mutId : grg->getMutationsForNode(nodeId)) {

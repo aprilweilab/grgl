@@ -48,7 +48,7 @@ constexpr uint32_t GRG_MINOR_VERSION = 0;
 
 namespace grgl {
 
-constexpr uint64_t ORDERED_NODE_IDS = 0x1;
+constexpr uint64_t HAS_INDIVIDUAL_COALS = 0x2;
 
 #pragma pack(push, 1)
 struct GRGFileHeader {
@@ -60,7 +60,9 @@ struct GRGFileHeader {
     uint64_t mutationCount;
     uint64_t nodeCount;
     uint64_t edgeCount;
-    uint64_t populationCount;
+    uint16_t populationCount;
+    uint16_t ploidy;
+    uint32_t unused32;
     uint64_t flags;
     uint64_t unused[7];
 };
@@ -117,12 +119,14 @@ public:
     //          A  C  B
     // Only "C" can be simplified in ths above, where C's children get moved up to P. Is this really a
     // simplification that we want?
-    bool getChildren(const grgl::ConstGRGPtr& grg, const grgl::NodeID nodeId, NodeIDList& result) {
+    bool getChildren(const grgl::GRGPtr& grg, const grgl::NodeID nodeId, NodeIDList& result, NodeData& parentData) {
         bool hasChildren = false;
         const auto& children = grg->getDownEdges(nodeId);
         for (const auto childId : children) {
             if (m_skipNode[childId]) {
-                hasChildren |= getChildren(grg, childId, result);
+                // Coalescences may have occurred at the nodes that we are deleting. These now move to the parent.
+                parentData.numIndividualCoals += grg->getNodeData(childId).numIndividualCoals;
+                hasChildren |= getChildren(grg, childId, result, parentData);
             } else {
                 hasChildren = true;
                 result.push_back(childId);
@@ -131,7 +135,7 @@ public:
         return hasChildren;
     }
 
-    bool visit(const grgl::ConstGRGPtr& grg,
+    bool visit(const grgl::GRGPtr& grg,
                const grgl::NodeID nodeId,
                const grgl::TraversalDirection direction,
                const grgl::DfsPass dfsPass) override {
@@ -139,16 +143,18 @@ public:
         if (m_nodeVector.empty()) {
             m_nodeVector.resize(grg->numNodes() + 1);
             m_nodeIdMap.resize(grg->numNodes() + 1);
+            m_revIdMap.resize(grg->numNodes() + 1);
             m_skipNode.resize(grg->numNodes());
             m_nodeCounter = grg->numSamples();
         }
         if (dfsPass == DfsPass::DFS_PASS_BACK_AGAIN) {
             if (grg->isSample(nodeId)) {
                 m_nodeIdMap[nodeId] = nodeId;
+                m_revIdMap[nodeId] = nodeId;
                 m_nodeVector[nodeId + 1] = 0;
             } else {
                 NodeIDList children;
-                getChildren(grg, nodeId, children);
+                getChildren(grg, nodeId, children, grg->getNodeData(nodeId));
                 const auto numParents = grg->numUpEdges(nodeId);
                 const bool extraneousNode =
                     (children.size() <= 1 || numParents <= 1 || (children.size() == 2 && numParents == 2));
@@ -157,6 +163,7 @@ public:
                     const NodeID newNodeId = m_nodeCounter++;
                     m_nodeVector[newNodeId + 1] = m_edgeCounter;
                     m_nodeIdMap[nodeId] = newNodeId;
+                    m_revIdMap[newNodeId] = nodeId;
 
                     for (const auto childId : children) {
                         const auto newChildId = m_nodeIdMap.at(childId);
@@ -195,10 +202,19 @@ public:
         return m_nodeIdMap[nodeId];
     }
 
+    NodeID getOldID(const NodeID nodeId) const {
+        if (nodeId == INVALID_NODE_ID) {
+            return nodeId;
+        }
+        return m_revIdMap[nodeId];
+    }
 private:
     std::ostream& m_outStream;
     std::vector<NodeIDSizeT> m_nodeVector;
+    // Maps old NodeID to new NodeID
     std::vector<NodeIDSizeT> m_nodeIdMap;
+    // Maps new NodeID to old NodeID (so the order is new NodeID acscending)
+    std::vector<NodeIDSizeT> m_revIdMap;
     std::vector<bool> m_skipNode;
     size_t m_idSize;
     NodeIDSizeT m_nodeCounter{};
@@ -247,8 +263,10 @@ void writeGrg(const GRGPtr& grg, std::ostream& outStream, bool useVarInt, bool a
         static_cast<uint64_t>(numMutations),
         static_cast<uint64_t>(grg->numNodes()),
         static_cast<uint64_t>(grg->numEdges()),
-        static_cast<uint64_t>(grg->getPopulations().size()),
-        ORDERED_NODE_IDS,
+        static_cast<uint16_t>(grg->getPopulations().size()),
+        0, /*static_cast<uint16_t>(grg->getPloidy()),*/
+        0, /* Unused */
+        HAS_INDIVIDUAL_COALS,
         0,
         0,
         0,
@@ -294,6 +312,10 @@ void writeGrg(const GRGPtr& grg, std::ostream& outStream, bool useVarInt, bool a
             writeScalar<uint16_t>(nodeData.populationId, outStream);
         }
     }
+    for (NodeID nodeId = grg->numSamples(); nodeId < grg->numNodes(); nodeId++) {
+        writeNodeID(grg->getNodeData(visitor.getOldID(nodeId)).numIndividualCoals, header.idSize, outStream);
+    }
+    assert_deserialization(outStream.good(), "Writing GRG failed");
 }
 
 template <typename T> static inline T readScalar(std::istream& inStream) {
@@ -368,12 +390,21 @@ void readGrgCommon(const GRGFileHeader& header, const GRGPtr& grg, std::istream&
     if (header.populationCount > 0) {
         for (size_t i = 0; i < header.populationCount; i++) {
             grg->addPopulation(std::move(readString(header.idSize == USE_VARINT, inStream)));
+            assert_deserialization(inStream.good(), "Malformed GRG file");
         }
         for (size_t i = 0; i < header.sampleCount; i++) {
             const auto popId = readScalar<uint16_t>(inStream);
-            assert_deserialization(inStream.good(), "Malformed GRG file");
             grg->getNodeData(i).populationId = popId;
         }
+        assert_deserialization(inStream.good(), "Malformed GRG file");
+    }
+
+    if ((bool)(header.flags & HAS_INDIVIDUAL_COALS)) {
+        for (NodeID nodeId = header.sampleCount; nodeId < header.nodeCount; nodeId++) {
+            const NodeIDSizeT coalCount = readNodeID(header.idSize, inStream);
+            grg->getNodeData(nodeId).numIndividualCoals = coalCount;
+        }
+        assert_deserialization(inStream.good(), "Malformed GRG file");
     }
 }
 

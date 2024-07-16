@@ -18,6 +18,7 @@
 #define GRG_NODE_H
 
 #include <cstdint>
+#include <limits>
 #include <list>
 #include <memory>
 #include <set>
@@ -108,12 +109,19 @@ using GRGNodePtr = std::shared_ptr<GRGNode>;
 
 /**
  * Container for information that can be attached to graph nodes.
+ *
+ * TODO: this contains fields that only apply to samples (populationID) and fields
+ * that apply to everything except samples (individualCoalCount). This is a waste of space.
  */
 struct NodeData {
+    static constexpr NodeIDSizeT COAL_COUNT_NOT_SET = std::numeric_limits<NodeIDSizeT>::max();
+
     NodeData() = default;
     explicit NodeData(const PopulationID popId)
         : populationId(popId) {}
 
+    NodeIDSizeT numIndividualCoals{COAL_COUNT_NOT_SET};
+    // The ID of the population
     PopulationID populationId{POPULATION_UNSPECIFIED};
 };
 

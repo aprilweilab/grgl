@@ -39,9 +39,9 @@ class TopoSampleHashVisitor : public TopoSampleSetVisitor {
 public:
     TopoSampleHashVisitor() = default;
 
-    virtual void processNode(const ConstGRGPtr& grg, const HashDigest& digest, NodeID nodeId) = 0;
+    virtual void processNode(const GRGPtr& grg, const HashDigest& digest, NodeID nodeId) = 0;
 
-    void processNode(const ConstGRGPtr& grg, const NodeIDList& samplesBeneath, NodeID nodeId) override {
+    void processNode(const GRGPtr& grg, const NodeIDList& samplesBeneath, NodeID nodeId) override {
         const HashDigest hash = !grg->isSample(nodeId) ? hashNodeSet(samplesBeneath) : "";
         processNode(grg, hash, nodeId);
     }
@@ -53,7 +53,7 @@ public:
  */
 class NodeHasherVisitor : public TopoSampleHashVisitor {
 public:
-    void processNode(const ConstGRGPtr& grg, const HashDigest& digest, const NodeID nodeId) override {
+    void processNode(const GRGPtr& grg, const HashDigest& digest, const NodeID nodeId) override {
         if (!grg->isSample(nodeId)) {
             m_hashToNodeId.emplace(digest, nodeId);
         }
@@ -68,7 +68,7 @@ public:
  */
 class NodeMapperVisitor : public TopoSampleHashVisitor {
 public:
-    NodeMapperVisitor(const ConstGRGPtr& sourceGrg,
+    NodeMapperVisitor(const GRGPtr& sourceGrg,
                       MutableGRG& targetGrg,
                       DigestToNode& targetHashToNodeId,
                       bool combineNodes)
@@ -78,7 +78,7 @@ public:
         m_nodeIdToTargetNodeId.resize(sourceGrg->numNodes(), INVALID_NODE_ID);
     }
 
-    void processNode(const ConstGRGPtr& grg, const HashDigest& digest, const NodeID nodeId) override {
+    void processNode(const GRGPtr& grg, const HashDigest& digest, const NodeID nodeId) override {
         if (grg->isSample(nodeId)) {
             for (const auto mutId : grg->getMutationsForNode(nodeId)) {
                 const auto& mutation = grg->getMutationById(mutId);
@@ -105,6 +105,8 @@ public:
             release_assert(nodeId < m_nodeIdToTargetNodeId.size());
             m_nodeIdToTargetNodeId[nodeId] = targetNodeId;
             m_targetHashToNodeId[digest] = targetNodeId;
+            // Copy node data.
+            m_targetGrg.getNodeData(targetNodeId) = grg->getNodeData(nodeId);
 
             // And reconnect all the child nodes appropriately. We only do child because
             // we are doing a bottom-up topological graph search.
