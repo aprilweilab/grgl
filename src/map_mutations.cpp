@@ -53,7 +53,7 @@ public:
     explicit TopoCandidateCollectorVisitor(const std::vector<NodeIDSizeT>& sampleCounts)
         : m_sampleCounts(sampleCounts) {}
 
-    bool visit(const grgl::ConstGRGPtr& grg,
+    bool visit(const grgl::GRGPtr& grg,
                const grgl::NodeID nodeId,
                const grgl::TraversalDirection direction,
                const grgl::DfsPass dfsPass = grgl::DfsPass::DFS_PASS_NONE) override {
@@ -65,7 +65,6 @@ public:
             m_refCounts.resize(grg->numNodes());
         }
 #endif
-
         bool isRoot = grg->numUpEdges(nodeId) == 0;
 
         const auto& alreadySeeded = m_nodeToSamples.find(nodeId);
@@ -74,6 +73,15 @@ public:
             return true;
         }
 
+        // TODO add ploidy to GRG
+        const size_t ploidy = 2;
+        auto& nodeData = grg->getNodeData(nodeId);
+        const bool computeCoals = !grg->isSample(nodeId) && (ploidy == 2)
+            && (NodeData::COAL_COUNT_NOT_SET == nodeData.numIndividualCoals);
+
+        size_t individualCoalCount = 0;
+        // Map from an individual to which child contained it.
+        std::unordered_map<NodeIDSizeT, NodeIDSizeT> individualToChild;
         NodeIDList candidateNodes;
         NodeIDList samplesBeneath;
         if (grg->isSample(nodeId)) {
@@ -91,15 +99,29 @@ public:
                 }
                 for (const auto childSampleId : childSamples) {
                     samplesBeneath.emplace_back(childSampleId);
+                    if (computeCoals) {
+                        auto insertPair = individualToChild.emplace(childSampleId/ploidy, childId);
+                        // The individual already existed from a _different child_, so the two samples just coalesced.
+                        if (!insertPair.second && childId != insertPair.first->second) {
+                            individualCoalCount++;
+                        }
+                    }
                 }
             }
         }
-
-        // We had a mismatch.
+        // Check if we had a mismatch in expected vs. total sample sets.
         release_assert(nodeId < m_sampleCounts.size());
         release_assert(m_sampleCounts[nodeId] <= grg->numSamples());
         bool keepGoing = true;
         NodeIDSizeT missing = (m_sampleCounts[nodeId] - samplesBeneath.size());
+
+        // We can only record coalescence counts if there are no samples missing.
+        if (missing == 0 && computeCoals) {
+            nodeData.numIndividualCoals = individualCoalCount;
+        }
+
+        // If we've reached the root of the graph or have missing samples beneath us, we need to stop the search
+        // and emit candidate nodes to map the mutation to.
         if (missing > 0 || isRoot) {
             for (const auto& candidate : candidateNodes) {
                 m_collectedNodes.emplace_back(candidate, m_nodeToSamples[candidate].size());
@@ -133,6 +155,7 @@ public:
     std::unordered_map<NodeID, NodeIDList> m_nodeToSamples;
 
 private:
+    // These are the _total_ samples beneath each node (not restricted to current samples being searched)
     const std::vector<NodeIDSizeT>& m_sampleCounts;
 #if CLEANUP_SAMPLE_SETS_MAPPING
     std::vector<NodeIDSizeT> m_refCounts;
@@ -148,6 +171,14 @@ static bool setsOverlap(const NodeIDSet& set1, const NodeIDList& set2) {
     return false;
 }
 
+// Tracking individual coalescence is a bit spread out, but I think it is the most efficient way to do it.
+// 1. Above, when searching for candidate nodes in the existing hierarchy, any node that does not have its
+//    coalescence info computed will be computed and stored.
+// 2. Below, when we connect two candidate nodes together we will look for any coalescences between them.
+// 3. Below, when we have "left-over" samples that did not have any candidate nodes, we will check for any
+//    coalescence within the left-over samples, or between the left-over samples and nodes that have already
+//    been covered.
+
 static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
                                     const std::vector<NodeID>& topoOrder,
                                     const std::vector<NodeIDSizeT>& sampleCounts,
@@ -155,6 +186,7 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
                                     const NodeIDList& mutSamples,
                                     MutationMappingStats& stats,
                                     const NodeID shapeNodeIdMax) {
+    const size_t ploidy = 2; // TODO
     // The set of nodes that we have covered so far (greedily extended)
     NodeIDSet covered;
 
@@ -186,6 +218,9 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
         }
     }
 
+    size_t individualCoalCount = 0;
+    // Map from an individual to which child contained it.
+    std::unordered_map<NodeIDSizeT, NodeIDSizeT> individualToChild;
     const NodeID mutNodeId = grg->makeNode();
     grg->addMutation(newMutation, mutNodeId);
     NodeIDList addedNodes;
@@ -203,11 +238,15 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
         // track that here. We do that by only considering candidates that have no overlap
         // with our already-covered set.
         if (!setsOverlap(covered, candidateSet)) {
-            NodeIDSet usedNodes;
             // Mark all the sample nodes as covered.
-            for (const auto nodeId : candidateSet) {
-                covered.emplace(nodeId);
-                usedNodes.emplace(nodeId);
+            for (const auto sampleId : candidateSet) {
+                covered.emplace(sampleId);
+                auto insertPair = individualToChild.emplace(sampleId/ploidy, candidateId);
+                // The individual already existed from a _different node_, so the two samples will coalesce
+                // at the new mutation node.
+                if (!insertPair.second && candidateId != insertPair.first->second) {
+                    individualCoalCount++;
+                }
             }
             if (candidateId >= shapeNodeIdMax) {
                 stats.reusedMutNodes++;
@@ -233,8 +272,18 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
         const auto coveredIt = covered.find(sampleNodeId);
         if (coveredIt == covered.end()) {
             uncovered.emplace(sampleNodeId);
+            // The individual had already been seen and >=1 of the samples was previously uncovered,
+            // then the new node we create is going to be the coalescence location for that individual.
+            if (ploidy == 2) {
+                auto insertPair = individualToChild.emplace(sampleNodeId/ploidy, mutNodeId);
+                if (!insertPair.second) {
+                    individualCoalCount++;
+                }
+            }
         }
     }
+    grg->getNodeData(mutNodeId).numIndividualCoals = individualCoalCount;
+
     if (!uncovered.empty()) {
         stats.numWithSingletons++;
     }
@@ -246,7 +295,7 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
         grg->connect(mutNodeId, sampleNodeId);
         stats.singletonSampleEdges++;
     }
-    // This nodes needs to be last, for the way we update things.
+    // This node needs to be last, for the way we update things.
     addedNodes.push_back(mutNodeId);
     return addedNodes;
 }

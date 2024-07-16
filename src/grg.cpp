@@ -43,8 +43,8 @@ MutationId GRG::addMutation(const Mutation& mutation, const NodeID nodeId) {
 void GRG::visitBfs(GRGVisitor& visitor,
                    TraversalDirection direction,
                    const NodeIDList& seedList,
-                   ssize_t maxQueueWidth) const {
-    ConstGRGPtr sharedThis = shared_from_this();
+                   ssize_t maxQueueWidth) {
+    GRGPtr sharedThis = shared_from_this();
     std::deque<NodeID> fifo;
     for (const auto& nodeId : seedList) {
         fifo.push_back(nodeId);
@@ -67,8 +67,8 @@ void GRG::visitBfs(GRGVisitor& visitor,
 void GRG::visitDfs(GRGVisitor& visitor,
                    TraversalDirection direction,
                    const NodeIDList& seedList,
-                   bool forwardOnly) const {
-    ConstGRGPtr sharedThis = shared_from_this();
+                   bool forwardOnly) {
+    GRGPtr sharedThis = shared_from_this();
     const NodeMark is2ndPass = NODE_MARK_1;
     // Most STL implementations implement this as a packed bitvector.
     std::unique_ptr<bitvect> alreadySeen(new bitvect(this->numNodes()));
@@ -122,7 +122,7 @@ class TopoOrderVisitor : public grgl::GRGVisitor {
 public:
     TopoOrderVisitor() = default;
 
-    bool visit(const ConstGRGPtr& grg,
+    bool visit(const GRGPtr& grg,
                const NodeID nodeId,
                const TraversalDirection direction,
                const DfsPass dfsPass = grgl::DfsPass::DFS_PASS_NONE) override {
@@ -142,7 +142,7 @@ private:
     NodeIDSizeT m_counter{};
 };
 
-std::vector<NodeIDSizeT> MutableGRG::topologicalSort(TraversalDirection direction) const {
+std::vector<NodeIDSizeT> MutableGRG::topologicalSort(TraversalDirection direction) {
     TopoOrderVisitor visitor;
     NodeIDList seeds =
         (direction == TraversalDirection::DIRECTION_DOWN) ? this->getRootNodes() : this->getSampleNodes();
@@ -166,8 +166,8 @@ static bool cmpHeapNode(const HeapNode& hnode1, const HeapNode& hnode2) { return
 void MutableGRG::visitTopo(GRGVisitor& visitor,
                            TraversalDirection direction,
                            const NodeIDList& seedList,
-                           const std::vector<NodeIDSizeT>* sortOrder) const {
-    ConstGRGPtr sharedThis = shared_from_this();
+                           const std::vector<NodeIDSizeT>* sortOrder) {
+    GRGPtr sharedThis = shared_from_this();
     std::vector<NodeIDSizeT> _localSortOrder;
     if (nullptr == sortOrder) {
         _localSortOrder = topologicalSort((direction == DIRECTION_UP) ? DIRECTION_DOWN : DIRECTION_UP);
@@ -204,7 +204,7 @@ void MutableGRG::visitTopo(GRGVisitor& visitor,
     }
 }
 
-std::vector<NodeIDSizeT> CSRGRG::topologicalSort(TraversalDirection direction) const {
+std::vector<NodeIDSizeT> CSRGRG::topologicalSort(TraversalDirection direction) {
     std::vector<NodeIDSizeT> result;
     if (direction == TraversalDirection::DIRECTION_DOWN) {
         for (size_t i = 0; i < this->numNodes(); i++) {
@@ -226,11 +226,11 @@ static bool cmpNodeIdLt(const NodeID& node1, const NodeID& node2) { return node1
 void CSRGRG::visitTopo(GRGVisitor& visitor,
                        TraversalDirection direction,
                        const NodeIDList& seedList,
-                       const std::vector<NodeIDSizeT>* sortOrder) const {
+                       const std::vector<NodeIDSizeT>* sortOrder) {
     if (sortOrder != nullptr) {
         throw ApiMisuseFailure("CSRGRG has its node topologically ordered; sortOrder unneeded");
     }
-    ConstGRGPtr sharedThis = shared_from_this();
+    GRGPtr sharedThis = shared_from_this();
     NodeIDSet alreadySeen;
     std::vector<NodeID> heap;
     heap.reserve(seedList.size() * 2);

@@ -29,7 +29,6 @@ enum DfsPass { DFS_PASS_NONE = 0, DFS_PASS_THERE = 1, DFS_PASS_BACK_AGAIN = 2 };
 
 class GRG;
 using GRGPtr = std::shared_ptr<GRG>;
-using ConstGRGPtr = std::shared_ptr<const GRG>;
 
 /**
  * Visitor abstract base class for traversing the nodes of a GRG.
@@ -59,7 +58,7 @@ public:
      *      values for all successors.
      */
     virtual bool
-    visit(const ConstGRGPtr& grg, NodeID node, TraversalDirection direction, DfsPass dfsPass = DFS_PASS_NONE) = 0;
+    visit(const GRGPtr& grg, NodeID node, TraversalDirection direction, DfsPass dfsPass = DFS_PASS_NONE) = 0;
 };
 
 } // namespace grgl

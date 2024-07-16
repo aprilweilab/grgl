@@ -14,7 +14,7 @@ public:
         , m_invalidVisits(0) {
     }
 
-    bool visit(const ConstGRGPtr& grg,
+    bool visit(const GRGPtr& grg,
                const NodeID nodeId,
                const TraversalDirection direction,
                const DfsPass dfsPass = DfsPass::DFS_PASS_NONE) override {

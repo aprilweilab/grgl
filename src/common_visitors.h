@@ -23,11 +23,11 @@ class TopoSampleSetVisitor : public GRGVisitor {
 public:
     TopoSampleSetVisitor() = default;
 
-    virtual void processNode(const grgl::ConstGRGPtr& grg,
+    virtual void processNode(const grgl::GRGPtr& grg,
                              const NodeIDList& samplesBeneath,
                              NodeID nodeId) = 0;
 
-    bool visit(const grgl::ConstGRGPtr& grg,
+    bool visit(const grgl::GRGPtr& grg,
                const grgl::NodeID nodeId,
                const grgl::TraversalDirection direction,
                const grgl::DfsPass dfsPass) override {
