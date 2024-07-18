@@ -31,7 +31,7 @@
 
 constexpr uint64_t GRG_MAGIC = 0xE9366C64DDC8C5B0;
 constexpr uint32_t GRG_MAJOR_VERSION = 4;
-constexpr uint32_t GRG_MINOR_VERSION = 0;
+constexpr uint32_t GRG_MINOR_VERSION = 1;
 
 // The file header stores the nodeID size. This special value means the nodeID size
 // should use the variable-sized int encoding (see varint.h)
@@ -264,7 +264,7 @@ void writeGrg(const GRGPtr& grg, std::ostream& outStream, bool useVarInt, bool a
         static_cast<uint64_t>(grg->numNodes()),
         static_cast<uint64_t>(grg->numEdges()),
         static_cast<uint16_t>(grg->getPopulations().size()),
-        0, /*static_cast<uint16_t>(grg->getPloidy()),*/
+        grg->getPloidy(),
         0, /* Unused */
         HAS_INDIVIDUAL_COALS,
         0,
@@ -416,9 +416,14 @@ MutableGRGPtr readMutableGrg(std::istream& inStream) {
     assert_deserialization(GRG_MAGIC == header.magic, "Invalid file header");
     assert_deserialization(GRG_MAJOR_VERSION == header.versionMajor, "Incompatible file major version");
     assert_deserialization(header.nodeCount <= MAX_GRG_NODES, "Malformed GRG file");
+    // For backwards compatibility to versions prior to 4.1
+    if (header.ploidy == 0 && header.versionMajor == 4 && header.versionMinor == 0) {
+        header.ploidy = 2;
+    }
+    assert_deserialization(header.ploidy != 0, "Malformed GRG file: ploidy was 0");
 
     // Construct GRG and allocate all the nodes.
-    MutableGRGPtr grg = std::make_shared<MutableGRG>(header.sampleCount, header.nodeCount);
+    MutableGRGPtr grg = std::make_shared<MutableGRG>(header.sampleCount, header.ploidy, header.nodeCount);
     grg->makeNode(header.nodeCount - header.sampleCount);
     release_assert(grg->numNodes() == header.nodeCount);
     std::vector<NodeID> edges;
@@ -464,9 +469,14 @@ GRGPtr readImmutableGrg(std::istream& inStream, bool loadUpEdges) {
     inStream.read(reinterpret_cast<char*>(&header), sizeof(header));
     assert_deserialization(GRG_MAGIC == header.magic, "Invalid file header");
     assert_deserialization(GRG_MAJOR_VERSION == header.versionMajor, "Incompatible file major version");
+    // For backwards compatibility to versions prior to 4.1
+    if (header.ploidy == 0 && header.versionMajor == 4 && header.versionMinor == 0) {
+        header.ploidy = 2;
+    }
+    assert_deserialization(header.ploidy != 0, "Malformed GRG file: ploidy was 0");
 
     // Construct GRG and allocate all the nodes.
-    CSRGRGPtr grg = std::make_shared<CSRGRG>(header.sampleCount, header.edgeCount, header.nodeCount);
+    CSRGRGPtr grg = std::make_shared<CSRGRG>(header.sampleCount, header.edgeCount, header.nodeCount, header.ploidy);
 
     // The GRG serialization only encodes the down edges, we deserialize them here.
     for (size_t i = 0; i < header.edgeCount; i++) {

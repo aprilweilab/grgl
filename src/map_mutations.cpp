@@ -73,8 +73,7 @@ public:
             return true;
         }
 
-        // TODO add ploidy to GRG
-        const size_t ploidy = 2;
+        const size_t ploidy = grg->getPloidy();
         auto& nodeData = grg->getNodeData(nodeId);
         const bool computeCoals = !grg->isSample(nodeId) && (ploidy == 2)
             && (NodeData::COAL_COUNT_NOT_SET == nodeData.numIndividualCoals);
@@ -186,7 +185,7 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
                                     const NodeIDList& mutSamples,
                                     MutationMappingStats& stats,
                                     const NodeID shapeNodeIdMax) {
-    const size_t ploidy = 2; // TODO
+    const size_t ploidy = grg->getPloidy();
     // The set of nodes that we have covered so far (greedily extended)
     NodeIDSet covered;
 
@@ -241,11 +240,13 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
             // Mark all the sample nodes as covered.
             for (const auto sampleId : candidateSet) {
                 covered.emplace(sampleId);
-                auto insertPair = individualToChild.emplace(sampleId/ploidy, candidateId);
-                // The individual already existed from a _different node_, so the two samples will coalesce
-                // at the new mutation node.
-                if (!insertPair.second && candidateId != insertPair.first->second) {
-                    individualCoalCount++;
+                if (ploidy == 2) {
+                    auto insertPair = individualToChild.emplace(sampleId/ploidy, candidateId);
+                    // The individual already existed from a _different node_, so the two samples will coalesce
+                    // at the new mutation node.
+                    if (!insertPair.second && candidateId != insertPair.first->second) {
+                        individualCoalCount++;
+                    }
                 }
             }
             if (candidateId >= shapeNodeIdMax) {
@@ -282,7 +283,9 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
             }
         }
     }
-    grg->getNodeData(mutNodeId).numIndividualCoals = individualCoalCount;
+    if (ploidy == 2) {
+        grg->getNodeData(mutNodeId).numIndividualCoals = individualCoalCount;
+    }
 
     if (!uncovered.empty()) {
         stats.numWithSingletons++;
