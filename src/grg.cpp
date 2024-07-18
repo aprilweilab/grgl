@@ -40,6 +40,34 @@ MutationId GRG::addMutation(const Mutation& mutation, const NodeID nodeId) {
     return mutId;
 }
 
+using MutIdAndNode = std::pair<MutationId, NodeID>;
+
+struct MutIdAndNodeLt {
+    explicit MutIdAndNodeLt(const ConstGRGPtr theGRG)
+        : grg(theGRG) {}
+
+    bool operator()(const MutIdAndNode& lhs, const MutIdAndNode& rhs) const {
+        const auto& mlhs = grg->getMutationById(lhs.first);
+        const auto& mrhs = grg->getMutationById(rhs.first);
+        if (mlhs.getPosition() == mrhs.getPosition()) {
+            return mlhs.getAllele() < mrhs.getAllele();
+        }
+        return mlhs.getPosition() < mrhs.getPosition();
+    }
+
+    ConstGRGPtr grg;
+};
+
+std::vector<MutIdAndNode> GRG::getMutationsToNodeOrdered() const {
+    std::vector<std::pair<MutationId, NodeID>> result;
+    for (const auto& nodeAndMutId : m_nodeToMutations) {
+        result.emplace_back(nodeAndMutId.second, nodeAndMutId.first);
+    }
+    ConstGRGPtr sharedThis = shared_from_this();
+    std::sort(result.begin(), result.end(), MutIdAndNodeLt(sharedThis));
+    return std::move(result);
+}
+
 void GRG::visitBfs(GRGVisitor& visitor,
                    TraversalDirection direction,
                    const NodeIDList& seedList,
@@ -64,10 +92,7 @@ void GRG::visitBfs(GRGVisitor& visitor,
     }
 }
 
-void GRG::visitDfs(GRGVisitor& visitor,
-                   TraversalDirection direction,
-                   const NodeIDList& seedList,
-                   bool forwardOnly) {
+void GRG::visitDfs(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList, bool forwardOnly) {
     GRGPtr sharedThis = shared_from_this();
     const NodeMark is2ndPass = NODE_MARK_1;
     // Most STL implementations implement this as a packed bitvector.

@@ -75,8 +75,8 @@ public:
 
         const size_t ploidy = grg->getPloidy();
         auto& nodeData = grg->getNodeData(nodeId);
-        const bool computeCoals = !grg->isSample(nodeId) && (ploidy == 2)
-            && (NodeData::COAL_COUNT_NOT_SET == nodeData.numIndividualCoals);
+        const bool computeCoals =
+            !grg->isSample(nodeId) && (ploidy == 2) && (NodeData::COAL_COUNT_NOT_SET == nodeData.numIndividualCoals);
 
         size_t individualCoalCount = 0;
         // Map from an individual to which child contained it.
@@ -99,7 +99,7 @@ public:
                 for (const auto childSampleId : childSamples) {
                     samplesBeneath.emplace_back(childSampleId);
                     if (computeCoals) {
-                        auto insertPair = individualToChild.emplace(childSampleId/ploidy, childId);
+                        auto insertPair = individualToChild.emplace(childSampleId / ploidy, childId);
                         // The individual already existed from a _different child_, so the two samples just coalesced.
                         if (!insertPair.second && childId != insertPair.first->second) {
                             individualCoalCount++;
@@ -241,7 +241,7 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
             for (const auto sampleId : candidateSet) {
                 covered.emplace(sampleId);
                 if (ploidy == 2) {
-                    auto insertPair = individualToChild.emplace(sampleId/ploidy, candidateId);
+                    auto insertPair = individualToChild.emplace(sampleId / ploidy, candidateId);
                     // The individual already existed from a _different node_, so the two samples will coalesce
                     // at the new mutation node.
                     if (!insertPair.second && candidateId != insertPair.first->second) {
@@ -276,7 +276,7 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
             // The individual had already been seen and >=1 of the samples was previously uncovered,
             // then the new node we create is going to be the coalescence location for that individual.
             if (ploidy == 2) {
-                auto insertPair = individualToChild.emplace(sampleNodeId/ploidy, mutNodeId);
+                auto insertPair = individualToChild.emplace(sampleNodeId / ploidy, mutNodeId);
                 if (!insertPair.second) {
                     individualCoalCount++;
                 }

@@ -208,6 +208,7 @@ public:
         }
         return m_revIdMap[nodeId];
     }
+
 private:
     std::ostream& m_outStream;
     std::vector<NodeIDSizeT> m_nodeVector;

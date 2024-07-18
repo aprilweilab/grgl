@@ -1,10 +1,12 @@
 cmake_minimum_required(VERSION 3.14)
 project(grgl)
+include(ExternalProject)
 
 option(PYTHON_SUPPORT "Build Python loadable module" OFF)
 option(ENABLE_CHECKERS "Enable external tools like clang-tidy" OFF)
 option(ENABLE_TESTS "Enable automated test execution" ON)
-option(ENABLE_BGEN "Enable BGEN support" ON)
+option(ENABLE_BGEN "Enable BGEN support" OFF)
+option(ENABLE_GSL "Enable GSL support for stat calculations" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -84,7 +86,6 @@ set(GRGL_PUBLIC_HEADERS
   )
 
 set(GRGL_CORE_SOURCES
-    ${CMAKE_CURRENT_LIST_DIR}/src/calculations.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/build_shape.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/hap_index.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/grg.cpp
@@ -111,6 +112,25 @@ if (${ENABLE_BGEN})
   add_compile_options(-DBGEN_ENABLED=1)
 endif()
 
+# We don't need AMPL bindings from gsl.
+if (${ENABLE_GSL})
+  ExternalProject_Add(
+    gsl
+    SOURCE_DIR ${CMAKE_BINARY_DIR}/third-party/gsl
+    BINARY_DIR ${CMAKE_BINARY_DIR}/third-party/gsl
+    URL "https://mirror.ibcp.fr/pub/gnu/gsl/gsl-latest.tar.gz"
+    CMAKE_ARGS ""
+    CONFIGURE_COMMAND ${CMAKE_BINARY_DIR}/third-party/gsl/configure --prefix=<INSTALL_DIR>
+    BUILD_COMMAND ${MAKE}
+    INSTALL_COMMAND ""
+    TEST_COMMAND "")
+
+  set(GRGP_LIBS ${CMAKE_BINARY_DIR}/third-party/gsl/.libs/libgsl.a)
+  set(GRGP_DEPS gsl)
+  include_directories(${CMAKE_BINARY_DIR}/third-party/gsl/)
+  add_compile_options(-DGSL_ENABLED=1)
+endif()
+
 # Library libgrgl.a for C++ projects that want to use GRGL.
 add_library(grgl STATIC ${GRGL_CORE_SOURCES})
 target_compile_options(grgl PRIVATE
@@ -126,9 +146,13 @@ target_link_libraries(grgl_tool tskit grgl ${BGEN_LIBS} z)
 # Tool for processing GRG files (stats, etc).
 add_executable(grgp_tool
                ${CMAKE_CURRENT_LIST_DIR}/src/grgp.cpp
+               ${CMAKE_CURRENT_LIST_DIR}/src/calculations.cpp
                )
 set_target_properties(grgp_tool PROPERTIES OUTPUT_NAME "grgp")
-target_link_libraries(grgp_tool grgl)
+target_link_libraries(grgp_tool grgl ${GRGP_LIBS})
+if (${ENABLE_GSL})
+  add_dependencies(grgp_tool ${GRGP_DEPS})
+endif()
 
 
 # Tool for merging GRGs.

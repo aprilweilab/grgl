@@ -54,8 +54,8 @@ public:
     };
 
     explicit GRG(size_t numSamples, uint16_t ploidy)
-        : m_numSamples(numSamples)
-        , m_ploidy(ploidy) {}
+        : m_numSamples(numSamples),
+          m_ploidy(ploidy) {}
 
     virtual ~GRG() = default;
     GRG(const GRG&) = delete;
@@ -78,7 +78,7 @@ public:
 
     size_t numSamples() const { return m_numSamples; }
 
-	/**
+    /**
      * How many haploid samples are there per individual?
      *
      * @return The ploidy, usually 1 or 2. Individual coalescence support only works when ploidy==2.
@@ -139,6 +139,13 @@ public:
     }
 
     /**
+     * Get pairs of mutation IDs and node IDs, ordered by the mutation position + allele (ascending).
+     *
+     * @return A vector of pairs, MutationID and NodeID (in that order).
+     */
+    std::vector<std::pair<MutationId, NodeID>> getMutationsToNodeOrdered() const;
+
+    /**
      * Visit nodes breadth-first, starting at the given nodes and following up or
      * down edges.
      *
@@ -149,10 +156,8 @@ public:
      * @param[in] maxQueueWidth The maximum width of the queue; restricts the number of
      *      end-to-end paths that will be visited.
      */
-    void visitBfs(GRGVisitor& visitor,
-                  TraversalDirection direction,
-                  const NodeIDList& seedList,
-                  ssize_t maxQueueWidth = -1);
+    void
+    visitBfs(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList, ssize_t maxQueueWidth = -1);
 
     /**
      * Visit nodes depth-first, starting at the given nodes and following up or
@@ -171,10 +176,8 @@ public:
      *      forwardOnly will only visit nodes in the forward direction. It also causes
      *      nodes to be visited an arbitrary number of times.
      */
-    void visitDfs(GRGVisitor& visitor,
-                  TraversalDirection direction,
-                  const NodeIDList& seedList,
-                  bool forwardOnly = false);
+    void
+    visitDfs(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList, bool forwardOnly = false);
 
     virtual std::vector<NodeIDSizeT> topologicalSort(TraversalDirection direction) = 0;
 

@@ -8,8 +8,9 @@ import sys
 
 C_MODULE_NAME = "_grgl"
 ARG_DEBUG = "--debug-build"
-ARG_NOBGEN = "--no-bgen"
+ARG_BGEN = "--bgen"
 ARG_COPYBINS = "--copy-bins"
+ARG_GSL = "--gsl"
 
 THISDIR = os.path.realpath(os.path.dirname(__file__))
 
@@ -20,12 +21,15 @@ for arg in sys.argv[1:]:
     if arg == ARG_DEBUG:
         build_type = "Debug"
         sys.argv.remove(ARG_DEBUG)
-    elif arg == ARG_NOBGEN:
-        extra_cmake_args.append("-DENABLE_BGEN=OFF")
-        sys.argv.remove(ARG_NOBGEN)
+    elif arg == ARG_BGEN:
+        extra_cmake_args.append("-DENABLE_BGEN=ON")
+        sys.argv.remove(ARG_BGEN)
     elif arg == ARG_COPYBINS:
         copy_bins = True
         sys.argv.remove(ARG_COPYBINS)
+    elif arg == ARG_GSL:
+        extra_cmake_args.append("-DENABLE_GSL=ON")
+        sys.argv.remove(ARG_GSL)
 
 class CMakeExtension(Extension):
     def __init__(self, name, cmake_lists_dir=".", sources=[], extra_executables=[], **kwa):

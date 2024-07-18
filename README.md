@@ -46,9 +46,9 @@ source /path/to/MyEnv/bin/activate
 pip install --install-option="--copy-bins" -v -e .
 ```
 
-BGEN support may not build easily on all platforms (such as MacOS). In that case you can use the `--no-bgen` option, such as:
-* `python setup.py bdist_wheel --no-bgen`
-* or `pip install --install-option="--no-bgen" --install-option="--copy-bins" -v -e .`
+BGEN support is disabled by default. If you want to enable it:
+* `python setup.py bdist_wheel --bgen`
+* or `pip install --install-option="--bgen" --install-option="--copy-bins" -v -e .`
 
 Build and installation should take at most a few minutes on the typical computer.
 
