@@ -157,10 +157,10 @@ static void getMutStats(MutationIterator& iterator,
     }
 }
 
-bool genotypeHashIndex(MutationIterator& mutIterator,
-                       grgl::NodeToHapVect& hashIndex,
-                       const size_t bitsPerMutation,
-                       const double dropBelowThreshold) {
+uint16_t genotypeHashIndex(MutationIterator& mutIterator,
+                           grgl::NodeToHapVect& hashIndex,
+                           const size_t bitsPerMutation,
+                           const double dropBelowThreshold) {
     constexpr size_t MAX_ALLELE_SIZE_FOR_HASH = 4;
     struct PosAndAllele {
         size_t position;
@@ -224,7 +224,7 @@ bool genotypeHashIndex(MutationIterator& mutIterator,
         std::cout << "Flipped " << mutIterator.numFlippedAlleles() << " reference alleles (to the major allele)"
                   << std::endl;
     }
-    return true;
+    return static_cast<uint16_t>(ploidy);
 }
 
 MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
@@ -241,11 +241,7 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
     std::shared_ptr<grgl::MutationIterator> mutationIterator =
         makeMutationIterator(sampleFile, genomeRange, useBinaryMuts, emitMissingData, flipRefMajor);
     auto operationStartTime = std::chrono::high_resolution_clock::now();
-    bool indexedOk = genotypeHashIndex(*mutationIterator, hashIndex, bitsPerMutation, dropBelowThreshold);
-    if (!indexedOk) {
-        std::cerr << "Failed constructing hash index\n";
-        return result;
-    }
+    uint16_t ploidy = genotypeHashIndex(*mutationIterator, hashIndex, bitsPerMutation, dropBelowThreshold);
     std::cout << "** Hashing input took "
               << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() -
                                                                        operationStartTime)
@@ -253,7 +249,7 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
               << " ms\n";
 
     std::cout << "Done" << std::endl;
-    result = std::make_shared<MutableGRG>(hashIndex.size());
+    result = std::make_shared<MutableGRG>(hashIndex.size(), ploidy);
     if (!indivIdToPop.empty()) {
         size_t ploidy = 0;
         size_t numIndividuals = 0;

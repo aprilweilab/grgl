@@ -13,7 +13,7 @@ TEST(GRG, Mutations) {
     ASSERT_TRUE(!m2.isEmpty());
 
     {
-        MutableGRG g1(2);
+        MutableGRG g1(/*numSamples=*/2, /*ploidy=*/1);
         g1.addMutation(m1, 1);
         ASSERT_EQ(g1.getUnmappedMutations().size(), 0);
         ASSERT_EQ(g1.getMutationsForNode(0).size(), 0);

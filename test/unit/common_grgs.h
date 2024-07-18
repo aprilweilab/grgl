@@ -12,7 +12,7 @@ using namespace grgl;
 //         s0      s1  s2      s3
 inline MutableGRGPtr depth3BinTree() {
     const size_t nSamples = 4;
-    MutableGRGPtr grg = std::make_shared<MutableGRG>(nSamples);
+    MutableGRGPtr grg = std::make_shared<MutableGRG>(nSamples, 2);
     NodeID pn4 = grg->makeNode();
     NodeID pn5 = grg->makeNode();
     NodeID pn6 = grg->makeNode();

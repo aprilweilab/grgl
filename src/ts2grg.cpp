@@ -168,7 +168,9 @@ static NodeID addMutationFromTree(TsToGrgContext& context,
 MutableGRGPtr convertTreeSeqToGRG(const tsk_treeseq_t* treeSeq, bool binaryMutations, bool useNodeTimes) {
     const size_t initialNodeCount = tsk_treeseq_get_num_nodes(treeSeq);
     const size_t numSamples = tsk_treeseq_get_num_samples(treeSeq);
-    MutableGRGPtr grg = std::make_shared<MutableGRG>(numSamples, initialNodeCount);
+    const size_t numIndividuals = tsk_treeseq_get_num_individuals(treeSeq);
+    const size_t ploidy = (numIndividuals == 0) ? 2 : (numSamples / numIndividuals);
+    MutableGRGPtr grg = std::make_shared<MutableGRG>(numSamples, static_cast<uint16_t>(ploidy), initialNodeCount);
     tsk_tree_t currentTree;
     TsToGrgContext constructionContext(initialNodeCount);
 

@@ -53,8 +53,9 @@ public:
         DEFAULT_NODE_CAPACITY = 1024,
     };
 
-    explicit GRG(size_t numSamples)
-        : m_numSamples(numSamples) {}
+    explicit GRG(size_t numSamples, uint16_t ploidy)
+        : m_numSamples(numSamples)
+        , m_ploidy(ploidy) {}
 
     virtual ~GRG() = default;
     GRG(const GRG&) = delete;
@@ -76,6 +77,13 @@ public:
     bool isSample(const NodeID nodeId) const { return nodeId < this->m_numSamples; }
 
     size_t numSamples() const { return m_numSamples; }
+
+	/**
+     * How many haploid samples are there per individual?
+     *
+     * @return The ploidy, usually 1 or 2. Individual coalescence support only works when ploidy==2.
+     */
+    uint16_t getPloidy() const { return m_ploidy; }
 
     virtual bool nodesAreOrdered() const = 0;
     virtual size_t numNodes() const = 0;
@@ -203,6 +211,7 @@ protected:
     std::vector<std::string> m_populations;
 
     const size_t m_numSamples;
+    const uint16_t m_ploidy;
 };
 
 using GRGPtr = std::shared_ptr<GRG>;
@@ -217,8 +226,8 @@ public:
      * @param[in] (Optional) the initial capacity of the node vector. If you know in advance roughly
      *      how many nodes will be created this can improve performance.
      */
-    explicit MutableGRG(size_t numSamples, size_t initialNodeCapacity = DEFAULT_NODE_CAPACITY)
-        : GRG(numSamples) {
+    explicit MutableGRG(size_t numSamples, uint16_t ploidy, size_t initialNodeCapacity = DEFAULT_NODE_CAPACITY)
+        : GRG(numSamples, ploidy) {
         if (initialNodeCapacity < numSamples) {
             initialNodeCapacity = numSamples * 2;
         }
@@ -337,8 +346,8 @@ using ConstMutableGRGPtr = std::shared_ptr<const MutableGRG>;
 
 class CSRGRG : public GRG {
 public:
-    explicit CSRGRG(size_t numSamples, size_t edgeCount, size_t nodeCount)
-        : GRG(numSamples),
+    explicit CSRGRG(size_t numSamples, size_t edgeCount, size_t nodeCount, uint16_t ploidy)
+        : GRG(numSamples, ploidy),
           m_downEdges(edgeCount),
           m_upEdges(edgeCount),
           m_downPositions(nodeCount + 2),
