@@ -79,7 +79,9 @@ int main(int argc, char** argv) {
     grgl::GRGPtr theGRG;
     START_TIMING_OPERATION();
     if (ends_with(*infile, ".grg")) {
-        theGRG = grgl::loadImmutableGRG(*infile);
+        // We only need up edges if we're calculating subsets via samples.
+        const bool loadUpEdges = (bool)sampleSubset;
+        theGRG = grgl::loadImmutableGRG(*infile, loadUpEdges);
         if (!theGRG) {
             std::cerr << "Failed to load " << *infile << std::endl;
             return 2;

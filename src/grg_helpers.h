@@ -104,7 +104,7 @@ static inline MutableGRGPtr loadMutableGRG(const std::string& filename) {
     return result;
 }
 
-static inline GRGPtr loadImmutableGRG(const std::string& filename) {
+static inline GRGPtr loadImmutableGRG(const std::string& filename, bool loadUpEdges = true) {
     GRGPtr result;
     std::ifstream inStream(filename, std::ios::binary);
     if (!inStream.good()) {
@@ -112,7 +112,7 @@ static inline GRGPtr loadImmutableGRG(const std::string& filename) {
         return result;
     }
     try {
-        result = readImmutableGrg(inStream);
+        result = readImmutableGrg(inStream, loadUpEdges);
     } catch (SerializationFailure& e) {
         std::cerr << "Failed to load GRG: " << e.what() << std::endl;
         return result;

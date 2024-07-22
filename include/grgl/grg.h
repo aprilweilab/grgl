@@ -349,10 +349,10 @@ using ConstMutableGRGPtr = std::shared_ptr<const MutableGRG>;
 
 class CSRGRG : public GRG {
 public:
-    explicit CSRGRG(size_t numSamples, size_t edgeCount, size_t nodeCount, uint16_t ploidy)
+    explicit CSRGRG(size_t numSamples, size_t edgeCount, size_t nodeCount, uint16_t ploidy, bool loadUpEdges = true)
         : GRG(numSamples, ploidy),
           m_downEdges(edgeCount),
-          m_upEdges(edgeCount),
+          m_upEdges(loadUpEdges ? edgeCount : 0),
           m_downPositions(nodeCount + 2),
           m_upPositions(nodeCount + 2),
           m_nodeData(nodeCount) {}
