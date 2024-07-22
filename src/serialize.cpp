@@ -477,7 +477,8 @@ GRGPtr readImmutableGrg(std::istream& inStream, bool loadUpEdges) {
     assert_deserialization(header.ploidy != 0, "Malformed GRG file: ploidy was 0");
 
     // Construct GRG and allocate all the nodes.
-    CSRGRGPtr grg = std::make_shared<CSRGRG>(header.sampleCount, header.edgeCount, header.nodeCount, header.ploidy);
+    CSRGRGPtr grg =
+        std::make_shared<CSRGRG>(header.sampleCount, header.edgeCount, header.nodeCount, header.ploidy, loadUpEdges);
 
     // The GRG serialization only encodes the down edges, we deserialize them here.
     for (size_t i = 0; i < header.edgeCount; i++) {
