@@ -111,6 +111,7 @@ static void mutationIteratorToIGD(const std::string& inFilename,
                                   const double fnPerVariant = 0,
                                   const size_t trimToSamples = 0,
                                   std::string keepIndividualFile = "",
+                                  bool removeEmpty = false,
                                   bool verbose = true) {
     constexpr size_t EMIT_EVERY = 10000;
 
@@ -188,6 +189,9 @@ static void mutationIteratorToIGD(const std::string& inFilename,
         }
         trim(mutAndSamples.samples, trimToSamples);
         mutAndSamples.samples = trimIndividuals(std::move(mutAndSamples.samples), ploidy, keepIndividuals);
+        if (removeEmpty && mutAndSamples.samples.empty()) {
+            continue;
+        }
         if (fpPerVariant + fnPerVariant > 0) {
             const double fp = fpPerVariant + fpLeftovers;
             const size_t fpThisVariant = (size_t)fp;
@@ -238,6 +242,7 @@ int main(int argc, char* argv[]) {
         "keepIndivs",
         "Only retain the individuals with the IDs given in this file (one ID per line).",
         {'i', "keep-indivs"});
+    args::Flag removeEmpty(parser, "removeEmpty", "Remove empty alternate alleles.", {'e', "remove-empty"});
     try {
         parser.ParseCLI(argc, argv);
     } catch (args::Help&) {
@@ -291,6 +296,8 @@ int main(int argc, char* argv[]) {
                           falseNegPerVariant ? *falseNegPerVariant : 0,
                           falsePosPerVariant ? *falsePosPerVariant : 0,
                           trimTo ? *trimTo : 0,
-                          keepIndivs ? *keepIndivs : "");
+                          keepIndivs ? *keepIndivs : "",
+                          removeEmpty,
+                          /*verbose=*/true);
     return 0;
 }
