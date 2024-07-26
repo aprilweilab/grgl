@@ -28,6 +28,8 @@
 
 namespace grgl {
 
+const NodeIDSizeT NodeData::COAL_COUNT_NOT_SET = std::numeric_limits<NodeIDSizeT>::max();
+
 using bitvect = std::vector<bool>;
 
 MutationId GRG::addMutation(const Mutation& mutation, const NodeID nodeId) {
