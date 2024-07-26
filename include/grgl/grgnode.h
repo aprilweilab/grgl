@@ -114,7 +114,7 @@ using GRGNodePtr = std::shared_ptr<GRGNode>;
  * that apply to everything except samples (individualCoalCount). This is a waste of space.
  */
 struct NodeData {
-    static constexpr NodeIDSizeT COAL_COUNT_NOT_SET = std::numeric_limits<NodeIDSizeT>::max();
+    static const NodeIDSizeT COAL_COUNT_NOT_SET;
 
     NodeData() = default;
     explicit NodeData(const PopulationID popId)
