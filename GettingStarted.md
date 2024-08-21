@@ -3,7 +3,7 @@
 This guide walks you through using GRGL locally on a Linux or MacOS system. Requirements:
 * [CMake](https://cmake.org/download/) v3.14 or newer
 * GCC or Clang that supports C++11
-* Python 3.7 or newer
+* Python 3.7 or newer (and the development libraries -- e.g., `python3-dev` on Ubuntu)
 * zlib/libz development libraries
 
 ## Build and Install
@@ -19,7 +19,7 @@ Replace `/path/to/anEnv` with any directory where you want to create the virtual
 **Enable the Python virtual environment**
 
 ```
-source /path/to/anEnv/bin/active
+source /path/to/anEnv/bin/activate
 ```
 
 All Python packages you install will now be specific to this environment. You can deactivate the environment
@@ -31,7 +31,7 @@ with the command `deactivate`. You can delete the environment directory when you
 git clone --recursive https://github.com/aprilweilab/grgl.git
 cd grgl
 pip install wheel
-python setup.py bdist_wheel --no-bgen
+python setup.py bdist_wheel
 pip install --force-reinstall dist/*.whl
 ```
 
