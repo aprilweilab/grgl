@@ -225,7 +225,9 @@ uint16_t genotypeHashIndex(MutationIterator& mutIterator,
             dropped++;
             continue;
         }
-        const size_t hashInput = std::hash<size_t>{}(variantCount);
+        // std::hash() of an integer is just the integer, and we get better results with a little
+        // bit more random-like behavior.
+        const size_t hashInput = hash_combine(std::hash<size_t>{}(variantCount), 42);
         for (auto sampleId : mutAndSamples.samples) {
             bloomFilters.at(sampleId).addHash(hashInput);
         }
