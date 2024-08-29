@@ -30,6 +30,8 @@ def add_options(subparser):
     subparser.add_argument("--population-ids", default=None,
         help="Format: \"filename:fieldname\". Read population ids from the given "
              "tab-separate file, using the given fieldname.")
+    subparser.add_argument("--bs-triplet", default=0,
+        help="Run the triplet algorithm for this many iterations in BuildShape")
     subparser.add_argument("--verbose", "-v", action="store_true",
         help="Verbose output, including timing information.")
 
@@ -61,6 +63,8 @@ def build_shape(range_triple, args, input_file):
             command.append("--no-maf-flip")
         if args.population_ids:
             command.extend(["--population-ids", args.population_ids])
+        if args.bs_triplet:
+            command.extend(["--bs-triplet", args.bs_triplet])
         command.extend(["--lf-filter", str(args.shape_lf_filter)])
         command.extend(["-l", "-s", "-r", f"{base}:{base+pspans}",
                         "-o", out_filename_tree(input_file, part, tnum)])

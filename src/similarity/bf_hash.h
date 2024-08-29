@@ -4,8 +4,6 @@
 #include <cstdint>
 #include <vector>
 
-#include "mmh3.h"
-
 namespace grgl {
 
 /**
@@ -21,10 +19,8 @@ public:
             : m_bitVector((numBits + (ELEM_SIZE-1)) / ELEM_SIZE) {
     }
 
-    template <typename T>
-    void addItem(const T& item) {
+    void addHash(const size_t hashIdx) {
         const size_t K = m_bitVector.size() * ELEM_SIZE;
-        const auto hashIdx = murmur3_32((const uint8_t*)&item, sizeof(item), 1);
         const size_t bitIndex = hashIdx % K;
         const size_t element = bitIndex / ELEM_SIZE;
         const ElemType mask = 0x1U << (bitIndex % ELEM_SIZE);
