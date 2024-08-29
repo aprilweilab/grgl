@@ -24,7 +24,8 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
                                         bool emitMissingData,
                                         bool flipRefMajor,
                                         double dropBelowThreshold,
-                                        const std::map<std::string, std::string>& indivIdToPop);
+                                        const std::map<std::string, std::string>& indivIdToPop,
+                                        size_t tripletLevels = 0);
 
 }
 

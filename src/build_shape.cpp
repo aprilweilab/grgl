@@ -28,32 +28,14 @@
 #include "grgl/mut_iterator.h"
 #include "hap_index.h"
 #include "similarity/bf_hash.h"
-#include "similarity/mmh3.h"
 #include "util.h"
 
 namespace grgl {
 
-static NodeID
-createParentForNodes(const MutableGRGPtr& grg, NodeToHapVect& nodeHashes, NodeIDList& cluster, NodeIDSet& covered) {
-    std::list<HaplotypeVector> similarHashes;
-    // Now create a node to represent this new cluster, and connect its children.
-    const auto newNodeId = grg->makeNode();
-    for (const NodeID similarId : cluster) {
-        covered.insert(similarId);
-        grg->connect(newNodeId, similarId);
-        const auto& similarHash = nodeHashes.at(similarId);
-        similarHashes.push_back(similarHash);
-    }
-    auto newGenotypeHash = bitwiseIntersect(similarHashes);
-    assert(nodeHashes.size() == newNodeId);
-    nodeHashes.emplace_back(std::move(newGenotypeHash));
-    return newNodeId;
-}
-
 static NodeIDList addGrgShapeFromHashing(const MutableGRGPtr& grg,
                                          NodeToHapVect& nodeHashes,
                                          const NodeIDList& initialNodes,
-                                         const bool binaryTrees) {
+                                         const size_t tripletLevels) {
     // Lambda that does hamming distance between nodes. Instead of passing around the vectors contains the
     // bloom filters / hashes, we use a BK-tree that has a distance callback between elements.
     auto compareNodeIds = [&](const NodeID& node1, const NodeID& node2) {
@@ -102,12 +84,56 @@ static NodeIDList addGrgShapeFromHashing(const MutableGRGPtr& grg,
             // level, IF the node has not already been used as a child. This is CRITICAL to the performance
             // of this algorithm; specifically using nodes that were just recently created is important (think
             // of it as: unbalanced trees are important)
-            NodeIDList similar = hashIndex.getMostSimilarNodes(nodeId, !binaryTrees);
+            NodeIDList similar = hashIndex.getMostSimilarNodes(nodeId, false);
             if (!similar.empty()) {
-                similar.push_back(nodeId);
-                NodeID newNodeId = createParentForNodes(grg, nodeHashes, similar, covered);
-                nextLevelNodes.push_back(newNodeId);
-                hashIndex.add(newNodeId);
+                // Pick the first element from similar as the representative. They should all be identical.
+                NodeID first = similar.front();
+                size_t isize = 0;
+                HaplotypeVector vect1 = nodeHashes.at(nodeId);
+                HaplotypeVector vect2 = nodeHashes.at(first);
+                const size_t vect1Size = countBits(vect1);
+                const size_t vect2Size = countBits(vect2);
+                HaplotypeVector intersect = bitwiseIntersect(vect1, vect2, isize);
+                // We create up to three nodes: (A & B), (A - B), (B - A) for any of them that are non-empty.
+                if (isize > 0) {
+                    NodeID newNodeId = grg->makeNode();
+                    nodeHashes.emplace_back(intersect);
+                    nextLevelNodes.push_back(newNodeId);
+                    hashIndex.add(newNodeId);
+
+                    grg->connect(newNodeId, nodeId);
+                    for (const NodeID similarId : similar) {
+                        grg->connect(newNodeId, similarId);
+                    }
+                }
+                if ((level < tripletLevels) && (isize < vect1Size)) {
+                    const size_t subSize = bitwiseSubtract(vect1, intersect);
+                    if (subSize > 0) {
+                        NodeID newNodeId = grg->makeNode();
+                        nodeHashes.emplace_back(std::move(vect1));
+                        nextLevelNodes.push_back(newNodeId);
+                        hashIndex.add(newNodeId);
+                        grg->connect(newNodeId, nodeId);
+                    }
+                }
+                if ((level < tripletLevels) && (isize < vect2Size)) {
+                    const size_t subSize = bitwiseSubtract(vect2, intersect);
+                    if (subSize > 0) {
+                        NodeID newNodeId = grg->makeNode();
+                        nodeHashes.emplace_back(std::move(vect2));
+                        nextLevelNodes.push_back(newNodeId);
+                        hashIndex.add(newNodeId);
+                        for (const NodeID similarId : similar) {
+                            grg->connect(newNodeId, similarId);
+                        }
+                    }
+                }
+
+                for (const NodeID similarId : similar) {
+                    covered.insert(similarId);
+                }
+                covered.insert(nodeId);
+
                 createdNodes = true;
             } else {
                 nextLevelNodes.push_back(nodeId);
@@ -161,12 +187,6 @@ uint16_t genotypeHashIndex(MutationIterator& mutIterator,
                            grgl::NodeToHapVect& hashIndex,
                            const size_t bitsPerMutation,
                            const double dropBelowThreshold) {
-    constexpr size_t MAX_ALLELE_SIZE_FOR_HASH = 4;
-    struct PosAndAllele {
-        size_t position;
-        char allele[MAX_ALLELE_SIZE_FOR_HASH];
-    };
-
     size_t ploidy = 0;
     size_t numIndividuals = 0;
     bool isPhased = false;
@@ -199,21 +219,19 @@ uint16_t genotypeHashIndex(MutationIterator& mutIterator,
     MutationAndSamples mutAndSamples = {Mutation(0.0, ""), NodeIDList()};
     mutIterator.reset();
     size_t dropped = 0;
-    size_t numVariants = 0;
+    size_t variantCount = 0;
     while (mutIterator.next(mutAndSamples, _ignore)) {
         if (mutAndSamples.samples.size() < dropBelowCount) {
             dropped++;
             continue;
         }
-        const size_t position = static_cast<size_t>(mutAndSamples.mutation.getPosition());
-        PosAndAllele hashInput = {position, {}};
-        strncpy(&hashInput.allele[0], mutAndSamples.mutation.getAllele().c_str(), MAX_ALLELE_SIZE_FOR_HASH);
+        const size_t hashInput = std::hash<size_t>{}(variantCount);
         for (auto sampleId : mutAndSamples.samples) {
-            bloomFilters.at(sampleId).addItem(hashInput);
+            bloomFilters.at(sampleId).addHash(hashInput);
         }
-        numVariants++;
+        variantCount++;
     }
-    std::cout << "Creating hash index with " << bloomFilters.size() << " entries for " << numVariants << " variants"
+    std::cout << "Creating hash index with " << bloomFilters.size() << " entries for " << variantCount << " variants"
               << std::endl;
     std::cout << "Dropped " << dropped << " variants" << std::endl;
     hashIndex = grgl::NodeToHapVect(bloomFilters.size());
@@ -234,7 +252,8 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
                                         const bool emitMissingData,
                                         const bool flipRefMajor,
                                         const double dropBelowThreshold,
-                                        const std::map<std::string, std::string>& indivIdToPop) {
+                                        const std::map<std::string, std::string>& indivIdToPop,
+                                        const size_t tripletLevels) {
     MutableGRGPtr result;
     NodeToHapVect hashIndex;
     std::cout << "Building genotype hash index..." << std::endl;
@@ -284,8 +303,7 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
         }
     }
     std::cout << "Adding GRG shape from genotype hashes..." << std::endl;
-    const bool buildBinaryTrees = true;
-    addGrgShapeFromHashing(result, hashIndex, result->getSampleNodes(), buildBinaryTrees);
+    addGrgShapeFromHashing(result, hashIndex, result->getSampleNodes(), tripletLevels);
     std::cout << "Done" << std::endl;
 
     return result;

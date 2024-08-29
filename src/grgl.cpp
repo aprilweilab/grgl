@@ -83,6 +83,10 @@ int main(int argc, char** argv) {
     args::Flag noMAFFlip(
         parser, "no-maf-flip", "Do not switch the reference allele with the major allele", {"no-maf-flip"});
     args::Flag showVersion(parser, "version", "Show version and exit", {"version"});
+    args::ValueFlag<size_t> triplet(parser,
+                                    "bs-triplet",
+                                    "Run the BuildShape triplet algorithm for at most this number of levels.",
+                                    {"bs-triplet"});
     args::ValueFlag<std::string> missingData(
         parser,
         "missing-data",
@@ -202,7 +206,8 @@ int main(int argc, char** argv) {
                                                  missingDataHandling == MDH_ADD_TO_GRG,
                                                  !noMAFFlip,
                                                  lfFilter ? *lfFilter : 0.0,
-                                                 indivIdToPop);
+                                                 indivIdToPop,
+                                                 triplet ? *triplet : 0);
         dumpStats(theGRG);
     } else {
         std::cerr << "Unsupported/undetected filetype for " << *infile << std::endl;
