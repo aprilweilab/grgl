@@ -32,6 +32,8 @@ def add_options(subparser):
              "tab-separate file, using the given fieldname.")
     subparser.add_argument("--bs-triplet", default=0,
         help="Run the triplet algorithm for this many iterations in BuildShape")
+    subparser.add_argument("--out-file", "-o", default=None,
+        help="Specify an output file instead of using the default name.")
     subparser.add_argument("--verbose", "-v", action="store_true",
         help="Verbose output, including timing information.")
 
@@ -169,7 +171,11 @@ def from_tabular(args):
 
     # Now merge them pairwise.
     print("Merging...")
-    final_filename = f"{base_name}.final.grg"
+    if args.out_file is not None:
+        final_filename = args.out_file
+    else:
+        final_filename = f"{base_name}.final.grg"
+
     command = [grg_merge_exe, "-s", final_filename, ]
     command.extend(map(lambda part: out_filename(input_file, part), range(0, args.parts)))
     print(command)
