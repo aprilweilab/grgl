@@ -54,7 +54,7 @@ void writeGrg(const GRGPtr& grg, std::ostream& out, bool useVarInt = true, bool 
  * @param[in] inStream The (binary) input stream.
  */
 MutableGRGPtr readMutableGrg(std::istream& inStream);
-GRGPtr readImmutableGrg(std::istream& inStream, bool loadUpEdges = true);
+GRGPtr readImmutableGrg(std::istream& inStream, bool loadUpEdges = true, bool loadDownEdges = true);
 
 }; // namespace grgl
 

@@ -94,6 +94,36 @@ public:
     virtual NodeListIterator getUpEdges(NodeID nodeId) const = 0;
     virtual NodeData& getNodeData(NodeID nodeId) = 0;
 
+    bool mutationsAreOrdered() const { return m_mutsAreOrdered; }
+
+    /**
+     * Get the base-pair range this GRG covers as a pair {first, last+1} where first is
+     * the base-pair position of the first mutation, and last is similarly defined.
+     * In general we treat all ranges as left-inclusive and right-exlusive, hence the
+     * +1 on the last.
+     */
+    std::pair<BpPosition, BpPosition> getBPRange() const {
+        if (mutationsAreOrdered() && !m_mutations.empty()) {
+            const size_t lastMutId = m_mutations.size() - 1;
+            return {m_mutations[0].getPosition(), m_mutations[lastMutId].getPosition()};
+        }
+        BpPosition firstPos = std::numeric_limits<BpPosition>::max();
+        BpPosition lastPos = 0;
+        for (MutationId i = 0; i < numMutations(); i++) {
+            const auto position = m_mutations[i].getPosition();
+            if (position < firstPos) {
+                firstPos = position;
+            }
+            if (position > lastPos) {
+                lastPos = position;
+            }
+        }
+        return {firstPos, lastPos + 1};
+    }
+
+    /**
+     * Get the NodeIDList for all samples in the graph.
+     */
     NodeIDList getSampleNodes() const {
         NodeIDList result;
         for (grgl::NodeID i = 0; i < this->numSamples(); i++) {
@@ -102,6 +132,9 @@ public:
         return result;
     }
 
+    /**
+     * Get the NodeIDList for all roots in the graph.
+     */
     NodeIDList getRootNodes() const {
         NodeIDList result;
         for (grgl::NodeID nodeId = 0; nodeId < this->numNodes(); nodeId++) {
@@ -215,10 +248,14 @@ protected:
 
     const size_t m_numSamples;
     const uint16_t m_ploidy;
+    // True if the mutationId order matches the (position, allele) order.
+    bool m_mutsAreOrdered;
 };
 
 using GRGPtr = std::shared_ptr<GRG>;
 using ConstGRGPtr = std::shared_ptr<const GRG>;
+using MutableGRGPtr = std::shared_ptr<MutableGRG>;
+using ConstMutableGRGPtr = std::shared_ptr<const MutableGRG>;
 
 class MutableGRG : public GRG {
 public:
@@ -342,10 +379,9 @@ public:
 private:
     // The list of nodes. The node's position in this vector must match its ID.
     std::vector<GRGNodePtr> m_nodes;
-};
 
-using MutableGRGPtr = std::shared_ptr<MutableGRG>;
-using ConstMutableGRGPtr = std::shared_ptr<const MutableGRG>;
+    friend MutableGRGPtr readMutableGrg(std::istream& inStream);
+};
 
 class CSRGRG : public GRG {
 public:
@@ -403,7 +439,7 @@ private:
     NodeIDList m_upEdges;
     std::vector<NodeData> m_nodeData;
 
-    friend GRGPtr readImmutableGrg(std::istream& inStream, bool loadUpEdges);
+    friend GRGPtr readImmutableGrg(std::istream& inStream, bool loadUpEdges, bool loadDownEdges);
 };
 
 using CSRGRGPtr = std::shared_ptr<CSRGRG>;

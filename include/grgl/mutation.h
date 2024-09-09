@@ -33,6 +33,12 @@ constexpr EXTERNAL_ID NO_ORIGINAL_ID = -1;
 class Mutation;
 
 using MutationId = uint32_t;
+constexpr MutationId INVALID_MUTATION_ID = std::numeric_limits<MutationId>::max();
+constexpr MutationId MAX_MUTATION_ID = INVALID_MUTATION_ID - 1;
+
+using BpPosition = uint64_t;
+constexpr BpPosition INVALID_POSITION = std::numeric_limits<BpPosition>::max();
+constexpr BpPosition MAX_POSITION = INVALID_POSITION - 1;
 
 /**
  * A mutation in the GRG.
@@ -49,12 +55,12 @@ public:
 
     Mutation()
         : m_alleleStorage({}),
-          m_position(std::numeric_limits<uint64_t>::max()),
+          m_position(INVALID_POSITION),
           m_time(-1.0),
           m_originalId(NO_ORIGINAL_ID),
           m_refPosition(0) {}
 
-    Mutation(uint64_t position, std::string allele)
+    Mutation(BpPosition position, std::string allele)
         : m_alleleStorage({}),
           m_position(position),
           m_time(-1.0),
@@ -66,7 +72,7 @@ public:
         setAlleleValues(std::move(allele), "");
     }
 
-    Mutation(uint64_t position,
+    Mutation(BpPosition position,
              std::string allele,
              const std::string& refAllele,
              float time = -1.0,
@@ -134,9 +140,9 @@ public:
         setAlleleValues(std::move(rhs.getAllele()), rhs.getRefAllele());
     }
 
-    bool isEmpty() const { return m_position == std::numeric_limits<uint64_t>::max(); }
+    bool isEmpty() const { return m_position == INVALID_POSITION; }
 
-    uint64_t getPosition() const { return m_position; }
+    BpPosition getPosition() const { return m_position; }
 
     float getTime() const { return m_time; }
 
@@ -220,7 +226,7 @@ protected:
         char _b[8];
     } m_alleleStorage; // 8
     static_assert(sizeof(m_alleleStorage) == 8, "Allele storage size changed");
-    uint64_t m_position;      // 8
+    BpPosition m_position;    // 8
     float m_time;             // 4
     EXTERNAL_ID m_originalId; // 4
     uint16_t m_refPosition;   // 2
@@ -249,7 +255,7 @@ struct MutationLtPosAllele {
  */
 template <> struct std::hash<grgl::Mutation> {
     std::size_t operator()(const grgl::Mutation& mut) const noexcept {
-        std::size_t h1 = std::hash<uint64_t>{}(mut.getPosition());
+        std::size_t h1 = std::hash<grgl::BpPosition>{}(mut.getPosition());
         std::size_t h2 = std::hash<std::string>{}(mut.getAllele());
         return grgl::hash_combine(h1, h2);
     }

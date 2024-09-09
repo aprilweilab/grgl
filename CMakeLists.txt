@@ -7,6 +7,7 @@ option(ENABLE_CHECKERS "Enable external tools like clang-tidy" OFF)
 option(ENABLE_TESTS "Enable automated test execution" ON)
 option(ENABLE_BGEN "Enable BGEN support" OFF)
 option(ENABLE_GSL "Enable GSL support for stat calculations" OFF)
+option(ENABLE_CPU_PROF "Enable gperftools CPU profiler" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -110,6 +111,14 @@ include_directories(${CMAKE_CURRENT_LIST_DIR}/include/
 if (${ENABLE_BGEN})
   set(BGEN_LIBS bgen)
   add_compile_options(-DBGEN_ENABLED=1)
+endif()
+
+# In order to use this, grab https://github.com/gperftools/gperftools/releases/download/gperftools-2.15/gperftools-2.15.tar.gz
+# and unzip it to the top-level grgl repo directory, and do "./configure && make"
+if (${ENABLE_CPU_PROF})
+  include_directories(${CMAKE_CURRENT_LIST_DIR}/gperftools-2.15/src/)
+  add_compile_options(-g) # Turn on symbols (but not debug mode)
+  set(GRGP_LIBS ${CMAKE_CURRENT_LIST_DIR}/gperftools-2.15/.libs/libprofiler.a unwind)
 endif()
 
 # We don't need AMPL bindings from gsl.
