@@ -150,6 +150,12 @@ PYBIND11_MODULE(_grgl, m) {
                 num_nodes instead of performing actual graph traversals, depending
                 on what you are trying to accomplish.
             )^")
+        .def_property_readonly("mutations_are_ordered", &grgl::GRG::mutationsAreOrdered, R"^(
+                Returns true if the MutationID order matches the (position, allele)
+                sorted order. That is, MutationID of 0 is the lowest position value
+                and MutationID of num_mutations-1 is the highest. Ties are broken
+                by the lexicographic order of the allele.
+            )^")
         .def_property_readonly("num_nodes", &grgl::GRG::numNodes, R"^(
                 Get the total number of nodes (including sample and mutation nodes)
                 in the GRG.
@@ -338,13 +344,22 @@ PYBIND11_MODULE(_grgl, m) {
         :rtype: pygrgl.MutableGRG
     )^");
 
-    m.def("load_immutable_grg", &grgl::loadImmutableGRG, py::arg("filename"), py::arg("load_up_edges") = true, R"^(
+    m.def("load_immutable_grg",
+          &grgl::loadImmutableGRG,
+          py::arg("filename"),
+          py::arg("load_up_edges") = true,
+          py::arg("load_down_edges") = true,
+          R"^(
         Load a GRG file from disk. Immutable GRGs are much faster to traverse than mutable
         GRGs and take up less RAM, so this is the preferred method if you are using a GRG
         for calculation or annotation, and not modifying the graph structure itself.
 
         :param filename: The file to load.
         :type filename: str
+        :param load_up_edges: If False, do not load the graph "up" edges (saves RAM).
+        :type load_up_edges: bool
+        :param load_down_edges: If False, do not load the graph "down" edges (saves RAM).
+        :type load_down_edges: bool
         :return: The GRG.
         :rtype: pygrgl.GRG
     )^");

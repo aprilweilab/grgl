@@ -49,6 +49,7 @@ constexpr uint32_t GRG_MINOR_VERSION = 1;
 namespace grgl {
 
 constexpr uint64_t HAS_INDIVIDUAL_COALS = 0x2;
+constexpr uint64_t MUTATION_IDS_ARE_ORDERED = 0x4;
 
 #pragma pack(push, 1)
 struct GRGFileHeader {
@@ -267,7 +268,7 @@ void writeGrg(const GRGPtr& grg, std::ostream& outStream, bool useVarInt, bool a
         static_cast<uint16_t>(grg->getPopulations().size()),
         grg->getPloidy(),
         0, /* Unused */
-        HAS_INDIVIDUAL_COALS,
+        HAS_INDIVIDUAL_COALS | MUTATION_IDS_ARE_ORDERED,
         0,
         0,
         0,
@@ -297,10 +298,10 @@ void writeGrg(const GRGPtr& grg, std::ostream& outStream, bool useVarInt, bool a
     std::cout << "  Edges: " << header.edgeCount << std::endl;
 
     // Mutations
-    for (const auto& nodeAndMutId : grg->getNodeMutationPairs()) {
-        writeMutation(grg->getMutationById(nodeAndMutId.second), header.idSize, outStream);
+    for (const auto& nodeAndMutId : grg->getMutationsToNodeOrdered()) {
+        writeMutation(grg->getMutationById(nodeAndMutId.first), header.idSize, outStream);
         assert_deserialization(outStream.good(), "Writing GRG failed");
-        writeNodeID(visitor.getNewID(nodeAndMutId.first), header.idSize, outStream);
+        writeNodeID(visitor.getNewID(nodeAndMutId.second), header.idSize, outStream);
         assert_deserialization(outStream.good(), "Writing GRG failed");
     }
     // Populations
@@ -460,10 +461,13 @@ MutableGRGPtr readMutableGrg(std::istream& inStream) {
     grg->compact();
 
     readGrgCommon(header, grg, inStream);
+    if ((bool)(header.flags & MUTATION_IDS_ARE_ORDERED)) {
+        grg->m_mutsAreOrdered = true;
+    }
     return grg;
 }
 
-GRGPtr readImmutableGrg(std::istream& inStream, bool loadUpEdges) {
+GRGPtr readImmutableGrg(std::istream& inStream, bool loadUpEdges, bool loadDownEdges) {
     assert_deserialization(inStream.good(), "Bad input stream");
     // Read header.
     GRGFileHeader header = {};
@@ -517,8 +521,17 @@ GRGPtr readImmutableGrg(std::istream& inStream, bool loadUpEdges) {
             }
         }
     }
+    if (!loadDownEdges) {
+        std::fill(grg->m_downPositions.begin(), grg->m_downPositions.end(), 0);
+        grg->m_downEdges.clear();
+        grg->m_downEdges.shrink_to_fit();
+        grg->finalize();
+    }
 
     readGrgCommon(header, grg, inStream);
+    if ((bool)(header.flags & MUTATION_IDS_ARE_ORDERED)) {
+        grg->m_mutsAreOrdered = true;
+    }
     return grg;
 }
 

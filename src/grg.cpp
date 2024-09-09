@@ -39,6 +39,9 @@ MutationId GRG::addMutation(const Mutation& mutation, const NodeID nodeId) {
         release_assert(nodeId < this->numNodes());
     }
     this->m_nodeToMutations.emplace(nodeId, mutId);
+    if (m_mutsAreOrdered) {
+        m_mutsAreOrdered = false;
+    }
     return mutId;
 }
 
@@ -60,13 +63,21 @@ struct MutIdAndNodeLt {
     ConstGRGPtr grg;
 };
 
+struct MutIdAndNodeLtFast {
+    bool operator()(const MutIdAndNode& lhs, const MutIdAndNode& rhs) const { return lhs.first < rhs.first; }
+};
+
 std::vector<MutIdAndNode> GRG::getMutationsToNodeOrdered() const {
     std::vector<std::pair<MutationId, NodeID>> result;
     for (const auto& nodeAndMutId : m_nodeToMutations) {
         result.emplace_back(nodeAndMutId.second, nodeAndMutId.first);
     }
     ConstGRGPtr sharedThis = shared_from_this();
-    std::sort(result.begin(), result.end(), MutIdAndNodeLt(sharedThis));
+    if (mutationsAreOrdered()) {
+        std::sort(result.begin(), result.end(), MutIdAndNodeLtFast());
+    } else {
+        std::sort(result.begin(), result.end(), MutIdAndNodeLt(sharedThis));
+    }
     return std::move(result);
 }
 
@@ -260,8 +271,8 @@ void CSRGRG::visitTopo(GRGVisitor& visitor,
     GRGPtr sharedThis = shared_from_this();
     NodeIDSet alreadySeen;
     std::vector<NodeID> heap;
-    heap.reserve(seedList.size() * 2);
     for (const auto& seedId : seedList) {
+        release_assert(seedId < numNodes());
         heap.emplace_back(seedId);
     }
     const bool isDown = direction == TraversalDirection::DIRECTION_DOWN;
