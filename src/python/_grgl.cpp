@@ -344,8 +344,12 @@ PYBIND11_MODULE(_grgl, m) {
         :rtype: pygrgl.MutableGRG
     )^");
 
-    m.def("load_immutable_grg", &grgl::loadImmutableGRG, py::arg("filename"),
-          py::arg("load_up_edges") = true, py::arg("load_down_edges") = true, R"^(
+    m.def("load_immutable_grg",
+          &grgl::loadImmutableGRG,
+          py::arg("filename"),
+          py::arg("load_up_edges") = true,
+          py::arg("load_down_edges") = true,
+          R"^(
         Load a GRG file from disk. Immutable GRGs are much faster to traverse than mutable
         GRGs and take up less RAM, so this is the preferred method if you are using a GRG
         for calculation or annotation, and not modifying the graph structure itself.
