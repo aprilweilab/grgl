@@ -103,6 +103,11 @@ int main(int argc, char** argv) {
                            "ts-node-times",
                            "When converting tree-seq, use node times instead of mutation times",
                            {"ts-node-times"});
+    args::Flag maintainTopo(
+        parser,
+        "maintain-topo",
+        "When converting tree-seq, maintain all topology below mutations (at the cost of a larger graph)",
+        {"maintain-topo"});
     args::ValueFlag<std::string> populationIds(parser,
                                                "population-ids",
                                                "Format: \"filename:fieldname\". Read population ids from the given "
@@ -182,7 +187,7 @@ int main(int argc, char** argv) {
         TSKIT_OK_OR_EXIT(tsk_treeseq_load(&treeSeq, infile->c_str(), 0), "Failed to load tree-seq");
 
         try {
-            theGRG = grgl::convertTreeSeqToGRG(&treeSeq, binaryMutations, tsNodeTimes);
+            theGRG = grgl::convertTreeSeqToGRG(&treeSeq, binaryMutations, tsNodeTimes, maintainTopo);
         } catch (grgl::TskitApiFailure& e) {
             std::cerr << e.what();
             return 2;

@@ -119,9 +119,9 @@ public:
         return nodeA;
     }
 
-    void markPendingUntilMRCA(const tsk_tree_t* tree, const std::list<tsk_id_t>& mrcaRoots) {
+    void markPendingUntilMRCA(const tsk_tree_t* tree, const std::list<tsk_id_t>& mrcaLeaves) {
         std::list<tsk_id_t> workList;
-        for (const tsk_id_t node : mrcaRoots) {
+        for (const tsk_id_t node : mrcaLeaves) {
             if (!tsIsDisconnected(tree, node)) {
                 workList.push_back(node);
             }
@@ -133,6 +133,22 @@ public:
             workList.pop_back();
             const tsk_id_t ancestor = markPendingAndGetMRCA(tree, nodeA, nodeB);
             workList.push_back(ancestor);
+        }
+    }
+
+    void markPendingUntilRoot(const tsk_tree_t* tree, const std::list<tsk_id_t>& leaves) {
+        std::unordered_set<tsk_id_t> seen;
+        for (const tsk_id_t node : leaves) {
+            tsk_id_t activeNode = node;
+            while (activeNode != TSK_NULL) {
+                addPendingSplit(activeNode);
+                auto insertPair = seen.emplace(activeNode);
+                // We didn't actually insert b/c it was already there -- we can stop traversing.
+                if (!insertPair.second) {
+                    break;
+                }
+                TSKIT_OK_OR_THROW(tsk_tree_get_parent(tree, activeNode, &activeNode), "Getting parent");
+            }
         }
     }
 
@@ -165,7 +181,8 @@ static NodeID addMutationFromTree(TsToGrgContext& context,
     return newNodeId;
 }
 
-MutableGRGPtr convertTreeSeqToGRG(const tsk_treeseq_t* treeSeq, bool binaryMutations, bool useNodeTimes) {
+MutableGRGPtr
+convertTreeSeqToGRG(const tsk_treeseq_t* treeSeq, bool binaryMutations, bool useNodeTimes, bool maintainTopology) {
     const size_t initialNodeCount = tsk_treeseq_get_num_nodes(treeSeq);
     const size_t numSamples = tsk_treeseq_get_num_samples(treeSeq);
     const size_t numIndividuals = tsk_treeseq_get_num_individuals(treeSeq);
@@ -259,7 +276,11 @@ MutableGRGPtr convertTreeSeqToGRG(const tsk_treeseq_t* treeSeq, bool binaryMutat
         // everything in between as needing-to-be-split.
         const auto modifiedNodesIt = positionToModifiedNodes.find(endOfTree);
         if (modifiedNodesIt != positionToModifiedNodes.end()) {
-            constructionContext.markPendingUntilMRCA(&currentTree, modifiedNodesIt->second);
+            if (maintainTopology) {
+                constructionContext.markPendingUntilRoot(&currentTree, modifiedNodesIt->second);
+            } else {
+                constructionContext.markPendingUntilMRCA(&currentTree, modifiedNodesIt->second);
+            }
         } else {
             std::cerr << "Missing modification between trees at " << endOfTree << std::endl;
         }
