@@ -43,6 +43,10 @@ Or for development you can install the folder with pip:
 ```
 python3 -m venv /path/to/MyEnv
 source /path/to/MyEnv/bin/activate
+pip install --config-settings="--build-setting=--copy-bins" -v -e .
+```
+For older versions of pip, you may need to use the below pip command instead:
+```
 pip install --install-option="--copy-bins" -v -e .
 ```
 
