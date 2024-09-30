@@ -43,16 +43,12 @@ Or for development you can install the folder with pip:
 ```
 python3 -m venv /path/to/MyEnv
 source /path/to/MyEnv/bin/activate
-pip install --config-settings="--build-setting=--copy-bins" -v -e .
-```
-For older versions of pip, you may need to use the below pip command instead:
-```
-pip install --install-option="--copy-bins" -v -e .
+GRGL_COPY_BINS=1 pip install -v -e .
 ```
 
 BGEN support is disabled by default. If you want to enable it:
-* `python setup.py bdist_wheel --bgen`
-* or `pip install --install-option="--bgen" --install-option="--copy-bins" -v -e .`
+* `GRGL_BGEN=1 python setup.py bdist_wheel `
+* or `GRGL_BGEN=1 GRGL_COPY_BINS=1 pip install -v -e .`
 
 Build and installation should take at most a few minutes on the typical computer.
 
