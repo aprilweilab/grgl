@@ -31,7 +31,18 @@ class CMakeExtension(Extension):
         self.cmake_lists_dir = os.path.abspath(cmake_lists_dir)
         self.extra_executables = extra_executables
 
+def all_files(dir_name):
+    result = []
+    for root, dirs, files in os.walk(dir_name):
+        for f in files:
+            result.append(os.path.join(root, f))
+    return result
+
 class CMakeBuild(build_ext):
+    def get_source_files(self):
+        return (["CMakeLists.txt", ] + all_files("src/") + all_files("include/") + all_files("third-party/")
+                + all_files("extra/") + all_files("test/"))
+
     def build_extensions(self):
         try:
             out = subprocess.check_output(["cmake", "--version"])

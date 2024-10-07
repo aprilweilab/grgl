@@ -1,0 +1,21 @@
+FROM ubuntu:22.04
+
+RUN apt update && \
+    DEBIAN_FRONTEND=noninteractive apt install -y python3.10 python3.10-venv python3.10-dev python3.11 python3.11-venv python3.11-dev python3-setuptools python3-pip git build-essential cmake wget 
+
+COPY . /grgl_src
+
+ENV PATH="/grgl_src/Env310/bin:$PATH"
+# Build the Python 3.10 wheel
+RUN cd /grgl_src \
+    && python3.10 -m venv Env310 \
+    && pip3 install wheel \
+    && GRGL_GSL=1 GRGL_BGEN=1 python setup.py bdist_wheel
+ENV PATH="/grgl_src/Env311/bin:$PATH"
+# Build the Python 3.11 wheel
+RUN cd /grgl_src \
+    && python3.11 -m venv Env311 \
+    && pip3 install wheel \
+    && GRGL_GSL=1 GRGL_BGEN=1 python setup.py bdist_wheel
+# Copy to an easily accesible location
+RUN mkdir /output && cp /grgl_src/dist/*.whl /output/
