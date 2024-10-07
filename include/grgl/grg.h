@@ -233,7 +233,53 @@ public:
      */
     const std::vector<std::string>& getPopulations() const { return m_populations; }
 
+    /**
+     * Add the given mutation to the GRG, associated with the given node. If there is no node associated
+     * with the mutation, use INVALID_NODE_ID.
+     *
+     * @param[in] mutation The Mutation to add.
+     * @param[in] nodeId The nodeId to associated it with, or INVALID_NODE_ID.
+     * @return The MutationId for the newly added Mutation.
+     */
     MutationId addMutation(const Mutation& mutation, NodeID nodeId);
+
+    // Internal method, used by Python API and the main API below.
+    void dotProduct(const double* inputData,
+                    size_t inputLength,
+                    TraversalDirection direction,
+                    double* outputData,
+                    size_t outputLength);
+
+    /**
+     * Compute one of two possible dot products across the entire graph. The input vector \f$V\f$ can be
+     * either \f$1 \times N\f$ (\f$N\f$ is number of samples) or \f$1 \times M\f$ (\f$M\f$ is number of
+     * mutations). The given direction determines which input vector is expected. Let \f$X\f$ be the
+     * \f$N \times M\f$ genotype matrix.
+     * For an \f$1 \times N\f$ input \f$V\f$, the product performed is \f$V \cdot X\f$ which gives a
+     * \f$1 \times M\f$ result. I.e., the input vector is a value per sample and the output vector is
+     * a value per mutation.
+     * For an \f$1 \times M\f$ input \f$V\f$, the product performed is \f$V \cdot X^T\f$ which gives a
+     * \f$1 \times N\f$ result. I.e., the input vector is a value per mutation and the output vector is
+     * a value per sample.
+     *
+     * Dot product in the graph works by seeding the input nodes (samples or mutations) with the corresponding
+     * values from the input vector and then traversing the graph in the relevant direction (up or down). The
+     * ancestor/descendant values are summed at each node, until the terminal nodes (mutations or samples) are
+     * reached.
+     *
+     * @param[in] inputData The \f$1 \times N\f$ or \f$1 \times M\f$ input vector. For samples, the \f$i\f$th
+     *      entry in the vector is the value for sample \f$i\f$. Similarly for mutations, the ordering follows
+     *      the MutationId ordering.
+     * @param[in] direction Use TraversalDirection::DIRECTION_DOWN for mutations as input, and
+     *      TraversalDirection::DIRECTION_UP for samples as input.
+     * @return The resulting vector as described above.
+     */
+    std::vector<double> dotProduct(const std::vector<double>& inputData, TraversalDirection direction) {
+        const size_t outSize = (direction == TraversalDirection::DIRECTION_DOWN) ? numSamples() : numMutations();
+        std::vector<double> result(outSize);
+        dotProduct(inputData.data(), inputData.size(), direction, result.data(), outSize);
+        return std::move(result);
+    }
 
 protected:
     // The position is the mutation ID.

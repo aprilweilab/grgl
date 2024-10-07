@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "grg_helpers.h"
+#include "grgl/common.h"
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
 #include "grgl/visitor.h"
@@ -88,6 +89,9 @@ void emitAlleleFrequency(grgl::GRGPtr& grg,
     if (bpRange.first == bpRange.second && onlySamples.empty()) {
         fastCompleteDFS(grg, visitorForDfs);
     } else if (!onlySamples.empty()) {
+        if (bpRange.first != bpRange.second) {
+            throw ApiMisuseFailure("--region and --sample-subset cannot be combined");
+        }
         grg->visitTopo(visitorForDfs, grgl::TraversalDirection::DIRECTION_UP, onlySamples);
     } else {
         grgl::NodeIDList seeds;

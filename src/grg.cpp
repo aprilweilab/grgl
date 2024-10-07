@@ -17,6 +17,7 @@
 #include "grgl/grg.h"
 #include "grgl/common.h"
 #include "grgl/grgnode.h"
+#include "grgl/mutation.h"
 #include "grgl/visitor.h"
 #include "util.h"
 
@@ -142,6 +143,108 @@ void GRG::visitDfs(GRGVisitor& visitor, TraversalDirection direction, const Node
             lifo.pop_back();
             visitor.visit(sharedThis, nodeId, direction, DFS_PASS_BACK_AGAIN);
             alreadySeen->at(nodeId) = true;
+        }
+    }
+}
+
+class ValueSumVisitor : public GRGVisitor {
+public:
+    explicit ValueSumVisitor(std::vector<double>& nodeValues)
+        : m_nodeValues(nodeValues) {}
+
+    bool visit(const grgl::GRGPtr& grg,
+               const grgl::NodeID nodeId,
+               const grgl::TraversalDirection direction,
+               const grgl::DfsPass dfsPass) override {
+        if (dfsPass != grgl::DfsPass::DFS_PASS_THERE) {
+            double transitiveValue = 0.0;
+            if (direction == DIRECTION_DOWN) {
+                for (const auto& child : grg->getDownEdges(nodeId)) {
+                    transitiveValue += m_nodeValues[child];
+                }
+            } else {
+                for (const auto& parent : grg->getUpEdges(nodeId)) {
+                    transitiveValue += m_nodeValues[parent];
+                }
+            }
+            m_nodeValues[nodeId] += transitiveValue;
+        }
+        return true;
+    }
+
+private:
+    std::vector<double>& m_nodeValues;
+};
+
+void GRG::dotProduct(const double* inputData,
+                     size_t inputLength,
+                     TraversalDirection direction,
+                     double* outputData,
+                     size_t outputLength) {
+    if (direction == DIRECTION_DOWN) {
+        if (inputLength != numMutations()) {
+            throw ApiMisuseFailure("Input vector is not size M (numMutations())");
+        }
+        if (outputLength != numSamples()) {
+            throw ApiMisuseFailure("Output vector is not size N (numSamples())");
+        }
+        std::vector<double> nodeValues(numNodes());
+        for (const auto& nodeIdAndMutId : this->getNodeMutationPairs()) {
+            const NodeID& nodeId = nodeIdAndMutId.first;
+            const MutationId& mutId = nodeIdAndMutId.second;
+            assert(mutId < inputLength);
+            if (nodeId != INVALID_NODE_ID) {
+                nodeValues[nodeId] += inputData[mutId];
+            }
+        }
+        if (this->nodesAreOrdered()) {
+            for (NodeID i = numNodes(); i > 0; i--) {
+                const NodeID nodeId = i - 1;
+                double value = 0.0;
+                for (NodeID parentId : this->getUpEdges(nodeId)) {
+                    value += nodeValues[parentId];
+                }
+                nodeValues[nodeId] += value;
+            }
+        } else {
+            ValueSumVisitor valueSumVisitor(nodeValues);
+            this->visitDfs(valueSumVisitor, DIRECTION_UP, getSampleNodes());
+        }
+        for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
+            assert(sampleId < outputLength);
+            outputData[sampleId] = nodeValues[sampleId];
+        }
+    } else {
+        if (inputLength != numSamples()) {
+            throw ApiMisuseFailure("Input vector is not size N (numSamples())");
+        }
+        if (outputLength != numMutations()) {
+            throw ApiMisuseFailure("Output vector is not size M (numMutations())");
+        }
+        std::vector<double> nodeValues(numNodes());
+        for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
+            assert(sampleId < inputLength);
+            nodeValues[sampleId] = inputData[sampleId];
+        }
+        if (this->nodesAreOrdered()) {
+            for (NodeID nodeId = numSamples(); nodeId < numNodes(); nodeId++) {
+                double value = 0.0;
+                for (NodeID childId : this->getDownEdges(nodeId)) {
+                    value += nodeValues[childId];
+                }
+                nodeValues[nodeId] += value;
+            }
+        } else {
+            ValueSumVisitor valueSumVisitor(nodeValues);
+            this->visitDfs(valueSumVisitor, DIRECTION_DOWN, getRootNodes());
+        }
+        for (const auto& nodeIdAndMutId : this->getNodeMutationPairs()) {
+            const NodeID& nodeId = nodeIdAndMutId.first;
+            const MutationId& mutId = nodeIdAndMutId.second;
+            assert(mutId < outputLength);
+            if (nodeId != INVALID_NODE_ID) {
+                outputData[mutId] += nodeValues[nodeId];
+            }
         }
     }
 }

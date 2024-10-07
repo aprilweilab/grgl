@@ -14,6 +14,7 @@
  * should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+#include <pybind11/numpy.h>
 #include <pybind11/operators.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -27,6 +28,20 @@
 #include "grgl/visitor.h"
 
 namespace py = pybind11;
+
+#include <iostream>
+
+py::array_t<double> dotProduct(grgl::GRGPtr& grg, py::array_t<double> input, grgl::TraversalDirection direction) {
+    py::buffer_info buffer = input.request();
+
+    const size_t outSize =
+        (direction == grgl::TraversalDirection::DIRECTION_DOWN) ? grg->numSamples() : grg->numMutations();
+    py::array_t<double> result(outSize);
+    py::buffer_info resultBuf = result.request();
+    memset(resultBuf.ptr, 0, outSize * sizeof(double));
+    grg->dotProduct((const double*)buffer.ptr, (size_t)buffer.size, direction, (double*)resultBuf.ptr, (size_t)outSize);
+    return std::move(result);
+}
 
 class NodeNumberingIterator : public grgl::GRGVisitor {
 public:
@@ -454,6 +469,34 @@ PYBIND11_MODULE(_grgl, m) {
         :type seed_list: List[int]
         :return: The ordered list of NodeIDs.
         :rtype: List[int]
+    )^");
+
+    m.def("dot_product", &dotProduct, py::arg("grg"), py::arg("input"), py::arg("direction"), R"^(
+        Compute one of two possible dot products across the entire graph. The input vector :math:`V` can be
+        either :math:`1 \times N` (:math:`N` is number of samples) or :math:`1 \times M` (:math:`M` is number of
+        mutations). The given direction determines which input vector is expected. Let :math:`X` be the
+        :math:`N \times M` genotype matrix.
+        For an :math:`1 \times N` input :math:`V`, the product performed is :math:`V \cdot X` which gives a
+        :math:`1 \times M` result. I.e., the input vector is a value per sample and the output vector is
+        a value per mutation.
+        For an :math:`1 \times M` input :math:`V`, the product performed is :math:`V \cdot X^T` which gives a
+        :math:`1 \times N` result. I.e., the input vector is a value per mutation and the output vector is
+        a value per sample.
+
+        Dot product in the graph works by seeding the input nodes (samples or mutations) with the corresponding
+        values from the input vector and then traversing the graph in the relevant direction (up or down). The
+        ancestor/descendant values are summed at each node, until the terminal nodes (mutations or samples) are
+        reached.
+
+        :param grg: The GRG to perform the computation against.
+        :type grg: pygrgl.GRG or pygrgl.MutableGRG
+        :param input: The numpy array of input values :math:`V`.
+        :type seed_list: numpy.array
+        :param direction: The direction to traverse, up (input is per sample) or down (input is per mutation).
+        :type direction: pygrgl.TraversalDirection
+        :return: The numpy array of output values.
+        :rtype: numpy.array
+
     )^");
 
     m.attr("INVALID_NODE") = INVALID_NODE_ID;
