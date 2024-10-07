@@ -4,7 +4,7 @@ Python API Documentation
 ------------------------
 
 .. automodule:: pygrgl
-    :members: grg_to_cyto_json, load_mutable_grg, load_immutable_grg, save_grg, grg_from_trees, get_bfs_order, get_dfs_order, get_topo_order, INVALID_NODE
+    :members: grg_to_cyto_json, load_mutable_grg, load_immutable_grg, save_grg, grg_from_trees, get_bfs_order, get_dfs_order, get_topo_order, dot_product, INVALID_NODE
 
 .. automodule:: pygrgl.display
     :members: grg_to_cyto
