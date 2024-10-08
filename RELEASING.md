@@ -16,29 +16,28 @@ Steps:
 
 ## Packaging for PyPi
 
-Build the package distributions for PyPi. We build a source dist and then Linux binary distributions for recent Python versions.
+Build the package distributions for PyPi. We build a source dist and then Linux binary distributions for recent Python versions. The container is based on the [manylinux](https://github.com/pypa/manylinux) project.
 
 ```
 # Remove dist/ to start fresh
 rm -rf dist
 
-# Build the source distribution (for MacOS, mostly)
-python setup.py sdist
+# Build the container based on the manylinux project
+docker build . -f Dockerfile.pkg -t grgl_pkg:latest
 
-# Build the Python3.8 and Python3.9 packages on an older Docker image
-docker build . -f Dockerfile.pkg1 -t grgl_pkg1:latest
-docker run -v $PWD/dist:/dist -it grgl_pkg1:latest bash -c "cp /output/*.whl /dist/"
-
-# Build the Python3.10+ packages on a newer Docker image
-docker build . -f Dockerfile.pkg2 -t grgl_pkg2:latest
-docker run -v $PWD/dist:/dist -it grgl_pkg2:latest bash -c "cp /output/*.whl /dist/"
+# Run the packaging inside the container
+docker run -v $PWD:/io -it grgl_pkg:latest /io/package.sh
 
 # Fix file permissions from Docker
-sudo chown ddehaas dist/*.whl
-sudo chgrp ddehaas dist/*.whl
+sudo chown -R ddehaas dist/
+sudo chgrp -R ddehaas dist/
+
+# Copy the source wheel to wheelhouse
+cp ./dist/*.tar.gz ./dist/wheelhouse/
+
 ```
 
-To upload to PyPi, ensure that your dist directory is clean (only has the packages you _just_ built), then upload via twine:
+To upload to PyPi:
 ```
-python3 -m twine upload dist/*
+python3 -m twine upload dist/wheelhouse/*
 ```
