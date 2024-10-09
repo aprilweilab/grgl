@@ -11,7 +11,7 @@ def which(exe: str, required=False) -> Optional[str]:
     except subprocess.CalledProcessError:
         result = None
     if result is None:
-        for p in sys.path:
+        for p in [*sys.path, os.getcwd()]:
             p = os.path.join(p, exe)
             if os.path.isfile(p):
                 result = p
