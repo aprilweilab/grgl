@@ -12,6 +12,15 @@ source /path/to/MyEnv/bin/activate
 GRGL_COPY_BINS=1 pip install -v -e .
 ```
 
+Other environment variables that control the Python-based build are:
+* `GRGL_GSL=1`: Turns on GNU scientific library, which is used to optionally compute p-values for GWAS
+* `GRGL_DEBUG=1`: Builds the unoptimized version with debug symbols.
+* `GRGL_BGEN=1`: Turns on BGEN input support for GRG construction
+
+## Utilities
+
+There are two utilities `gconverter` and `gindexer` that are built when performing the build either via CMake or python. These utilities can be run with `--help` to see options; they are used for converting files (.vcf, .vcf.gz, and BGEN) to IGD and for indexing BGEN files (which is required before providing a BGEN input to GRG construction).
+
 ## Testing
 
 * C++ unit tests are built as `grgl_test`, and running that executable will tell you the status of those tests.
