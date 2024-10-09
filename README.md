@@ -6,18 +6,28 @@
 GRGL can be used as a library in both C++ and Python. Support is currently limited to Linux and MacOS.
 It contains both an API [(see docs)](https://grgl.readthedocs.io/) and a [set of command-line tools](https://github.com/aprilweilab/grgl/blob/main/GettingStarted.md).
 
-## Building (non-Python)
+## Installing from pip
+
+If you just want to use the tools (e.g., constructing GRG or converting tree-sequence to GRG) and the Python API then you can install via pip (from [PyPi](http://pypi.org/project/pygrgl/)).
+
+```
+pip install pygrgl
+```
+
+This will use prebuilt packages for most modern Linux situations, and will build from source for MacOS. In order to build from source it will require CMake (at least v3.14), zlib development headers, and a clang or GCC compiler that supports C++11.
+
+## Building (C++ only)
 
 Make sure you clone with `git clone --recursive`!
 
-If you only intend to use GRGL from C++, or use the command-line tools, you can just build it via `CMake`:
+If you only intend to use GRGL from C++, you can just build it via `CMake`:
 ```
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j4
 ```
 
-See below to install the libraries and tools to your system. It is recommended to install it to a custom location (prefix) since removing packages installed via `make install` is a pain otherwise. Example:
+See below to install the libraries to your system. It is recommended to install it to a custom location (prefix) since removing packages installed via `make install` is a pain otherwise. Example:
 ```
 mkdir /path/to/grgl_installation/
 mkdir build && cd build
@@ -39,18 +49,7 @@ python setup.py bdist_wheel               # Compiles C++, builds a wheel in the 
 pip install --force-reinstall dist/*.whl  # Install from wheel
 ```
 
-Or for development you can install the folder with pip:
-```
-python3 -m venv /path/to/MyEnv
-source /path/to/MyEnv/bin/activate
-GRGL_COPY_BINS=1 pip install -v -e .
-```
-
-BGEN support is disabled by default. If you want to enable it:
-* `GRGL_BGEN=1 python setup.py bdist_wheel `
-* or `GRGL_BGEN=1 GRGL_COPY_BINS=1 pip install -v -e .`
-
-Build and installation should take at most a few minutes on the typical computer.
+Build and installation should take at most a few minutes on the typical computer. For more details on build options, see DEVELOPING.md.
 
 ## Building (Docker)
 
