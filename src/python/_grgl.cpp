@@ -239,8 +239,18 @@ PYBIND11_MODULE(_grgl, m) {
                 Get a list of pairs (NodeID, MutationID). Each Mutation typically
                 is associated to a single Node, but rarely it can have more than one
                 Node, in which case it will show up in more than one pair.
+                Results are ordered by NodeID, ascending.
 
                 :return: A list of pairs of NodeID and MutationID.
+                :rtype: List[Tuple[int, int]]
+            )^")
+        .def("get_mutation_node_pairs", &grgl::GRG::getMutationsToNodeOrdered, R"^(
+                Get a list of pairs (MutationID, NodeID). Each Mutation typically
+                is associated to a single Node, but rarely it can have more than one
+                Node, in which case it will show up in more than one pair.
+                Results are ordered by MutationID, ascending.
+
+                :return: A list of pairs of MutationID and NodeID.
                 :rtype: List[Tuple[int, int]]
             )^")
         .def("get_mutations_for_node", &grgl::GRG::getMutationsForNode, py::arg("node_id"), R"^(
