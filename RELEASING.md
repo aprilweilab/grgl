@@ -11,7 +11,6 @@ Bug fixes and minor non-breaking changes do not require a version number bump. Y
 
 Steps:
 * Update `include/grgl/version.h`
-* Update `setup.py` to have the new version
 * After merging to `main` and ensuring all CI passes (and testing prior to that), run the steps for PyPi below
 
 ## Packaging for PyPi
@@ -23,7 +22,7 @@ Build the package distributions for PyPi. We build a source dist and then Linux 
 rm -rf dist
 
 # Build the container based on the manylinux project
-docker build . -f Dockerfile.pkg -t grgl_pkg:latest
+docker build . -f Dockerfile.package -t grgl_pkg:latest
 
 # Run the packaging inside the container
 docker run -v $PWD:/io -it grgl_pkg:latest /io/package.sh
