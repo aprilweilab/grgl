@@ -80,7 +80,7 @@ Load a GRG and emit some simple statistics about the GRG itself:
 grg process stats my_arg_data.grg
 ```
 
-To construct a GRG from a VCF file, use the `grg_from_vcf.py` script (after building grgl):
+To construct a GRG from a VCF file, use the `grg construct` command:
 ```
 grg construct --parts 20 -j 1 path/to/foo.vcf
 ```
