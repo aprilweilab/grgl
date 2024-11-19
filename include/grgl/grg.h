@@ -122,6 +122,18 @@ public:
     }
 
     /**
+     * Get the specified base-pair range this GRG covers as a pair {first, last+1}. Unlike getBPRange,
+     * this function just returns a pair of values that were specified by a tool/user at some point.
+     */
+    std::pair<BpPosition, BpPosition> getSpecifiedBPRange() const { return m_specifiedRange; }
+
+    /**
+     * Set the specified base-pair range this GRG covers as a pair {first, last+1}, i.e. the lower value
+     * is inclusive and the higher value is exclusive.
+     */
+    void setSpecifiedBPRange(std::pair<BpPosition, BpPosition> bpRange) { m_specifiedRange = bpRange; }
+
+    /**
      * Get the NodeIDList for all samples in the graph.
      */
     NodeIDList getSampleNodes() const {
@@ -291,6 +303,9 @@ protected:
     // (Optional) list of population descriptions. The position corresponds to the population
     // ID, which can be used to tag nodes.
     std::vector<std::string> m_populations;
+
+    // The range of base-pair positions covered by this GRG, according to the user/tool that created it.
+    std::pair<BpPosition, BpPosition> m_specifiedRange{};
 
     const size_t m_numSamples;
     const uint16_t m_ploidy;

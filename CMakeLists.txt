@@ -95,6 +95,7 @@ set(GRGL_CORE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/mut_iterator.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/serialize.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/ts2grg.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/windowing.cpp
   )
 
 include_directories(${CMAKE_CURRENT_LIST_DIR}/include/

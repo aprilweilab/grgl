@@ -1,6 +1,7 @@
 from .clicmd import construct
 from .clicmd import convert
 from .clicmd import process
+from .clicmd import split
 from .clicmd.common import which
 import argparse
 import subprocess
@@ -9,6 +10,7 @@ import sys
 CMD_CONVERT = "convert"
 CMD_CONSTRUCT = "construct"
 CMD_PROCESS = "process"
+CMD_SPLIT = "split"
 
 def main():
     parser = argparse.ArgumentParser()
@@ -23,6 +25,9 @@ def main():
     process_parser = subparsers.add_parser(CMD_PROCESS,
         help="Process a GRG to compute information from it.")
     process.add_options(process_parser)
+    split_parser = subparsers.add_parser(CMD_SPLIT,
+        help="Split a GRG into smaller pieces.")
+    split.add_options(split_parser)
     args = parser.parse_args()
 
     if args.version:
@@ -37,7 +42,9 @@ def main():
     elif args.command == CMD_CONSTRUCT:
         construct.from_tabular(args)
     elif args.command == CMD_PROCESS:
-        process.stat_command(args)
+        process.process_command(args)
+    elif args.command == CMD_SPLIT:
+        split.do_split(args)
     else:
         print(f"Invalid command {args.command}", file=sys.stderr)
         parser.print_help()

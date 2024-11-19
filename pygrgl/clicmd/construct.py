@@ -36,6 +36,8 @@ def add_options(subparser):
         help="Specify an output file instead of using the default name.")
     subparser.add_argument("--verbose", "-v", action="store_true",
         help="Verbose output, including timing information.")
+    subparser.add_argument("--no-merge", action="store_true",
+        help="Do not merge the resulting GRGs (so if you specified \"-p C\" there will be C GRGs).")
 
 grgl_exe = which("grgl")
 grg_merge_exe = which("grg-merge")
@@ -169,22 +171,23 @@ def from_tabular(args):
         print(f"Removing uncompressed input file {input_file} (done with it)")
         os.remove(input_file)
 
-    # Now merge them pairwise.
-    print("Merging...")
-    if args.out_file is not None:
-        final_filename = args.out_file
-    else:
-        final_filename = f"{base_name}.final.grg"
+    if not args.no_merge:
+        # Now merge them pairwise.
+        print("Merging...")
+        if args.out_file is not None:
+            final_filename = args.out_file
+        else:
+            final_filename = f"{base_name}.final.grg"
 
-    command = [grg_merge_exe, "-s", final_filename, ]
-    command.extend(map(lambda part: out_filename(input_file, part), range(0, args.parts)))
-    print(command)
-    final_merge_time = time_call(command)
-    log_time("FINAL_MERGE_TIME", final_merge_time, args.verbose)
+        command = [grg_merge_exe, "-s", final_filename, ]
+        command.extend(map(lambda part: out_filename(input_file, part), range(0, args.parts)))
+        print(command)
+        final_merge_time = time_call(command)
+        log_time("FINAL_MERGE_TIME", final_merge_time, args.verbose)
 
-    if not args.no_file_cleanup:
-        for part in range(0, args.parts):
-            os.remove(out_filename(input_file, part))
+        if not args.no_file_cleanup:
+            for part in range(0, args.parts):
+                os.remove(out_filename(input_file, part))
 
 def main():
     parser = argparse.ArgumentParser(description="Construct a GRG from a VCF file.")

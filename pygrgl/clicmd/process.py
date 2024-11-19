@@ -17,7 +17,7 @@ def add_options(subparser):
         help="The operation to perform on the GRG file")
     subparser.add_argument("grg_file", help="The input GRG file")
 
-def stat_command(arguments):
+def process_command(arguments):
     command_args = [GRGP, arguments.grg_file]
     if arguments.operation == Statistic.GRAPH_STATS:
         command_args.append("-s")

@@ -26,6 +26,7 @@
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
 #include "grgl/mut_iterator.h"
+#include "grgl/mutation.h"
 #include "hap_index.h"
 #include "similarity/bf_hash.h"
 #include "util.h"
@@ -306,6 +307,8 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
     }
     std::cout << "Adding GRG shape from genotype hashes..." << std::endl;
     addGrgShapeFromHashing(result, hashIndex, result->getSampleNodes(), tripletLevels);
+    const auto actualRange = mutationIterator->getBpRange();
+    result->setSpecifiedBPRange({(BpPosition)actualRange.start(), (BpPosition)actualRange.end()});
     std::cout << "Done" << std::endl;
 
     return result;

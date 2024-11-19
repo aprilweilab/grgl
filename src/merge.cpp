@@ -73,7 +73,10 @@ int main(int argc, char** argv) {
     }
 
     std::ofstream outStream(*outfile, std::ios::binary);
-    grgl::writeGrg(grg1, outStream, true, !noSimplify);
+    auto counts = grgl::writeGrg(grg1, outStream, true, !noSimplify);
+    std::cout << "Wrote simplified GRG with:" << std::endl;
+    std::cout << "  Nodes: " << counts.first << std::endl;
+    std::cout << "  Edges: " << counts.second << std::endl;
     std::cout << "Wrote GRG to " << *outfile << std::endl;
     return 0;
 }
