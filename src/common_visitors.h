@@ -6,9 +6,9 @@
 #include "grgl/visitor.h"
 #include "util.h"
 
+#include <algorithm>
 #include <string>
 #include <vector>
-#include <algorithm>
 
 namespace grgl {
 
@@ -23,9 +23,7 @@ class TopoSampleSetVisitor : public GRGVisitor {
 public:
     TopoSampleSetVisitor() = default;
 
-    virtual void processNode(const grgl::GRGPtr& grg,
-                             const NodeIDList& samplesBeneath,
-                             NodeID nodeId) = 0;
+    virtual void processNode(const grgl::GRGPtr& grg, const NodeIDList& samplesBeneath, NodeID nodeId) = 0;
 
     bool visit(const grgl::GRGPtr& grg,
                const grgl::NodeID nodeId,
@@ -73,9 +71,8 @@ public:
         return true;
     }
 
-    void clearSampleSets() {
-        m_sampleLists.clear();
-    }
+    void clearSampleSets() { m_sampleLists.clear(); }
+
 private:
 #ifdef CLEANUP_SAMPLE_SETS
     std::vector<NodeIDSizeT> m_refCounts;
@@ -83,6 +80,6 @@ private:
     std::vector<NodeIDList> m_sampleLists;
 };
 
-}
+} // namespace grgl
 
 #endif /* GRG_COMMON_VISITORS_H */
