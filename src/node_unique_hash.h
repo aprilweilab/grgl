@@ -3,8 +3,8 @@
 
 #include "grgl/grgnode.h"
 
-#include <unordered_map>
 #include <string>
+#include <unordered_map>
 
 #include "picohash.h"
 
@@ -14,9 +14,7 @@ using HashDigest = std::string;
 using DigestToNode = std::unordered_map<HashDigest, NodeID>;
 
 template <typename OrderedContainer>
-inline HashDigest hashNodeSet(
-        const OrderedContainer& nodeIdSet,
-        size_t length = PICOHASH_MD5_DIGEST_LENGTH) {
+inline HashDigest hashNodeSet(const OrderedContainer& nodeIdSet, size_t length = PICOHASH_MD5_DIGEST_LENGTH) {
     HashDigest result;
     result.resize(PICOHASH_MD5_DIGEST_LENGTH);
     picohash_ctx_t hashContext;
@@ -31,6 +29,6 @@ inline HashDigest hashNodeSet(
     return std::move(result);
 }
 
-}
+} // namespace grgl
 
 #endif

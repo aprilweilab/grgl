@@ -1,20 +1,20 @@
 #ifndef GRG_HAP_INDEX_H
 #define GRG_HAP_INDEX_H
 
-#include <vector>
-#include <unordered_map>
-#include <cstdint>
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <list>
+#include <unordered_map>
+#include <vector>
 
 #include "grgl/common.h"
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
-#include "util.h"
-#include "lean_bk_tree.h"
 #include "hap_helpers.h"
+#include "lean_bk_tree.h"
+#include "util.h"
 
 namespace grgl {
 
@@ -26,8 +26,7 @@ using NodeToHapVect = std::vector<HaplotypeVector>;
 class HaplotypeIndex {
 public:
     explicit HaplotypeIndex(std::function<size_t(const NodeID&, const NodeID&)> distFunc)
-        : m_bkTree(std::move(distFunc)) {
-    }
+        : m_bkTree(std::move(distFunc)) {}
 
     virtual ~HaplotypeIndex() = default;
 
@@ -56,12 +55,13 @@ public:
         std::cout << " -- Index Stats --" << std::endl;
         std::cout << "  -> Comparisons: " << m_comparisons << std::endl;
     }
+
 private:
     LeanBKTree<NodeID> m_bkTree;
     // Keep track of how many comparisons we do.
     size_t m_comparisons{};
 };
 
-}
+} // namespace grgl
 
 #endif /* GRG_HAP_INDEX_H */

@@ -1,9 +1,9 @@
 #ifndef GRG_VARINT_H
 #define GRG_VARINT_H
 
-#include <limits>
-#include <iostream>
 #include <cstdint>
+#include <iostream>
+#include <limits>
 
 namespace grgl {
 
@@ -20,52 +20,45 @@ inline uint64_t readVarInt(std::istream& inStream) {
     if (controlByte <= 240) {
         return static_cast<uint64_t>(controlByte);
     } else if (controlByte <= 248) {
-        return 240 + (256 * (static_cast<uint64_t>(controlByte) - 241))
-            + static_cast<uint64_t>(readByte(inStream));
+        return 240 + (256 * (static_cast<uint64_t>(controlByte) - 241)) + static_cast<uint64_t>(readByte(inStream));
     } else {
         switch (controlByte) {
-            case 249:
-                return 2288 + (256 * (static_cast<uint64_t>(readByte(inStream))))
-                    + static_cast<uint64_t>(readByte(inStream));
-            case 250:
-                return static_cast<uint64_t>(readByte(inStream))
-                    + (static_cast<uint64_t>(readByte(inStream)) << 8U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 16U);
-            case 251:
-                return static_cast<uint64_t>(readByte(inStream))
-                    + (static_cast<uint64_t>(readByte(inStream)) << 8U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 16U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 24U);
-            case 252:
-                return static_cast<uint64_t>(readByte(inStream))
-                    + (static_cast<uint64_t>(readByte(inStream)) << 8U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 16U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 24U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 32U);
-            case 253:
-                return static_cast<uint64_t>(readByte(inStream))
-                    + (static_cast<uint64_t>(readByte(inStream)) << 8U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 16U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 24U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 32U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 40U);
-            case 254:
-                return static_cast<uint64_t>(readByte(inStream))
-                    + (static_cast<uint64_t>(readByte(inStream)) << 8U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 16U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 24U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 32U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 40U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 48U);
-            default:
-                return static_cast<uint64_t>(readByte(inStream))
-                    + (static_cast<uint64_t>(readByte(inStream)) << 8U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 16U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 24U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 32U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 40U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 48U)
-                    + (static_cast<uint64_t>(readByte(inStream)) << 56U);
+        case 249:
+            return 2288 + (256 * (static_cast<uint64_t>(readByte(inStream)))) +
+                   static_cast<uint64_t>(readByte(inStream));
+        case 250:
+            return static_cast<uint64_t>(readByte(inStream)) + (static_cast<uint64_t>(readByte(inStream)) << 8U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 16U);
+        case 251:
+            return static_cast<uint64_t>(readByte(inStream)) + (static_cast<uint64_t>(readByte(inStream)) << 8U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 16U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 24U);
+        case 252:
+            return static_cast<uint64_t>(readByte(inStream)) + (static_cast<uint64_t>(readByte(inStream)) << 8U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 16U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 24U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 32U);
+        case 253:
+            return static_cast<uint64_t>(readByte(inStream)) + (static_cast<uint64_t>(readByte(inStream)) << 8U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 16U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 24U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 32U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 40U);
+        case 254:
+            return static_cast<uint64_t>(readByte(inStream)) + (static_cast<uint64_t>(readByte(inStream)) << 8U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 16U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 24U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 32U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 40U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 48U);
+        default:
+            return static_cast<uint64_t>(readByte(inStream)) + (static_cast<uint64_t>(readByte(inStream)) << 8U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 16U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 24U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 32U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 40U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 48U) +
+                   (static_cast<uint64_t>(readByte(inStream)) << 56U);
         }
     }
 }
@@ -84,12 +77,12 @@ inline void writeVarInt(uint64_t intValue, std::ostream& outStream) {
     if (intValue <= case1) {
         writeByte(static_cast<uint8_t>(intValue), outStream);
     } else if (intValue <= case2) {
-        writeByte(static_cast<uint8_t>((intValue-case1) / 256) + case1 + 1, outStream);
-        writeByte(static_cast<uint8_t>((intValue-case1) % 256), outStream);
+        writeByte(static_cast<uint8_t>((intValue - case1) / 256) + case1 + 1, outStream);
+        writeByte(static_cast<uint8_t>((intValue - case1) % 256), outStream);
     } else if (intValue <= case3) {
         writeByte(static_cast<uint8_t>(249), outStream);
-        writeByte(static_cast<uint8_t>((intValue - (case2+1)) / 256), outStream);
-        writeByte(static_cast<uint8_t>((intValue - (case2+1)) % 256), outStream);
+        writeByte(static_cast<uint8_t>((intValue - (case2 + 1)) / 256), outStream);
+        writeByte(static_cast<uint8_t>((intValue - (case2 + 1)) % 256), outStream);
     } else if (intValue <= std::numeric_limits<uint16_t>::max()) {
         writeByte(static_cast<uint8_t>(250), outStream);
         writeByte(static_cast<uint8_t>(intValue), outStream);
@@ -138,6 +131,6 @@ inline void writeVarInt(uint64_t intValue, std::ostream& outStream) {
     }
 }
 
-}
+} // namespace grgl
 
 #endif /* GRG_VARINT_H */

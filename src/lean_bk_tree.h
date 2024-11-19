@@ -11,16 +11,13 @@
 
 namespace grgl {
 
-template <typename ElementType>
-class LeanBKTree;
+template <typename ElementType> class LeanBKTree;
 
-template <typename ElementType>
-class LeanBKTreeNode {
+template <typename ElementType> class LeanBKTreeNode {
 public:
     explicit LeanBKTreeNode(const ElementType& element)
-        : m_elements({element})
-        , m_isDeleted(false) {
-    }
+        : m_elements({element}),
+          m_isDeleted(false) {}
 
     void addElement(ElementType element) {
         if (m_isDeleted) {
@@ -31,13 +28,13 @@ public:
         }
     }
 
-    template <typename Container>
-    void moveElements(Container& result) {
+    template <typename Container> void moveElements(Container& result) {
         for (size_t i = 0; i < m_elements.size(); i++) {
             result.push_back(m_elements[i]);
         }
         m_isDeleted = true;
     }
+
 private:
     using ChildPair = std::pair<size_t, std::shared_ptr<LeanBKTreeNode<ElementType>>>;
 
@@ -51,17 +48,14 @@ private:
     friend class LeanBKTree<ElementType>;
 };
 
-template <typename ElementType>
-class LeanBKTree {
+template <typename ElementType> class LeanBKTree {
 public:
     using NodePointer = std::shared_ptr<LeanBKTreeNode<ElementType>>;
 
     explicit LeanBKTree(std::function<size_t(const ElementType&, const ElementType&)> distFunc)
-        : m_distFunc(distFunc) {
-    }
+        : m_distFunc(distFunc) {}
 
-    NodePointer insert(const ElementType& element,
-                       size_t& comparisons) {
+    NodePointer insert(const ElementType& element, size_t& comparisons) {
         if (!m_rootNode) {
             m_rootNode = std::make_shared<LeanBKTreeNode<ElementType>>(element);
             return m_rootNode;
@@ -90,10 +84,8 @@ public:
         abort();
     }
 
-    std::vector<NodePointer> lookup(const ElementType& queryElement,
-                                    size_t& nearestDistance,
-                                    size_t& comparisons,
-                                    bool collectAll = true) {
+    std::vector<NodePointer>
+    lookup(const ElementType& queryElement, size_t& nearestDistance, size_t& comparisons, bool collectAll = true) {
         size_t distBest = std::numeric_limits<size_t>::max();
         if (!m_rootNode) {
             nearestDistance = distBest;
@@ -131,11 +123,12 @@ public:
         nearestDistance = distBest;
         return results;
     }
+
 private:
     NodePointer m_rootNode{};
     std::function<size_t(const ElementType&, const ElementType&)> m_distFunc;
 };
 
-}
+} // namespace grgl
 
 #endif /* GRGL_LEAN_BK_TREE_H */

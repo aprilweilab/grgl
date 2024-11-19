@@ -27,6 +27,6 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
                                         const std::map<std::string, std::string>& indivIdToPop,
                                         size_t tripletLevels = 0);
 
-}
+} // namespace grgl
 
 #endif /* GRG_BUILD_SHAPE_H */

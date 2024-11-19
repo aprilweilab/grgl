@@ -37,10 +37,7 @@ inline uint32_t countBits(const HaplotypeVector& vect) {
     return count;
 }
 
-inline HaplotypeVector bitwiseIntersect(
-        const HaplotypeVector& vect1,
-        const HaplotypeVector& vect2,
-        size_t& bitsSet) {
+inline HaplotypeVector bitwiseIntersect(const HaplotypeVector& vect1, const HaplotypeVector& vect2, size_t& bitsSet) {
     bitsSet = 0;
     HaplotypeVector result = vect1;
     const size_t minSize = std::min(result.size(), vect2.size());
@@ -65,13 +62,11 @@ inline size_t bitwiseSubtract(HaplotypeVector& first, const HaplotypeVector& sec
     return after;
 }
 
-inline size_t bitwiseHamming(const HaplotypeVector& hash1,
-                             const HaplotypeVector& hash2) {
+inline size_t bitwiseHamming(const HaplotypeVector& hash1, const HaplotypeVector& hash2) {
     size_t dist = 0;
     release_assert(hash1.size() == hash2.size());
     for (size_t i = 0; i < hash1.size(); i++) {
-        static_assert(sizeof(HapVectorT) == 4,
-                      "Optimization for counting set bits assumes 32-bit ints");
+        static_assert(sizeof(HapVectorT) == 4, "Optimization for counting set bits assumes 32-bit ints");
         const uint32_t xorValue = hash1[i] ^ hash2[i];
         // Fun times: https://graphics.stanford.edu/~seander/bithacks.htm
         uint32_t numBits = xorValue - ((xorValue >> 1U) & 0x55555555U);
@@ -88,10 +83,8 @@ inline void setBit(HaplotypeVector& vect, const size_t bitIndex) {
     vect[element] |= mask;
 }
 
-inline size_t bloomFilterCapacity(size_t numBits) {
-    return (numBits + (sizeof(HapVectorT)-1)) / sizeof(HapVectorT);
-}
+inline size_t bloomFilterCapacity(size_t numBits) { return (numBits + (sizeof(HapVectorT) - 1)) / sizeof(HapVectorT); }
 
-}
+} // namespace grgl
 
 #endif /* GRGL_HAP_HELPERS_H */

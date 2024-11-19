@@ -228,7 +228,7 @@ inline std::string removeExt(const std::string& pathname) {
 inline std::string basename(const std::string& pathname) {
     size_t pos = pathname.find_last_of('/');
     if (pos != std::string::npos) {
-        return std::move(pathname.substr(pos+1));
+        return std::move(pathname.substr(pos + 1));
     }
     return pathname;
 }
