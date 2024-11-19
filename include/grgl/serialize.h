@@ -17,6 +17,8 @@
 #ifndef GRG_SERIALIZE_H
 #define GRG_SERIALIZE_H
 
+#include "grgl/grgnode.h"
+#include "grgl/visitor.h"
 #include <iosfwd>
 #include <memory>
 #include <stdexcept>
@@ -38,6 +40,26 @@ using GRGPtr = std::shared_ptr<GRG>;
 using MutableGRGPtr = std::shared_ptr<MutableGRG>;
 
 /**
+ * Simple class to encapsulate the filtering of a GRG to shrink it.
+ */
+class GRGOutputFilter {
+public:
+    GRGOutputFilter()
+        : direction(TraversalDirection::DIRECTION_UP),
+          seedList() {}
+
+    GRGOutputFilter(TraversalDirection dir, const NodeIDList& seeds)
+        : direction(dir),
+          seedList(seeds) {}
+
+    bool isSpecified() const { return !seedList.empty(); }
+
+    TraversalDirection direction;
+    NodeIDList seedList;
+    std::pair<BpPosition, BpPosition> bpRange;
+};
+
+/**
  * Serialize the GRG to the given outstream.
  *
  * @param[in] grg The GRG to be serialized.
@@ -46,7 +68,11 @@ using MutableGRGPtr = std::shared_ptr<MutableGRG>;
  *      integer encoding in the serialization. The only reason to do this is if you are using another
  *      library/program to read GRG files and it does not support variable integer encoding.
  */
-void writeGrg(const GRGPtr& grg, std::ostream& out, bool useVarInt = true, bool allowSimplify = true);
+std::pair<NodeIDSizeT, size_t>
+writeGrg(const GRGPtr& grg, std::ostream& out, bool useVarInt = true, bool allowSimplify = true);
+
+std::pair<NodeIDSizeT, size_t> simplifyAndSerialize(
+    const GRGPtr& grg, std::ostream& outStream, const GRGOutputFilter& filter, bool useVarInt, bool allowSimplify);
 
 /**
  * Deserialize the GRG from the given input stream.

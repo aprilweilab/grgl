@@ -18,6 +18,7 @@
 #include <chrono>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <tskit.h>
 
 #include "build_shape.h"
@@ -27,6 +28,8 @@
 #include "grgl/map_mutations.h"
 #include "grgl/serialize.h"
 #include "grgl/ts2grg.h"
+#include "grgl/windowing.h"
+#include "pooled_jobs.h"
 #include "tskit_util.h"
 #include "util.h"
 
@@ -113,6 +116,18 @@ int main(int argc, char** argv) {
                                                "Format: \"filename:fieldname\". Read population ids from the given "
                                                "tab-separate file, using the given fieldname.",
                                                {"population-ids"});
+    args::ValueFlag<std::string> windowedSplit(
+        parser,
+        "windowedSplit",
+        "Split graph into this many GRGs with the given number of BP or cM per GRG. Argument is either BP or cM "
+        "(integer/double), prefixed by a hapmap-style recombination map filename (e.g. \"filename:integer\")"
+        " when the value is cM. Creates a directory <infile>.split/ and puts all the resulting GRGs there.",
+        {"split"});
+    args::ValueFlag<size_t> jobsArg(
+        parser,
+        "jobs",
+        "Use this many threads for the given task. Currently only applies to the --split command",
+        {'j', "jobs"});
     try {
         parser.ParseCLI(argc, argv);
     } catch (args::Help&) {
@@ -250,8 +265,78 @@ int main(int argc, char** argv) {
 
     if (outfile) {
         START_TIMING_OPERATION();
-        saveGRG(theGRG, *outfile, !noSimplify);
+        auto counts = saveGRG(theGRG, *outfile, !noSimplify);
+        std::cout << "Wrote simplified GRG with:" << std::endl;
+        std::cout << "  Nodes: " << counts.first << std::endl;
+        std::cout << "  Edges: " << counts.second << std::endl;
+
         EMIT_TIMING_MESSAGE("Wrote GRG to " << *outfile << " in ");
+    }
+
+    if (windowedSplit) {
+        std::stringstream splitOutPrefix;
+        splitOutPrefix << *infile << ".split";
+        if (pathExists(splitOutPrefix.str())) {
+            std::cerr << "Split output directory " << splitOutPrefix.str() << " already exists; remove and try again"
+                      << std::endl;
+            return 2;
+        }
+        makeDir(splitOutPrefix.str());
+        splitOutPrefix << "/" << removeExt(basename(*infile)) << ".split";
+
+        START_TIMING_OPERATION();
+        std::string mapFile;
+        const auto tokens = split(*windowedSplit, ':');
+        if (tokens.size() == 2) {
+            mapFile = tokens[0];
+        } else if (tokens.size() != 1) {
+            std::cerr << "Invalid split argument: \"" << *windowedSplit << "\"" << std::endl;
+            return 2;
+        }
+        double perWindowAmt = 0;
+        if (!parseExactDouble(tokens[tokens.size() - 1], perWindowAmt)) {
+            std::cerr << "Invalid split argument: \"" << *windowedSplit << "\"" << std::endl;
+            return 2;
+        }
+
+        const size_t jobs = jobsArg ? *jobsArg : 1;
+        const size_t overlap = 1; // TODO: add support for overlapping windows.
+        grgl::WindowList windows;
+        if (mapFile.empty()) {
+            windows = grgl::windowByBP(theGRG->getBPRange(), (size_t)perWindowAmt, 1);
+        } else {
+            windows = grgl::windowByCM(theGRG->getBPRange(), mapFile, perWindowAmt, 1);
+        }
+
+        // Worker pool for splitting the GRG.
+        class SplitJobs : public grgl::PooledJobs<grgl::Window> {
+        public:
+            explicit SplitJobs(grgl::GRGPtr grg, std::string filenamePrefix)
+                : m_grg(std::move(grg)),
+                  m_filenamePrefix(std::move(filenamePrefix)) {}
+
+        protected:
+            void processItem(grgl::Window window) override {
+                grgl::NodeIDList mutations = mutationsForWindow(m_grg, window);
+                std::stringstream filename;
+                filename << m_filenamePrefix << "_" << window.begin << ".grg";
+                saveGRGSubset(m_grg,
+                              filename.str(),
+                              grgl::TraversalDirection::DIRECTION_DOWN,
+                              mutations,
+                              {window.begin, window.end});
+            }
+
+            grgl::GRGPtr m_grg;
+            std::string m_filenamePrefix;
+        };
+
+        SplitJobs workers(theGRG, splitOutPrefix.str());
+        for (const auto& window : windows) {
+            workers.addWork(window);
+        }
+        workers.doAllWork(jobs);
+        EMIT_TIMING_MESSAGE("Split GRG into " << windows.size() << " parts in ");
     }
     return 0;
 }

@@ -154,6 +154,14 @@ PYBIND11_MODULE(_grgl, m) {
         .def_property_readonly("num_samples", &grgl::GRG::numSamples, R"^(
                 The number of sample nodes in the GRG.
             )^")
+        .def_property_readonly("bp_range", &grgl::GRG::getBPRange, R"^(
+                The range in base-pair positions that this GRG covers, from its list of mutations.
+            )^")
+        .def_property_readonly("specified_bp_range", &grgl::GRG::getSpecifiedBPRange, R"^(
+                The range in base-pair positions that this GRG covers, as specified during the
+                GRG construction. This range may exceed the bp_range if the GRG was constructed
+                from a range of the genome that did not immediately start/end with a mutation.
+            )^")
         .def_property_readonly("nodes_are_ordered", &grgl::GRG::nodesAreOrdered, R"^(
                 Returns true if the NodeIDs are already in topological order from
                 the bottom-up. If this is true, then the first `S` NodeIDs starting
@@ -392,8 +400,37 @@ PYBIND11_MODULE(_grgl, m) {
     m.def("save_grg", &grgl::saveGRG, py::arg("grg"), py::arg("filename"), py::arg("allow_simplify") = true, R"^(
         Save the GRG to disk, simplifying it (if possible) in the process.
 
+        :param grg: The GRG
+        :type filename: pygrgl.GRG
         :param filename: The file to save to.
         :type filename: str
+        :param allow_simplify: Set to False to disallow removing nodes/edges from the graph that do not
+            significantly contribute to the mutation-to-samples mapping.
+        :type allow_simplify: bool
+    )^");
+
+    m.def("save_subset",
+          &grgl::saveGRGSubset,
+          py::arg("grg"),
+          py::arg("filename"),
+          py::arg("direction"),
+          py::arg("seed_list"),
+          py::arg("bp_range") = std::pair<grgl::BpPosition, grgl::BpPosition>(),
+          R"^(
+        Save a subset of the GRG to disk, specified by a vector masking either mutation IDs or sample IDs.
+
+        :param grg: The GRG
+        :type filename: pygrgl.GRG
+        :param filename: The file to save to.
+        :type filename: str
+        :param direction: Downward means the seeds should be a list of MutationID that should be kept in
+            the graph. Upward means the seeds should be a list of sample NodeID that should be kept.
+        :type direction: pygrgl.TraversalDirection
+        :param seed_list: A list of MutationID or NodeID (see direction parameter).
+        :type seed_list: List[int]
+        :param bp_range: A pair of integers specifying the base-pair range that this GRG covers. This is just
+            meta-data, and does not change the filtering behavior.
+        :type bp_range: Tuple[int, int]
     )^");
 
     m.def("grg_from_trees", &grgl::grgFromTrees, py::arg("filename"), py::arg("binary_mutations") = false, R"^(

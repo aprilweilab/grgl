@@ -84,6 +84,8 @@ public:
 
     size_t numFlippedAlleles() const { return m_flippedAlleles; }
 
+    FloatRange getBpRange() const { return m_genomeRange; }
+
 protected:
     virtual void buffer_next(size_t& totalSamples) = 0;
     virtual void reset_specific() = 0;

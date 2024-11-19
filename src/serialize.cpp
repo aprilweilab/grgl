@@ -16,6 +16,7 @@
  */
 #include "grgl/serialize.h"
 #include "grg_helpers.h"
+#include "grgl/common.h"
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
@@ -26,6 +27,7 @@
 #include <iostream>
 #include <istream>
 #include <limits>
+#include <numeric>
 #include <ostream>
 #include <sstream>
 
@@ -65,7 +67,9 @@ struct GRGFileHeader {
     uint16_t ploidy;
     uint32_t unused32;
     uint64_t flags;
-    uint64_t unused[7];
+    uint64_t rangeStart; // in BP
+    uint64_t rangeEnd;   // in BP
+    uint64_t unused[5];
 };
 #pragma pack(pop)
 
@@ -124,7 +128,9 @@ public:
         bool hasChildren = false;
         const auto& children = grg->getDownEdges(nodeId);
         for (const auto childId : children) {
-            if (m_skipNode[childId]) {
+            if (!m_keepBeneath[childId]) {
+                continue;
+            } else if (INVALID_NODE_ID == m_nodeIdMap[childId]) {
                 // Coalescences may have occurred at the nodes that we are deleting. These now move to the parent.
                 parentData.numIndividualCoals += grg->getNodeData(childId).numIndividualCoals;
                 hasChildren |= getChildren(grg, childId, result, parentData);
@@ -136,22 +142,89 @@ public:
         return hasChildren;
     }
 
+    // Does the given node have mutations (after filtering)?
+    bool hasMutations(const grgl::GRGPtr& grg, const grgl::NodeID nodeId) const {
+        if (grg->nodeHasMutations(nodeId)) {
+            if (m_keepMutations.empty()) {
+                return true;
+            }
+            for (auto mutId : grg->getMutationsForNode(nodeId)) {
+                if (m_keepMutations[mutId]) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Set which samples we want to keep; if never called then we keep all samples.
+    NodeIDSizeT setKeepSamples(const grgl::GRGPtr& grg, grgl::NodeIDList sampleIDList) {
+        NodeIDSizeT numSamples = 0;
+        m_nodeIdMap.resize(sampleIDList.size());
+        NodeID prevSampleId = INVALID_NODE_ID;
+        std::sort(sampleIDList.begin(), sampleIDList.end());
+        for (const auto sampleId : sampleIDList) {
+            if (!grg->isSample(sampleId)) {
+                throw ApiMisuseFailure("Not a valid sampleId");
+            }
+            if (sampleId != prevSampleId) {
+                m_nodeIdMap[sampleId] = numSamples++;
+            }
+            prevSampleId = sampleId;
+        }
+        return numSamples;
+    }
+
+    // Set which mutations we want to keep; if never called then we keep all mutations.
+    NodeIDList setKeepMutations(const grgl::GRGPtr& grg, const grgl::NodeIDList& mutationIDList) {
+        NodeIDList keptMutNodes;
+        if (!mutationIDList.empty()) {
+            m_keepMutations.resize(grg->numMutations());
+            for (auto id : mutationIDList) {
+                m_keepMutations.at(id) = true;
+            }
+            for (const auto& nodeIdAndMutId : grg->getNodeMutationPairs()) {
+                if (m_keepMutations[nodeIdAndMutId.second]) {
+                    if (nodeIdAndMutId.first != INVALID_NODE_ID) {
+                        keptMutNodes.push_back(nodeIdAndMutId.first);
+                    }
+                }
+            }
+        } else {
+            m_keepMutations.resize(0);
+            m_keepMutations.shrink_to_fit();
+        }
+        return std::move(keptMutNodes);
+    }
+
+    bool keepMutation(const MutationId mutId) { return m_keepMutations.empty() || m_keepMutations[mutId]; }
+
     bool visit(const grgl::GRGPtr& grg,
                const grgl::NodeID nodeId,
                const grgl::TraversalDirection direction,
                const grgl::DfsPass dfsPass) override {
-        release_assert(direction == TraversalDirection::DIRECTION_DOWN);
         if (m_nodeVector.empty()) {
             m_nodeVector.resize(grg->numNodes() + 1);
-            m_nodeIdMap.resize(grg->numNodes() + 1);
             m_revIdMap.resize(grg->numNodes() + 1);
-            m_skipNode.resize(grg->numNodes());
-            m_nodeCounter = grg->numSamples();
+            m_keepBeneath.resize(grg->numNodes(), false);
+            // If nodeIdMap is not empty, we already mapped the samples. Otherwise we need to do it.
+            const bool noSamplesMapped = m_nodeIdMap.empty();
+            m_nodeCounter = m_nodeIdMap.size();
+            m_nodeIdMap.resize(grg->numNodes() + 1);
+            if (noSamplesMapped) {
+                const NodeIDSizeT numSamples = grg->numSamples();
+                m_nodeCounter = numSamples;
+                std::iota(m_nodeIdMap.begin(), m_nodeIdMap.begin() + numSamples, 0);
+            }
         }
-        if (dfsPass == DfsPass::DFS_PASS_BACK_AGAIN) {
+        if (dfsPass != DfsPass::DFS_PASS_THERE) {
+            // A flag we use to track which nodes we have visited, any unvisited nodes are filtered out during
+            // GRG serialization.
+            m_keepBeneath[nodeId] = true;
+
             if (grg->isSample(nodeId)) {
-                m_nodeIdMap[nodeId] = nodeId;
-                m_revIdMap[nodeId] = nodeId;
+                const NodeID newNodeId = m_nodeIdMap[nodeId];
+                m_revIdMap[newNodeId] = nodeId;
                 m_nodeVector[nodeId + 1] = 0;
             } else {
                 NodeIDList children;
@@ -159,7 +232,7 @@ public:
                 const auto numParents = grg->numUpEdges(nodeId);
                 const bool extraneousNode =
                     (children.size() <= 1 || numParents <= 1 || (children.size() == 2 && numParents == 2));
-                if (!m_allowSimplify || !extraneousNode || grg->nodeHasMutations(nodeId)) {
+                if (!m_allowSimplify || !extraneousNode || hasMutations(grg, nodeId)) {
                     // Save the position of the start of our edges.
                     const NodeID newNodeId = m_nodeCounter++;
                     m_nodeVector[newNodeId + 1] = m_edgeCounter;
@@ -173,8 +246,7 @@ public:
                     }
                     assert_deserialization(m_outStream.good(), "Writing GRG failed");
                 } else {
-                    m_skipNode[nodeId] = true;
-                    m_nodeIdMap[nodeId] = std::numeric_limits<NodeIDSizeT>::max();
+                    m_nodeIdMap[nodeId] = INVALID_NODE_ID;
                 }
             }
         }
@@ -217,7 +289,8 @@ private:
     std::vector<NodeIDSizeT> m_nodeIdMap;
     // Maps new NodeID to old NodeID (so the order is new NodeID acscending)
     std::vector<NodeIDSizeT> m_revIdMap;
-    std::vector<bool> m_skipNode;
+    std::vector<bool> m_keepBeneath;
+    std::vector<bool> m_keepMutations;
     size_t m_idSize;
     NodeIDSizeT m_nodeCounter{};
     NodeIDSizeT m_edgeCounter{};
@@ -250,12 +323,12 @@ static void writeMutation(const Mutation& mutation, size_t idSize, std::ostream&
     writeScalar<float>(mutation.getTime(), outStream);
 }
 
-// 0...   8...     16...      24...        32...    40...
-// <Magic><Id Size><Sample Ct><Mutation Ct><Node Ct><Edge Ct>
-void writeGrg(const GRGPtr& grg, std::ostream& outStream, bool useVarInt, bool allowSimplify) {
+std::pair<NodeIDSizeT, size_t> simplifyAndSerialize(
+    const GRGPtr& grg, std::ostream& outStream, const GRGOutputFilter& filter, bool useVarInt, bool allowSimplify) {
     assert_deserialization(outStream.good(), "Bad output stream");
     size_t numMutations = grg->getMutations().size();
     release_assert(grg->getNodeMutationPairs().size() == numMutations);
+    const auto bpRange = grg->getBPRange();
     GRGFileHeader header = {
         GRG_MAGIC,
         GRG_MAJOR_VERSION,
@@ -269,8 +342,8 @@ void writeGrg(const GRGPtr& grg, std::ostream& outStream, bool useVarInt, bool a
         grg->getPloidy(),
         0, /* Unused */
         HAS_INDIVIDUAL_COALS | MUTATION_IDS_ARE_ORDERED,
-        0,
-        0,
+        filter.bpRange.first,
+        filter.bpRange.second,
         0,
         0,
         0,
@@ -283,41 +356,62 @@ void writeGrg(const GRGPtr& grg, std::ostream& outStream, bool useVarInt, bool a
 
     // Write Edges and Nodes
     RenumberAndWriteVisitor visitor(outStream, header.idSize, allowSimplify);
-    fastCompleteDFS(grg, visitor);
+    if (filter.isSpecified()) {
+        if (filter.direction == TraversalDirection::DIRECTION_UP) {
+            header.sampleCount = visitor.setKeepSamples(grg, filter.seedList);
+            grg->visitTopo(visitor, TraversalDirection::DIRECTION_UP, filter.seedList);
+        } else {
+            assert(filter.direction == TraversalDirection::DIRECTION_DOWN);
+            NodeIDList keptMutNodes = visitor.setKeepMutations(grg, filter.seedList);
+            grg->visitDfs(visitor, TraversalDirection::DIRECTION_DOWN, keptMutNodes);
+        }
+    } else {
+        fastCompleteDFS(grg, visitor);
+    }
     visitor.writeNodeVector();
     assert_deserialization(outStream.good(), "Writing GRG failed");
     header.nodeCount = visitor.getNumNodes();
     header.edgeCount = visitor.getNumEdges();
-    const auto savedPos = outStream.tellp();
-    outStream.seekp(0);
-    outStream.write(reinterpret_cast<const char*>(&header), sizeof(header));
-    assert_deserialization(outStream.good(), "Writing GRG failed");
-    outStream.seekp(savedPos);
-    std::cout << "Wrote simplified GRG with:" << std::endl;
-    std::cout << "  Nodes: " << header.nodeCount << std::endl;
-    std::cout << "  Edges: " << header.edgeCount << std::endl;
 
     // Mutations
-    for (const auto& nodeAndMutId : grg->getMutationsToNodeOrdered()) {
-        writeMutation(grg->getMutationById(nodeAndMutId.first), header.idSize, outStream);
-        assert_deserialization(outStream.good(), "Writing GRG failed");
-        writeNodeID(visitor.getNewID(nodeAndMutId.second), header.idSize, outStream);
-        assert_deserialization(outStream.good(), "Writing GRG failed");
+    header.mutationCount = 0;
+    for (const auto& mutIdAndNode : grg->getMutationsToNodeOrdered()) {
+        if (visitor.keepMutation(mutIdAndNode.first)) {
+            writeMutation(grg->getMutationById(mutIdAndNode.first), header.idSize, outStream);
+            assert_deserialization(outStream.good(), "Writing GRG failed");
+            writeNodeID(visitor.getNewID(mutIdAndNode.second), header.idSize, outStream);
+            assert_deserialization(outStream.good(), "Writing GRG failed");
+            header.mutationCount++;
+        }
     }
+
     // Populations
     if (!grg->getPopulations().empty()) {
         for (const auto& popDescription : grg->getPopulations()) {
             writeString(useVarInt, popDescription, outStream);
         }
-        for (size_t i = 0; i < grg->numSamples(); i++) {
-            auto nodeData = grg->getNodeData(i);
+        for (size_t i = 0; i < header.sampleCount; i++) {
+            auto nodeData = grg->getNodeData(visitor.getOldID(i));
             writeScalar<uint16_t>(nodeData.populationId, outStream);
         }
     }
-    for (NodeID nodeId = grg->numSamples(); nodeId < grg->numNodes(); nodeId++) {
+    for (NodeID nodeId = header.sampleCount; nodeId < header.nodeCount; nodeId++) {
         writeNodeID(grg->getNodeData(visitor.getOldID(nodeId)).numIndividualCoals, header.idSize, outStream);
     }
     assert_deserialization(outStream.good(), "Writing GRG failed");
+
+    // Rewrite the header, since some fields can change.
+    outStream.seekp(0);
+    outStream.write(reinterpret_cast<const char*>(&header), sizeof(header));
+    assert_deserialization(outStream.good(), "Writing GRG failed");
+    return {(NodeIDSizeT)header.nodeCount, (size_t)header.edgeCount};
+}
+
+std::pair<NodeIDSizeT, size_t>
+writeGrg(const GRGPtr& grg, std::ostream& outStream, bool useVarInt, bool allowSimplify) {
+    GRGOutputFilter emptyFilter;
+    emptyFilter.bpRange = grg->getSpecifiedBPRange();
+    return simplifyAndSerialize(grg, outStream, emptyFilter, useVarInt, allowSimplify);
 }
 
 template <typename T> static inline T readScalar(std::istream& inStream) {
@@ -426,6 +520,7 @@ MutableGRGPtr readMutableGrg(std::istream& inStream) {
 
     // Construct GRG and allocate all the nodes.
     MutableGRGPtr grg = std::make_shared<MutableGRG>(header.sampleCount, header.ploidy, header.nodeCount);
+    grg->setSpecifiedBPRange({header.rangeStart, header.rangeEnd});
     grg->makeNode(header.nodeCount - header.sampleCount);
     release_assert(grg->numNodes() == header.nodeCount);
     std::vector<NodeID> edges;
@@ -483,6 +578,7 @@ GRGPtr readImmutableGrg(std::istream& inStream, bool loadUpEdges, bool loadDownE
     // Construct GRG and allocate all the nodes.
     CSRGRGPtr grg =
         std::make_shared<CSRGRG>(header.sampleCount, header.edgeCount, header.nodeCount, header.ploidy, loadUpEdges);
+    grg->setSpecifiedBPRange({header.rangeStart, header.rangeEnd});
 
     // The GRG serialization only encodes the down edges, we deserialize them here.
     for (size_t i = 0; i < header.edgeCount; i++) {
