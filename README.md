@@ -1,6 +1,18 @@
 ![](https://github.com/aprilweilab/grgl/actions/workflows/cmake-multi-platform.yml/badge.svg)
 ![](https://readthedocs.org/projects/grgl/badge/?version=latest)
 
+# Genotype Representation Graphs
+
+A Genotype Representation Graph (GRG) is a compact way to store reference-aligned genotype data for large
+genetic datasets. These datasets are typically stored in tabular formats (VCF, BCF, BGEN, etc.) and then
+compressed using off-the-shelf compression. In contrast, a GRG contains Mutation nodes (representing variants)
+and Sample nodes (representing haploid samples), where there is a path from a Mutation node to a Sample
+node if-and-only-if that sample contains that mutation. These paths go through internal nodes that represent
+common ancestry between multiple samples, and this can result in significant compression (10-15x smaller than
+.vcf.gz). Calculations on the whole dataset can be performed very quickly on GRG, using GRGL. See our paper
+["Enabling efficient analysis of biobank-scale data with genotype representation graphs"](https://www.nature.com/articles/s43588-024-00739-9)
+for more details.
+
 # Genotype Representation Graph Library (GRGL)
 
 GRGL can be used as a library in both C++ and Python. Support is currently limited to Linux and MacOS.
@@ -83,6 +95,16 @@ grg process stats my_arg_data.grg
 To construct a GRG from a VCF file, use the `grg construct` command:
 ```
 grg construct --parts 20 -j 1 path/to/foo.vcf
+```
+
+**WARNING:** VCF access for GRG is not indexed, and in general really slow. For anything beyond toy datasets, it is recommended to convert
+VCF files to [IGD](https://github.com/aprilweilab/picovcf) first. You can use the `grg convert` tool (available as part of GRGL)
+ or `igdtools` from [picovcf](https://github.com/aprilweilab/picovcf).
+
+To convert a VCF(.gz) to an IGD and then build a GRG:
+```
+grg convert path/to/foo.vcf foo.igd
+grg construct --parts 20 -j 1 foo.igd
 ```
 
 Construction for small datasets (such as those included as tests in this repository) should be very fast, a few minutes at most. Really large datasets (such as Biobank-scale) can take on the order of a day when using lots of threads (e.g., 70).
