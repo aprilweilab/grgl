@@ -200,11 +200,10 @@ void GRG::dotProduct(const double* inputData,
         if (this->nodesAreOrdered()) {
             for (NodeID i = numNodes(); i > 0; i--) {
                 const NodeID nodeId = i - 1;
-                double value = 0.0;
-                for (NodeID parentId : this->getUpEdges(nodeId)) {
-                    value += nodeValues[parentId];
+                const double myValue = nodeValues[nodeId];
+                for (NodeID childId : this->getDownEdges(nodeId)) {
+                    nodeValues[childId] += myValue;
                 }
-                nodeValues[nodeId] += value;
             }
         } else {
             ValueSumVisitor valueSumVisitor(nodeValues);
