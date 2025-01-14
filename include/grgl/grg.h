@@ -141,7 +141,7 @@ public:
         for (grgl::NodeID i = 0; i < this->numSamples(); i++) {
             result.push_back(i);
         }
-        return result;
+        return std::move(result);
     }
 
     /**
@@ -154,7 +154,7 @@ public:
                 result.push_back(nodeId);
             }
         }
-        return result;
+        return std::move(result);
     }
 
     const std::vector<Mutation>& getMutations() const { return m_mutations; }
