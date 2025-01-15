@@ -66,13 +66,6 @@ public:
         }
 #endif
         bool isRoot = grg->numUpEdges(nodeId) == 0;
-
-        const auto& alreadySeeded = m_nodeToSamples.find(nodeId);
-        if (alreadySeeded != m_nodeToSamples.end()) {
-            m_collectedNodes.emplace_back(nodeId, m_nodeToSamples[nodeId].size());
-            return true;
-        }
-
         const size_t ploidy = grg->getPloidy();
         auto& nodeData = grg->getNodeData(nodeId);
         const bool computeCoals =
@@ -111,7 +104,6 @@ public:
         // Check if we had a mismatch in expected vs. total sample sets.
         release_assert(nodeId < m_sampleCounts.size());
         release_assert(m_sampleCounts[nodeId] <= grg->numSamples());
-        bool keepGoing = true;
         NodeIDSizeT missing = (m_sampleCounts[nodeId] - samplesBeneath.size());
 
         // We can only record coalescence counts if there are no samples missing.
@@ -121,7 +113,15 @@ public:
 
         // If we've reached the root of the graph or have missing samples beneath us, we need to stop the search
         // and emit candidate nodes to map the mutation to.
-        if (missing > 0 || isRoot) {
+        const bool keepGoing = (missing == 0 && !isRoot);
+        if (missing == 0 && isRoot) {
+            m_collectedNodes.emplace_back(nodeId, samplesBeneath.size()); // Root is a candidate node.
+#if CLEANUP_SAMPLE_SETS_MAPPING
+            // Prevent candidates from having their samplesets garbage collected.
+            m_refCounts[nodeId] = MAX_GRG_NODES + 1;
+#endif
+            m_nodeToSamples.emplace(nodeId, std::move(samplesBeneath));
+        } else if (!keepGoing) {
             for (const auto& candidate : candidateNodes) {
                 m_collectedNodes.emplace_back(candidate, m_nodeToSamples[candidate].size());
 #if CLEANUP_SAMPLE_SETS_MAPPING
@@ -129,10 +129,7 @@ public:
                 m_refCounts[candidate] = MAX_GRG_NODES + 1;
 #endif
             }
-            keepGoing = false;
-        }
-
-        if (keepGoing) {
+        } else {
             m_nodeToSamples.emplace(nodeId, std::move(samplesBeneath));
         }
 
@@ -198,6 +195,9 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
         grg->visitTopo(collector, grgl::TraversalDirection::DIRECTION_UP, seeds, &topoOrder);
     }
     std::vector<NodeSamples>& candidates = collector.m_collectedNodes;
+    std::sort(candidates.begin(), candidates.end());
+    auto endOfUnique = std::unique(candidates.begin(), candidates.end());
+    candidates.erase(endOfUnique, candidates.end());
     std::sort(candidates.begin(), candidates.end(), cmpNodeSamples);
 
     if (candidates.empty()) {
@@ -227,6 +227,7 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
         const auto& candidate = candidates.back();
         const auto candidateId = std::get<0>(candidate);
         const NodeIDList& candidateSet = collector.m_nodeToSamples.at(candidateId);
+        release_assert(!candidateSet.empty());
         // Different candidates may cover different subsets of the sample set that
         // we are currently trying to cover. Those sample sets MUST be non-overlapping
         // or we will introduce a diamond into the graph:
@@ -374,7 +375,7 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
                     release_assert(sampleCounts[childId] > 0);
                     sumSamples += sampleCounts[childId];
                 }
-                topoOrder[nodeId] = maxOrder;
+                topoOrder[nodeId] = maxOrder + 1;
 
                 // Step 3: Update sample count for the new node.
                 sampleCounts[nodeId] = sumSamples;
