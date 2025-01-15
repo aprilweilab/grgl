@@ -170,8 +170,8 @@ void loadPhenotypeData(const std::string& phenotypeTextFile,
         std::vector<std::string> v = split(myText, ' ');
         if (v.size() != 3) {
             std::stringstream ssErr;
-            ssErr << "Each line in phenotype file must have three space-separated columns."
-                  << " Line " << i << " failed this check.";
+            ssErr << "Each line in phenotype file must have three space-separated columns." << " Line " << i
+                  << " failed this check.";
             throw grgl::BadInputFileFailure(ssErr.str().c_str());
         }
         phenVector[i] = std::stof(v[2]);
