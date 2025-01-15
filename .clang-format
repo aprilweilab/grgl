@@ -11,4 +11,5 @@ IndentWidth: 4
 NamespaceIndentation: None
 PointerAlignment: Left
 PackConstructorInitializers: Never
+SpaceAfterCStyleCast: 'false'
 ...

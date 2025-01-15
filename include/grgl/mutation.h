@@ -186,7 +186,7 @@ protected:
         const size_t totalBytes = altAllele.size() + refAllele.size();
         m_refPosition = altAllele.size();
         if (totalBytes > 7) {
-            m_alleleStorage._str = (size_t) new char[totalBytes + 1];
+            m_alleleStorage._str = reinterpret_cast<size_t>(new char[totalBytes + 1]);
             std::memcpy((void*)m_alleleStorage._str, altAllele.c_str(), altAllele.size());
             std::memcpy((void*)(m_alleleStorage._str + m_refPosition), refAllele.c_str(), refAllele.size());
             *(char*)(m_alleleStorage._str + totalBytes) = 0; // null term
