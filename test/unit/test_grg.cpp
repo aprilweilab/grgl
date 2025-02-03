@@ -14,9 +14,9 @@
 using namespace grgl;
 
 TEST(GRG, Mutations) {
-    Mutation m1(1.1, "A", "G");
+    Mutation m1(1, "A", "G");
     ASSERT_TRUE(!m1.isEmpty());
-    Mutation m2(5.1, "T", "G");
+    Mutation m2(5, "T", "G");
     ASSERT_TRUE(!m2.isEmpty());
 
     {
@@ -36,10 +36,9 @@ TEST(GRG, Mutations) {
 }
 
 TEST(GRG, DotProductGood) {
-    GRGPtr grg = depth3BinTree();
+    GRGPtr grg = depth3BinTree(/*keepNodeOrder=*/false);
     ASSERT_TRUE(grg->numEdges() == 6);
     ASSERT_TRUE(grg->numNodes() == 7);
-    // We haven't serialized the GRG ever, so the nodes are unordered.
     ASSERT_FALSE(grg->nodesAreOrdered());
 
     Mutation m1(5, "A", "G");
@@ -68,9 +67,9 @@ TEST(GRG, DotProductGood) {
     // the methods invoked under the hood will be slightly different.
     const char * const testFile = "test.grg.dotproductgood.grg";
     std::ofstream outStream(testFile);
-    writeGrg(grg, outStream, false, false);
+    writeGrg(grg, outStream, false);
     outStream.close();
-    std::ifstream inStream(testFile);
+    grgl::IFSPointer inStream = std::make_shared<std::ifstream>(testFile);
     grg = readImmutableGrg(inStream);
     ASSERT_TRUE(grg->nodesAreOrdered());
 

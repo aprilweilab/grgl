@@ -11,7 +11,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * should have received a copy of the GNU General Public License
+ * You should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #ifndef GRG_NODE_H
@@ -46,23 +46,18 @@
 
 namespace grgl {
 
-using PopulationID = uint16_t;
-constexpr PopulationID POPULATION_UNSPECIFIED = 0xffff;
-
 #ifdef COMPACT_NODE_IDS
 using NodeID = uint32_t;
 using NodeIDSizeT = uint32_t;
 
-// We support about 250 million nodes.
-#define MAX_GRG_NODES   (0x3fffffffU - 1)
-#define INVALID_NODE_ID (0x3fffffffU)
-// The upper 4 bits are available for flags.
-#define GRG_NODE_FLAG_MASK (0xc0000000U)
+// We support about 2 billion nodes per graph.
+#define MAX_GRG_NODES   (0x7fffffffU - 1)
+#define INVALID_NODE_ID (0x7fffffffU)
+// The upper bit is available for flags.
+#define GRG_NODE_FLAG_MASK (0x80000000U)
 
-enum NodeMark {
-    NODE_MARK_1 = 0x40000000U,
-    NODE_MARK_2 = 0x80000000U,
-};
+using NodeMark = NodeID;
+constexpr NodeMark NODE_MARK_1 = 0x80000000U;
 #else
 using NodeID = uint64_t;
 using NodeIDSizeT = uint64_t;
@@ -108,31 +103,12 @@ class GRGNode;
 using GRGNodePtr = std::shared_ptr<GRGNode>;
 
 /**
- * Container for information that can be attached to graph nodes.
- *
- * TODO: this contains fields that only apply to samples (populationID) and fields
- * that apply to everything except samples (individualCoalCount). This is a waste of space.
- */
-struct NodeData {
-    static const NodeIDSizeT COAL_COUNT_NOT_SET;
-
-    NodeData() = default;
-    explicit NodeData(const PopulationID popId)
-        : populationId(popId) {}
-
-    NodeIDSizeT numIndividualCoals{COAL_COUNT_NOT_SET};
-    // The ID of the population
-    PopulationID populationId{POPULATION_UNSPECIFIED};
-};
-
-/**
  * A node in the Genomic Representation Graph (GRG). Typically only accessed via the GRG
  * class, and not independently.
  */
 class GRGNode {
 public:
-    explicit GRGNode(const PopulationID populationId = POPULATION_UNSPECIFIED)
-        : m_nodeData(populationId) {}
+    GRGNode() = default;
 
     virtual ~GRGNode() = default;
     GRGNode(const GRGNode&) = delete;
@@ -145,10 +121,6 @@ public:
     const NodeIDList& getUpEdges() const { return this->m_upEdges; }
 
     bool operator==(const GRGNode& rhs) const = delete;
-
-    NodeData& getNodeData() { return m_nodeData; }
-
-    const NodeData& getNodeData() const { return m_nodeData; }
 
 protected:
     static bool edgeDelete(NodeIDList& edges, const NodeID nodeId) {
@@ -182,7 +154,6 @@ protected:
 
     NodeIDList m_downEdges;
     NodeIDList m_upEdges;
-    NodeData m_nodeData;
 
     friend MutableGRG;
 };

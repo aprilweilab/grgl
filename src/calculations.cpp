@@ -11,7 +11,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * should have received a copy of the GNU General Public License
+ * You should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "calculations.h"
@@ -230,7 +230,7 @@ void emitBeta(const grgl::GRGPtr& grg, const std::string& phenotype, std::ostrea
                 nodeXY += nodeXYcount[child];
             }
             frequencyMap[node] = frequency;
-            nodeXXcount[node] = nodeXX + 2 * grg->getNodeData(node).numIndividualCoals;
+            nodeXXcount[node] = nodeXX + 2 * grg->getNumIndividualCoals(node);
             nodeXYcount[node] = nodeXY;
         }
     }
@@ -330,8 +330,8 @@ public:
                 samplesBeneath++;
             } else {
                 // Start with the number of individuals that coalesce at exactly this node.
-                homozygBeneath = grg->getNodeData(nodeId).numIndividualCoals;
-                release_assert(homozygBeneath != grgl::NodeData::COAL_COUNT_NOT_SET);
+                homozygBeneath = grg->getNumIndividualCoals(nodeId);
+                release_assert(homozygBeneath != COAL_COUNT_NOT_SET && homozygBeneath <= grg->numIndividuals());
 
                 for (const auto& child : grg->getDownEdges(nodeId)) {
                     samplesBeneath += m_samplesBeneath[child];
@@ -375,7 +375,7 @@ void emitZygosityInfo(grgl::GRGPtr& grg,
             countPair.second += visitorForDfs.m_homozygousBeneath[pair.first];
         }
     }
-    const size_t totalIndividuals = grg->numSamples() / 2;
+    const size_t totalIndividuals = grg->numIndividuals();
     const auto& mutIdAndNodes = grg->getMutationsToNodeOrdered();
     outStream << "POSITION" << SEP << "REF" << SEP << "ALT" << SEP << "AA" << SEP << "Aa" << SEP << "aa" << std::endl;
     size_t i = 0;
@@ -393,7 +393,7 @@ void emitZygosityInfo(grgl::GRGPtr& grg,
             }
             i++;
         } while (i < mutIdAndNodes.size() && mutIdAndNodes[i].first == mutId);
-        const size_t heteroWithMut = (samplesWithMut - (2 * homozygWithMut)) / 2;
+        const size_t heteroWithMut = samplesWithMut - (2 * homozygWithMut);
         const size_t neitherWithMut = totalIndividuals - (homozygWithMut + heteroWithMut);
         assert(neitherWithMut + heteroWithMut + homozygWithMut == totalIndividuals);
         const grgl::Mutation& mut = grg->getMutationById(mutId);

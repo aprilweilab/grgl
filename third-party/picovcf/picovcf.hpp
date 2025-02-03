@@ -1543,8 +1543,7 @@ public:
             }
             return std::move(sampleList);
         } else {
-            const bool phased = (bool)(m_header.flags & IGD_PHASED);
-            const SampleT numSamples = phased ? (m_header.ploidy * m_header.numIndividuals) : m_header.numIndividuals;
+            const SampleT numSamples = this->numSamples();
             const SampleT readAmount = picovcf_div_ceiling<SampleT, 8>(numSamples);
             PICOVCF_RELEASE_ASSERT(readAmount > 0);
             std::unique_ptr<uint8_t> buffer(new uint8_t[readAmount]);
@@ -1672,37 +1671,15 @@ static inline void writeString(const std::string& value, std::ostream& outStream
     outStream.write(value.c_str(), value.size());
 }
 
-inline void writeAllelesAsOnes(std::ostream& outStream, const IGDSampleList& orderedSampleList, SampleT numSamples) {
-    // XXX this can be majorly optimized.
-    uint8_t buffer = 0x0;
-    SampleT i = 0;
-    SampleT j = 0;
-    SampleT nextSample = SAMPLE_INDEX_NOT_SET;
-    if (i < orderedSampleList.size()) {
-        nextSample = orderedSampleList[i];
-        i++;
+inline void
+writeAllelesAsOnes(std::vector<uint8_t>& outData, const IGDSampleList& orderedSampleList, SampleT numSamples) {
+    const SampleT writeAmount = picovcf_div_ceiling<SampleT, 8>(numSamples);
+    outData.resize(writeAmount);
+    for (const auto& sampleId : orderedSampleList) {
+        const size_t byteIndex = sampleId / 8;
+        const size_t bitIndex = 7 - (sampleId % 8);
+        outData[byteIndex] |= (1 << bitIndex);
     }
-    while (j < numSamples) {
-        if (j != 0 && j % 8 == 0) {
-            writeScalar<uint8_t>(buffer, outStream);
-        }
-        buffer <<= 1;
-        if (j == nextSample) {
-            buffer |= 0x1;
-            if (i < orderedSampleList.size()) {
-                nextSample = orderedSampleList[i];
-                i++;
-            } else {
-                nextSample = SAMPLE_INDEX_NOT_SET;
-            }
-        }
-        j++;
-    }
-    SampleT leftover = numSamples % 8;
-    if (leftover > 0) {
-        buffer <<= (8 - leftover);
-    }
-    writeScalar<uint8_t>(buffer, outStream);
 }
 
 /**
@@ -1792,7 +1769,9 @@ public:
             writeSparse(outStream, sampleList);
             m_sparseCount++;
         } else {
-            writeAllelesAsOnes(outStream, sampleList, numSamples);
+            std::vector<uint8_t> writeBuffer;
+            writeAllelesAsOnes(writeBuffer, sampleList, numSamples);
+            outStream.write((const char*)writeBuffer.data(), writeBuffer.size());
         }
         m_header.numVariants++;
         m_totalCount++;
@@ -1888,9 +1867,7 @@ public:
 private:
     void writeSparse(std::ostream& outStream, const IGDSampleList& sampleList) {
         writeScalar<SampleT>(sampleList.size(), outStream);
-        for (SampleT i = 0; i < sampleList.size(); i++) {
-            writeScalar<SampleT>(sampleList[i], outStream);
-        }
+        outStream.write(reinterpret_cast<const char*>(sampleList.data()), sizeof(SampleT) * sampleList.size());
     }
 
     IGDData::IndexEntry makeEntry(VariantT genomePosition,

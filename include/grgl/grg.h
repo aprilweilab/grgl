@@ -11,51 +11,67 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * should have received a copy of the GNU General Public License
+ * You should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #ifndef GRG_H
 #define GRG_H
 
+#include <algorithm>
+#include <limits>
 #include <list>
 #include <map>
 #include <memory>
 #include <vector>
 
+#include "grgl/common.h"
+#include "grgl/csr_storage.h"
+#include "grgl/file_vector.h"
 #include "grgnode.h"
 #include "mutation.h"
+#include "node_data.h"
 #include "visitor.h"
 
 namespace grgl {
+
+// Returned by the edge-count functionality when there are no edges loaded/stored for the up direction, as opposed to
+// actually having no edges. This is safer than returning 0 for the number of edges, as anything that requires up
+// will fail hard trying to iterate this many edges.
+constexpr size_t NO_UP_EDGES = std::numeric_limits<size_t>::max();
+
+/**
+ * Simple class to encapsulate the filtering of a GRG to shrink it.
+ */
+class GRGOutputFilter {
+public:
+    GRGOutputFilter()
+        : direction(TraversalDirection::DIRECTION_UP) {}
+
+    GRGOutputFilter(TraversalDirection dir, NodeIDList seeds)
+        : direction(dir),
+          seedList(std::move(seeds)) {}
+
+    bool isSpecified() const { return !seedList.empty(); }
+
+    TraversalDirection direction;
+    NodeIDList seedList;
+    std::pair<BpPosition, BpPosition> bpRange;
+};
 
 /**
  * Abstract GRG base class.
  */
 class GRG : public std::enable_shared_from_this<GRG> {
 public:
-    class NodeListIterator {
-    public:
-        using VectIter = std::vector<NodeID>::const_iterator;
-
-        NodeListIterator(VectIter begin, VectIter end)
-            : m_begin(begin),
-              m_end(end) {}
-
-        VectIter begin() const { return m_begin; }
-        VectIter end() const { return m_end; }
-
-    private:
-        VectIter m_begin;
-        VectIter m_end;
-    };
-
     enum {
         DEFAULT_NODE_CAPACITY = 1024,
     };
 
     explicit GRG(size_t numSamples, uint16_t ploidy)
         : m_numSamples(numSamples),
-          m_ploidy(ploidy) {}
+          m_ploidy(ploidy) {
+        release_assert(numSamples % ploidy == 0);
+    }
 
     virtual ~GRG() = default;
     GRG(const GRG&) = delete;
@@ -78,6 +94,8 @@ public:
 
     size_t numSamples() const { return m_numSamples; }
 
+    size_t numIndividuals() const { return m_numSamples / m_ploidy; }
+
     /**
      * How many haploid samples are there per individual?
      *
@@ -85,15 +103,49 @@ public:
      */
     uint16_t getPloidy() const { return m_ploidy; }
 
+    /**
+     * Returns true if nodes are ordered in bottom-up topological order.
+     */
     virtual bool nodesAreOrdered() const = 0;
-    virtual size_t numNodes() const = 0;
-    virtual size_t numEdges() const = 0;
-    virtual size_t numUpEdges(NodeID nodeId) const = 0;
-    virtual size_t numDownEdges(NodeID nodeId) const = 0;
-    virtual NodeListIterator getDownEdges(NodeID nodeId) const = 0;
-    virtual NodeListIterator getUpEdges(NodeID nodeId) const = 0;
-    virtual NodeData& getNodeData(NodeID nodeId) = 0;
 
+    /**
+     * Number of nodes (including sample nodes) in the graph.
+     */
+    virtual size_t numNodes() const = 0;
+
+    /**
+     * Number of edges (total) in the graph.
+     */
+    virtual size_t numEdges() const = 0;
+
+    /**
+     * Number of down edges for a particular node in the graph.
+     */
+    virtual size_t numDownEdges(NodeID nodeId) = 0;
+
+    /**
+     * Number of up edges for a particular node in the graph.
+     */
+    virtual size_t numUpEdges(NodeID nodeId) = 0;
+
+    /**
+     * Get list of down edges for a particular node in the graph.
+     */
+    virtual NodeIDList getDownEdges(NodeID nodeId) = 0;
+
+    /**
+     * Get list of up edges for a particular node in the graph.
+     */
+    virtual NodeIDList getUpEdges(NodeID nodeId) = 0;
+
+    /**
+     * True if this graph stores up edges, false if only down edges are stored.
+     */
+    virtual bool hasUpEdges() const = 0;
+
+    /**
+     * True iff the mutations are ordered according to position and the alternate allele (in that order).
+     */
     bool mutationsAreOrdered() const { return m_mutsAreOrdered; }
 
     /**
@@ -102,7 +154,7 @@ public:
      * In general we treat all ranges as left-inclusive and right-exlusive, hence the
      * +1 on the last.
      */
-    std::pair<BpPosition, BpPosition> getBPRange() const {
+    std::pair<BpPosition, BpPosition> getBPRange() {
         if (mutationsAreOrdered() && !m_mutations.empty()) {
             const size_t lastMutId = m_mutations.size() - 1;
             return {m_mutations[0].getPosition(), m_mutations[lastMutId].getPosition()};
@@ -147,40 +199,68 @@ public:
     /**
      * Get the NodeIDList for all roots in the graph.
      */
-    NodeIDList getRootNodes() const {
+    NodeIDList getRootNodes() {
         NodeIDList result;
-        for (grgl::NodeID nodeId = 0; nodeId < this->numNodes(); nodeId++) {
-            if (this->numUpEdges(nodeId) == 0) {
-                result.push_back(nodeId);
+        if (hasUpEdges()) {
+            for (grgl::NodeID nodeId = 0; nodeId < this->numNodes(); nodeId++) {
+                if (this->numUpEdges(nodeId) == 0) {
+                    result.push_back(nodeId);
+                }
+            }
+        } else {
+            std::vector<bool> isTarget(numNodes(), false);
+            for (grgl::NodeID nodeId = 0; nodeId < this->numNodes(); nodeId++) {
+                for (grgl::NodeID targetId : getDownEdges(nodeId)) {
+                    isTarget[targetId] = true;
+                }
+            }
+            for (grgl::NodeID nodeId = 0; nodeId < this->numNodes(); nodeId++) {
+                if (!isTarget[nodeId]) {
+                    result.push_back(nodeId);
+                }
             }
         }
         return std::move(result);
     }
 
-    const std::vector<Mutation>& getMutations() const { return m_mutations; }
+    const std::vector<Mutation>& getMutations() const { return m_mutations.vector(); }
 
     size_t numMutations() const { return m_mutations.size(); }
 
-    const std::multimap<NodeID, MutationId>& getNodeMutationPairs() const { return m_nodeToMutations; }
-
-    const Mutation& getMutationById(MutationId mutId) const { return m_mutations.at(mutId); }
-
-    void setMutationById(MutationId mutId, Mutation mutation) { m_mutations.at(mutId) = std::move(mutation); }
-
-    std::vector<MutationId> getUnmappedMutations() const { return getMutationsForNode(INVALID_NODE_ID); }
-
-    std::vector<MutationId> getMutationsForNode(const NodeID nodeId) const {
-        std::vector<MutationId> result;
-        auto findRange = m_nodeToMutations.equal_range(nodeId);
-        for (auto it = findRange.first; it != findRange.second; it++) {
-            result.emplace_back(it->second);
+    const std::vector<std::pair<NodeID, MutationId>>& getNodeMutationPairs() {
+        if (!m_mutIdsByNodeIdSorted) {
+            sortMutIdsByNodeID();
         }
-        return result;
+        return m_mutIdsByNodeId;
     }
 
-    bool nodeHasMutations(const NodeID nodeId) const {
-        auto findIt = m_nodeToMutations.find(nodeId);
-        return findIt != m_nodeToMutations.end();
+    const Mutation& getMutationById(MutationId mutId) { return m_mutations.cref(mutId); }
+
+    void setMutationById(MutationId mutId, Mutation mutation) { m_mutations.atRef(mutId) = std::move(mutation); }
+
+    std::vector<MutationId> getUnmappedMutations() { return getMutationsForNode(INVALID_NODE_ID); }
+
+    std::vector<MutationId> getMutationsForNode(const NodeID nodeId) {
+        if (!m_mutIdsByNodeIdSorted) {
+            sortMutIdsByNodeID();
+        }
+        std::vector<MutationId> result;
+        std::pair<NodeID, MutationId> query = {nodeId, 0};
+        auto mutIdIt = std::lower_bound(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end(), query);
+        while (mutIdIt != m_mutIdsByNodeId.end() && mutIdIt->first == nodeId) {
+            result.push_back(mutIdIt->second);
+            mutIdIt++;
+        }
+        return std::move(result);
+    }
+
+    bool nodeHasMutations(const NodeID nodeId) {
+        if (!m_mutIdsByNodeIdSorted) {
+            sortMutIdsByNodeID();
+        }
+        std::pair<NodeID, MutationId> query = {nodeId, 0};
+        auto mutIdIt = std::lower_bound(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end(), query);
+        return mutIdIt != m_mutIdsByNodeId.end() && (mutIdIt->first == nodeId);
     }
 
     /**
@@ -188,7 +268,7 @@ public:
      *
      * @return A vector of pairs, MutationID and NodeID (in that order).
      */
-    std::vector<std::pair<MutationId, NodeID>> getMutationsToNodeOrdered() const;
+    std::vector<std::pair<MutationId, NodeID>> getMutationsToNodeOrdered();
 
     /**
      * Visit nodes breadth-first, starting at the given nodes and following up or
@@ -293,12 +373,63 @@ public:
         return std::move(result);
     }
 
+    /**
+     * Get the ID of the population associated with the node. Will be POPULATION_UNSPECIFIED if the
+     * node is not a sample, or if there is no population associated.
+     * @param[in] nodeId The node to retrieve.
+     */
+    PopulationID getPopulationId(NodeID nodeId) { return m_nodeData.getPopId(nodeId); }
+
+    /**
+     * Set the ID of the population associated with the node.
+     * @param[in] nodeId The node to modify.
+     * @param[in] popId The population ID, which is already associated with a population description
+     *      via addPopulation().
+     */
+    void setPopulationId(NodeID nodeId, PopulationID popId) {
+        api_exc_check(popId < m_populations.size(),
+                      "Invalid population ID " << popId << " (only have " << m_populations.size()
+                                               << " populations configured)");
+        m_nodeData.setPopId(nodeId, popId);
+    }
+
+    /**
+     * Get the number of individuals that coalescence _at_ this node (not below it, but exactly at it).
+     * @param[in] nodeId The node to retrieve.
+     * @return The number of individuals. For diploid data this is a number between 0...numSamples()/2.
+     */
+    NodeIDSizeT getNumIndividualCoals(NodeID nodeId) {
+        const auto coals = m_nodeData.getNumCoals(numSamples(), nodeId);
+        assert(coals == COAL_COUNT_NOT_SET || coals <= numIndividuals());
+        return coals;
+    }
+
+    /**
+     * Set the number of individuals that coalesce at this node.
+     * @param[in] nodeId The node to modify.
+     * @param[in] coals The number of individuals that coalesce, between 0...numSamples()/ploidy.
+     */
+    void setNumIndividualCoals(NodeID nodeId, NodeIDSizeT coals) {
+        assert(coals == COAL_COUNT_NOT_SET || coals <= numIndividuals());
+        m_nodeData.setNumCoals(numSamples(), nodeId, coals);
+    }
+
 protected:
-    // The position is the mutation ID.
-    std::vector<Mutation> m_mutations;
-    // Each node can have multiple mutations. To get the nodes for a particular mutation you have
-    // to iterate the entire list. Client code should construct its own reverse map if needed.
-    std::multimap<NodeID, MutationId> m_nodeToMutations;
+    void visitTopoNodeOrdered(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
+
+    // m_mutIdsByNodeId gets appended to and then sorted periodically or as needed, using this
+    // function. We rarely need to lookup Mutations by NodeID while modifying a GRG, so this ends
+    // up being about 3x smaller than the previous multimap<> and many times faster.
+    void sortMutIdsByNodeID() {
+        std::sort(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end());
+        m_mutIdsByNodeIdSorted = true;
+    }
+
+    // The position is the mutation ID for both of these vectors.
+    EagerFileVector<Mutation> m_mutations;
+    // This vector is MutationIDs ordered by their associated NodeID, ascending.
+    std::vector<std::pair<NodeID, MutationId>> m_mutIdsByNodeId;
+    bool m_mutIdsByNodeIdSorted{false};
 
     // (Optional) list of population descriptions. The position corresponds to the population
     // ID, which can be used to tag nodes.
@@ -307,10 +438,16 @@ protected:
     // The range of base-pair positions covered by this GRG, according to the user/tool that created it.
     std::pair<BpPosition, BpPosition> m_specifiedRange{};
 
+    // Node data.
+    NodeDataContainer m_nodeData;
+
     const size_t m_numSamples;
     const uint16_t m_ploidy;
+
     // True if the mutationId order matches the (position, allele) order.
-    bool m_mutsAreOrdered;
+    bool m_mutsAreOrdered{false};
+
+    friend void readGrgCommon(const GRGFileHeader& header, const GRGPtr& grg, IFSPointer& inStream);
 };
 
 using GRGPtr = std::shared_ptr<GRG>;
@@ -333,10 +470,10 @@ public:
             initialNodeCapacity = numSamples * 2;
         }
         this->m_nodes.reserve(initialNodeCapacity);
-        this->makeNode(numSamples);
+        this->makeNode(numSamples, true);
     }
 
-    bool nodesAreOrdered() const override { return false; }
+    bool nodesAreOrdered() const override { return m_nodesAreOrdered; }
 
     size_t numNodes() const override { return m_nodes.size(); }
 
@@ -348,21 +485,15 @@ public:
         return edgeCount;
     }
 
-    size_t numDownEdges(NodeID nodeId) const override { return m_nodes.at(nodeId)->getDownEdges().size(); }
+    size_t numDownEdges(NodeID nodeId) override { return m_nodes.at(nodeId)->getDownEdges().size(); }
 
-    size_t numUpEdges(NodeID nodeId) const override { return m_nodes.at(nodeId)->getUpEdges().size(); }
+    size_t numUpEdges(NodeID nodeId) override { return m_nodes.at(nodeId)->getUpEdges().size(); }
 
-    NodeListIterator getDownEdges(NodeID nodeId) const override {
-        const NodeIDList& edges = m_nodes.at(nodeId)->getDownEdges();
-        return {edges.begin(), edges.end()};
-    }
+    NodeIDList getDownEdges(NodeID nodeId) override { return m_nodes.at(nodeId)->getDownEdges(); }
 
-    NodeListIterator getUpEdges(NodeID nodeId) const override {
-        const NodeIDList& edges = m_nodes.at(nodeId)->getUpEdges();
-        return {edges.begin(), edges.end()};
-    }
+    NodeIDList getUpEdges(NodeID nodeId) override { return m_nodes.at(nodeId)->getUpEdges(); }
 
-    NodeData& getNodeData(NodeID nodeId) override { return m_nodes.at(nodeId)->getNodeData(); }
+    bool hasUpEdges() const override { return true; }
 
     /**
      * Create a new node in the GRG.
@@ -370,11 +501,19 @@ public:
      * This is the only valid way to construct a GRG node. When you create a GRG you specify the number
      * of sample nodes, and those nodes are created right away. Each call to `makeNode()` after that will
      * generate sequential-ID nodes. Use `connect()` to connect the newly created node to other nodes.
+     *
+     * @param[in] count The number of nodes to create.
+     * @param[in] forceOrdered If true, do not "break" the topological ordering property of the graph if
+     *      it already exists. Use only when you are certain that newly added nodes (and their edges) will
+     *      main topological order.
      */
-    NodeID makeNode(const size_t count = 1) {
+    NodeID makeNode(const size_t count = 1, bool forceOrdered = false) {
         const auto nextId = this->m_nodes.size();
         for (size_t i = 0; i < count; i++) {
             this->m_nodes.push_back(std::make_shared<GRGNode>());
+        }
+        if (!forceOrdered) {
+            this->m_nodesAreOrdered = false;
         }
         return nextId;
     }
@@ -441,50 +580,55 @@ private:
     // The list of nodes. The node's position in this vector must match its ID.
     std::vector<GRGNodePtr> m_nodes;
 
-    friend MutableGRGPtr readMutableGrg(std::istream& inStream);
+    friend MutableGRGPtr readMutableGrg(IFSPointer& inStream);
+
+    // True if the nodeId order matches the bottom-up topological order.
+    bool m_nodesAreOrdered{true};
 };
+
+// Eager CSR sorted 32-bit edges, encoded.
+using EagerCSREdges32 = CSRStorageImm<EagerFileVector, uint32_t, true, true>;
+// Lazy CSR sorted 32-bit edges, encoded.
+using LazyCSREdges32 = CSRStorageImm<LazyFileVector, uint32_t, true, true>;
 
 class CSRGRG : public GRG {
 public:
-    explicit CSRGRG(size_t numSamples, size_t edgeCount, size_t nodeCount, uint16_t ploidy, bool loadUpEdges = true)
+    explicit CSRGRG(size_t numSamples, size_t nodeCount, uint16_t ploidy, bool loadUpEdges = true)
         : GRG(numSamples, ploidy),
-          m_downEdges(edgeCount),
-          m_upEdges(loadUpEdges ? edgeCount : 0),
-          m_downPositions(nodeCount + 2),
-          m_upPositions(nodeCount + 2),
-          m_nodeData(nodeCount) {}
-
-    void finalize() {
-        // Just a convenience: the last slot points to the end of the edge vector.
-        m_downPositions[m_downPositions.size() - 1] = m_downEdges.size();
-        m_upPositions[m_upPositions.size() - 1] = m_upEdges.size();
-    }
+          m_downEdges(nodeCount),
+          m_upEdges(loadUpEdges ? nodeCount : 0) {}
 
     bool nodesAreOrdered() const override { return true; }
 
-    size_t numNodes() const override { return m_downPositions.size() - 2; }
+    size_t numNodes() const override { return m_downEdges.numNodes(); }
 
-    size_t numEdges() const override { return m_downEdges.size(); }
+    size_t numEdges() const override { return m_downEdges.numValues(); }
 
-    size_t numDownEdges(NodeID nodeId) const override {
-        return m_downPositions.at(nodeId + 2) - m_downPositions[nodeId + 1];
+    size_t numDownEdges(NodeID nodeId) override { return m_downEdges.numValuesAt(nodeId); }
+
+    bool hasUpEdges() const override { return m_upEdges.numNodes() > 0; }
+
+    size_t numUpEdges(NodeID nodeId) override {
+        if (!hasUpEdges()) {
+            return NO_UP_EDGES;
+        }
+        return m_upEdges.numValuesAt(nodeId);
     }
 
-    size_t numUpEdges(NodeID nodeId) const override { return m_upPositions.at(nodeId + 2) - m_upPositions[nodeId + 1]; }
-
-    NodeListIterator getDownEdges(NodeID nodeId) const override {
-        const NodeIDSizeT end = m_downPositions.at(nodeId + 2);
-        const NodeIDSizeT start = m_downPositions[nodeId + 1];
-        return {m_downEdges.begin() + start, m_downEdges.begin() + end};
+    NodeIDList getDownEdges(NodeID nodeId) override {
+        NodeIDList result;
+        m_downEdges.getData(nodeId, result);
+        return std::move(result);
     }
 
-    NodeListIterator getUpEdges(NodeID nodeId) const override {
-        const NodeIDSizeT end = m_upPositions.at(nodeId + 2);
-        const NodeIDSizeT start = m_upPositions[nodeId + 1];
-        return {m_upEdges.begin() + start, m_upEdges.begin() + end};
+    NodeIDList getUpEdges(NodeID nodeId) override {
+        if (!hasUpEdges()) {
+            throw ApiMisuseFailure("No up edges were loaded/created");
+        }
+        NodeIDList result;
+        m_upEdges.getData(nodeId, result);
+        return std::move(result);
     }
-
-    NodeData& getNodeData(NodeID nodeId) override { return m_nodeData.at(nodeId); }
 
     std::vector<NodeIDSizeT> topologicalSort(TraversalDirection direction) override;
 
@@ -493,14 +637,11 @@ public:
                    const NodeIDList& seedList,
                    const std::vector<NodeIDSizeT>* sortOrder = nullptr) override;
 
-private:
-    std::vector<NodeIDSizeT> m_downPositions;
-    NodeIDList m_downEdges;
-    std::vector<NodeIDSizeT> m_upPositions;
-    NodeIDList m_upEdges;
-    std::vector<NodeData> m_nodeData;
+    EagerCSREdges32 m_downEdges;
+    EagerCSREdges32 m_upEdges;
 
-    friend GRGPtr readImmutableGrg(std::istream& inStream, bool loadUpEdges, bool loadDownEdges);
+private:
+    friend GRGPtr readImmutableGrg(IFSPointer& inStream, bool loadUpEdges, bool loadDownEdges);
 };
 
 using CSRGRGPtr = std::shared_ptr<CSRGRG>;
