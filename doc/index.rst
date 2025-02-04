@@ -1,16 +1,35 @@
-GRGL Documentation
-==================
+GRGL Overview
+=============
 
 GRGL is a C++ library with Python bindings for accessing Genotype Representation Graphs (GRGs). 
+A GRG is a compact way to store reference-aligned genotype data for large
+genetic datasets. These datasets are typically stored in tabular formats (VCF,
+BCF, BGEN, etc.) and then compressed using off-the-shelf compression. In
+contrast, a GRG contains Mutation nodes (representing variants) and Sample nodes
+(representing haploid samples), where there is a path from a Mutation node to a
+Sample node if-and-only-if that sample contains that mutation. These paths go
+through internal nodes that represent common ancestry between multiple samples,
+and this can result in significant compression (10-15x smaller than .vcf.gz).
+Calculations on the whole dataset can be performed very quickly on GRG, using
+GRGL. See our paper `"Enabling efficient analysis of biobank-scale data with
+genotype representation graphs" <https://www.nature.com/articles/s43588-024-00739-9>`_
+for more details.
 
 .. contents::
    :depth: 2
 
 .. toctree::
+  :hidden:
   :maxdepth: 2
 
+  Installation <installation>
+  Constructing GRGs <construct>
+  Converting Tree-Sequences <ts_convert>
+  Graph Traversals <traversal>
+  Calculating dot produces <dot_products>
   python_api
   cpp_api
+  Examples and applications <examples_and_applications>
 
 Simple Usage Examples
 ---------------------
@@ -62,3 +81,6 @@ C++ TBD1
     return 0;
   }
 
+
+Simple Usage Examples
+---------------------
