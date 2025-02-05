@@ -108,3 +108,19 @@ TEST(GRG, DotProductBad) {
         ApiMisuseFailure
     );
 }
+
+TEST(GRG, NoUpEdges) {
+    GRGPtr grg = depth3BinTree();
+    const NodeIDList rootsBefore = grg->getRootNodes();
+
+	// Serialize and deserialize the GRG
+    const char * const testFile = "test.no_up_edges.grg";
+    std::ofstream outStream(testFile);
+    writeGrg(grg, outStream, /*allowSimplify=*/false);
+    outStream.close();
+    grgl::IFSPointer inStream = std::make_shared<std::ifstream>(testFile);
+    grg = readImmutableGrg(inStream, /*loadUpEdges=*/false);
+
+    const NodeIDList rootsAfter = grg->getRootNodes();
+    ASSERT_EQ(rootsBefore, rootsAfter);
+}
