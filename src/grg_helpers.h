@@ -1,3 +1,19 @@
+/* Genotype Representation Graph Library (GRGL)
+ * Copyright (C) 2024 April Wei
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 #ifndef GRG_HELPERS_H
 #define GRG_HELPERS_H
 
@@ -84,8 +100,8 @@ static inline void dumpStats(const GRGPtr& grg) {
 
 static inline MutableGRGPtr loadMutableGRG(const std::string& filename) {
     MutableGRGPtr result;
-    std::ifstream inStream(filename, std::ios::binary);
-    if (!inStream.good()) {
+    IFSPointer inStream = std::make_shared<std::ifstream>(filename, std::ios::binary);
+    if (!inStream->good()) {
         std::cerr << "Could not read " << filename << std::endl;
         return result;
     }
@@ -98,15 +114,15 @@ static inline MutableGRGPtr loadMutableGRG(const std::string& filename) {
     return result;
 }
 
-static inline GRGPtr loadImmutableGRG(const std::string& filename, bool loadUpEdges = true, bool loadDownEdges = true) {
+static inline GRGPtr loadImmutableGRG(const std::string& filename, bool loadUpEdges = true) {
     GRGPtr result;
-    std::ifstream inStream(filename, std::ios::binary);
-    if (!inStream.good()) {
+    IFSPointer inStream = std::make_shared<std::ifstream>(filename, std::ios::binary);
+    if (!inStream->good()) {
         std::cerr << "Could not read " << filename << std::endl;
         return result;
     }
     try {
-        result = readImmutableGrg(inStream, loadUpEdges, loadDownEdges);
+        result = readImmutableGrg(inStream, loadUpEdges);
     } catch (SerializationFailure& e) {
         std::cerr << "Failed to load GRG: " << e.what() << std::endl;
         return result;
@@ -117,7 +133,7 @@ static inline GRGPtr loadImmutableGRG(const std::string& filename, bool loadUpEd
 static inline std::pair<NodeIDSizeT, NodeIDSizeT>
 saveGRG(const GRGPtr& theGRG, const std::string& filename, bool allowSimplify = true) {
     std::ofstream outStream(filename, std::ios::binary);
-    return grgl::writeGrg(theGRG, outStream, true, allowSimplify);
+    return grgl::writeGrg(theGRG, outStream, allowSimplify);
 }
 
 static inline void saveGRGSubset(const GRGPtr& theGRG,
@@ -128,7 +144,7 @@ static inline void saveGRGSubset(const GRGPtr& theGRG,
     std::ofstream outStream(filename, std::ios::binary);
     GRGOutputFilter filter(direction, seedList);
     filter.bpRange = bpRange;
-    grgl::simplifyAndSerialize(theGRG, outStream, filter, true, true);
+    grgl::simplifyAndSerialize(theGRG, outStream, filter, true);
 }
 
 /**

@@ -17,7 +17,6 @@ try:
 finally:
     os.chdir(orig_dir)
 
-
 extensions = ["breathe", "sphinx.ext.autodoc", "sphinx.ext.autosummary"]
 
 html_theme = "sphinx_rtd_theme"
@@ -27,7 +26,6 @@ breathe_projects = {
     "grgl": DOC_OUTPUT + "/xml/",
 }
 breathe_default_project = "grgl"
-
 
 autosummary_generate = True  # Turn on sphinx.ext.autosummary
 

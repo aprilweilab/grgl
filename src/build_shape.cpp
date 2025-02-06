@@ -11,7 +11,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * should have received a copy of the GNU General Public License
+ * You should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "build_shape.h"
@@ -301,7 +301,7 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
             for (NodeID offset = 0; offset < ploidy; offset++) {
                 const NodeID sampleId = (individual * ploidy) + offset;
                 release_assert(sampleId < result->numSamples());
-                result->getNodeData(sampleId).populationId = popId;
+                result->setPopulationId(sampleId, popId);
             }
         }
     }

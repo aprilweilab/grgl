@@ -11,7 +11,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * should have received a copy of the GNU General Public License
+ * You should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #ifndef GRG_WINDOWING_H

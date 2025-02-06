@@ -11,7 +11,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * should have received a copy of the GNU General Public License
+ * You should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include <args.hxx>
@@ -83,8 +83,8 @@ int main(int argc, char** argv) {
         "bits-per-mut",
         "How many bits per mutation (on avg) should we use when comparing samples? (default: 4)",
         {'p', "bits-per-mut"});
-    args::Flag noMAFFlip(
-        parser, "no-maf-flip", "Do not switch the reference allele with the major allele", {"no-maf-flip"});
+    args::Flag MAFFlip(
+        parser, "maf-flip", "Switch the reference allele with the major allele when they differ", {"maf-flip"});
     args::Flag showVersion(parser, "version", "Show version and exit", {"version"});
     args::ValueFlag<size_t> triplet(parser,
                                     "bs-triplet",
@@ -224,7 +224,7 @@ int main(int argc, char** argv) {
                                                  bitsPerMutation,
                                                  binaryMutations,
                                                  missingDataHandling == MDH_ADD_TO_GRG,
-                                                 !noMAFFlip,
+                                                 MAFFlip,
                                                  lfFilter ? *lfFilter : 0.0,
                                                  indivIdToPop,
                                                  triplet ? *triplet : 0);
@@ -243,7 +243,7 @@ int main(int argc, char** argv) {
         }
         START_TIMING_OPERATION();
         std::shared_ptr<grgl::MutationIterator> unmappedMutations = makeMutationIterator(
-            *mapMutations, restrictRange, binaryMutations, missingDataHandling == MDH_ADD_TO_GRG, !noMAFFlip);
+            *mapMutations, restrictRange, binaryMutations, missingDataHandling == MDH_ADD_TO_GRG, MAFFlip);
         if (!unmappedMutations) {
             std::cerr << "Could not load mutations file " << *mapMutations << std::endl;
             return 1;
