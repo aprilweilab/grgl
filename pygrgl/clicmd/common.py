@@ -4,6 +4,9 @@ import time
 import sys
 import os
 
+THISDIR = os.path.dirname(os.path.realpath(__file__))
+REPO_ROOT = os.path.join(THISDIR, "..", "..")
+
 def which(exe: str, required=False) -> Optional[str]:
     try:
         result = subprocess.check_output(["which", exe],
@@ -11,7 +14,7 @@ def which(exe: str, required=False) -> Optional[str]:
     except subprocess.CalledProcessError:
         result = None
     if result is None:
-        for p in [*sys.path, os.getcwd()]:
+        for p in [*sys.path, REPO_ROOT]:
             p = os.path.join(p, exe)
             if os.path.isfile(p):
                 result = p
