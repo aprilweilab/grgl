@@ -11,7 +11,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * should have received a copy of the GNU General Public License
+ * You should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #ifndef GRG_MUTATION_H
@@ -26,9 +26,6 @@
 #include <string>
 
 namespace grgl {
-
-using EXTERNAL_ID = int32_t;
-constexpr EXTERNAL_ID NO_ORIGINAL_ID = -1;
 
 class Mutation;
 
@@ -57,31 +54,24 @@ public:
         : m_alleleStorage({}),
           m_position(INVALID_POSITION),
           m_time(-1.0),
-          m_originalId(NO_ORIGINAL_ID),
-          m_refPosition(0) {}
+          m_altIndex(0) {}
 
     Mutation(BpPosition position, std::string allele)
         : m_alleleStorage({}),
           m_position(position),
           m_time(-1.0),
-          m_originalId(NO_ORIGINAL_ID),
-          m_refPosition(0) {
+          m_altIndex(0) {
         if (allele.size() > std::numeric_limits<uint16_t>::max()) {
             throw ApiMisuseFailure("Allele length cannot exceed (2^16)-1");
         }
         setAlleleValues(std::move(allele), "");
     }
 
-    Mutation(BpPosition position,
-             std::string allele,
-             const std::string& refAllele,
-             float time = -1.0,
-             EXTERNAL_ID originalId = NO_ORIGINAL_ID)
+    Mutation(BpPosition position, std::string allele, const std::string& refAllele, float time = -1.0)
         : m_alleleStorage({}),
           m_position(position),
           m_time(time),
-          m_originalId(originalId),
-          m_refPosition(0) {
+          m_altIndex(0) {
         if (allele.size() > std::numeric_limits<uint16_t>::max()) {
             throw ApiMisuseFailure("Allele length cannot exceed (2^16)-1");
         }
@@ -102,8 +92,7 @@ public:
         : m_alleleStorage({}),
           m_position(rhs.m_position),
           m_time(rhs.m_time),
-          m_originalId(rhs.m_originalId),
-          m_refPosition(0) {
+          m_altIndex(0) {
         setAlleleValues(std::move(rhs.getAllele()), rhs.getRefAllele());
     }
 
@@ -112,8 +101,7 @@ public:
             this->cleanup();
             this->m_position = rhs.m_position;
             this->m_time = rhs.m_time;
-            this->m_originalId = rhs.m_originalId;
-            this->m_refPosition = 0;
+            this->m_altIndex = 0;
             setAlleleValues(std::move(rhs.getAllele()), rhs.getRefAllele());
         }
         return *this;
@@ -124,8 +112,7 @@ public:
             this->cleanup();
             this->m_position = rhs.m_position;
             this->m_time = rhs.m_time;
-            this->m_originalId = rhs.m_originalId;
-            this->m_refPosition = 0;
+            this->m_altIndex = 0;
             setAlleleValues(std::move(rhs.getAllele()), rhs.getRefAllele());
         }
         return *this;
@@ -135,8 +122,7 @@ public:
         : m_alleleStorage({}),
           m_position(rhs.m_position),
           m_time(rhs.m_time),
-          m_originalId(rhs.m_originalId),
-          m_refPosition(0) {
+          m_altIndex(0) {
         setAlleleValues(std::move(rhs.getAllele()), rhs.getRefAllele());
     }
 
@@ -150,15 +136,21 @@ public:
 
     std::string getAllele() const {
         std::string storage = alleleStorageString();
-        return storage.substr(0, m_refPosition);
+        return std::move(storage.substr(m_altIndex));
     }
 
     std::string getRefAllele() const {
         std::string storage = alleleStorageString();
-        return storage.substr(m_refPosition);
+        return std::move(storage.substr(0, m_altIndex));
     }
 
-    EXTERNAL_ID getOriginalId() const { return m_originalId; }
+    /**
+     * Get a pair containing the reference allele (first) and the alternate allele (second) as strings.
+     */
+    std::pair<std::string, std::string> getBothAlleles() const {
+        std::string storage = alleleStorageString();
+        return {std::move(storage.substr(0, m_altIndex)), std::move(storage.substr(m_altIndex))};
+    }
 
     bool operator==(const Mutation& rhs) const {
         if (this->m_position != rhs.m_position) {
@@ -166,41 +158,28 @@ public:
         }
         std::string storage = alleleStorageString();
         std::string storageRhs = rhs.alleleStorageString();
-        return storage == storageRhs && this->m_originalId == rhs.m_originalId;
+        return storage == storageRhs && this->m_altIndex == rhs.m_altIndex;
     }
 
     bool operator<(const Mutation& rhs) const {
         if (this->m_position == rhs.m_position) {
-            std::string storage = alleleStorageString();
-            std::string storageRhs = rhs.alleleStorageString();
-            if (storage == storageRhs) {
-                return this->m_originalId < rhs.m_originalId;
+            const auto thisAlleles = this->getBothAlleles();
+            const auto rightAlleles = rhs.getBothAlleles();
+            if (thisAlleles.first == rightAlleles.first) {
+                return thisAlleles.second < rightAlleles.second;
             }
-            return storage < storageRhs;
+            return thisAlleles.first < rightAlleles.first;
         }
         return this->m_position < rhs.m_position;
     }
 
-protected:
-    void setAlleleValues(std::string altAllele, std::string refAllele) {
-        const size_t totalBytes = altAllele.size() + refAllele.size();
-        m_refPosition = altAllele.size();
-        if (totalBytes > 7) {
-            m_alleleStorage._str = (size_t) new char[totalBytes + 1];
-            std::memcpy((void*)m_alleleStorage._str, altAllele.c_str(), altAllele.size());
-            std::memcpy((void*)(m_alleleStorage._str + m_refPosition), refAllele.c_str(), refAllele.size());
-            *(char*)(m_alleleStorage._str + totalBytes) = 0; // null term
-            m_alleleStorage._str |= PTR_STOLEN_BIT;
-        } else {
-            for (size_t i = 0; i < altAllele.size(); i++) {
-                m_alleleStorage._b[i + 1] = altAllele[i];
-            }
-            for (size_t i = altAllele.size(); i < totalBytes; i++) {
-                m_alleleStorage._b[i + 1] = refAllele[i - altAllele.size()];
-            }
-        }
-    }
+    bool isShort() const { return !(bool)(m_alleleStorage._str & PTR_STOLEN_BIT); }
 
+    /**
+     * Returns the concatenation of the reference allele with the alternate allele.
+     * There is no delimiter, see getAltIndex() to get the index of the first character
+     * in the alternate allele.
+     */
     std::string alleleStorageString() const {
         std::string result;
         if (m_alleleStorage._str & PTR_STOLEN_BIT) {
@@ -216,6 +195,44 @@ protected:
         return std::move(result);
     }
 
+    /**
+     * INTERNAL SERIALIZATION METHOD.
+     */
+    void setAlleleStorageString(const std::string& storageStr) {
+        const size_t length = storageStr.size();
+        assert(length > 7);
+        m_alleleStorage._str = (size_t)new char[length + 1];
+        std::memcpy((void*)m_alleleStorage._str, storageStr.c_str(), length);
+        *(char*)(m_alleleStorage._str + length) = 0; // null term
+        m_alleleStorage._str |= PTR_STOLEN_BIT;
+    }
+
+    /**
+     * The position of the first character of the alternate allele in the allele
+     * storage string.
+     */
+    size_t getAltIndex() const { return static_cast<size_t>(m_altIndex); }
+
+protected:
+    void setAlleleValues(std::string altAllele, std::string refAllele) {
+        const size_t totalBytes = altAllele.size() + refAllele.size();
+        m_altIndex = refAllele.size();
+        if (totalBytes > 7) {
+            m_alleleStorage._str = (size_t)new char[totalBytes + 1];
+            std::memcpy((void*)m_alleleStorage._str, refAllele.c_str(), refAllele.size());
+            std::memcpy((void*)(m_alleleStorage._str + m_altIndex), altAllele.c_str(), altAllele.size());
+            *(char*)(m_alleleStorage._str + totalBytes) = 0; // null term
+            m_alleleStorage._str |= PTR_STOLEN_BIT;
+        } else {
+            for (size_t i = 0; i < refAllele.size(); i++) {
+                m_alleleStorage._b[i + 1] = refAllele[i];
+            }
+            for (size_t i = refAllele.size(); i < totalBytes; i++) {
+                m_alleleStorage._b[i + 1] = altAllele[i - refAllele.size()];
+            }
+        }
+    }
+
     // It is safe to steal the least-significant bit from a heap-allocated pointer
     // since those will always be at least 4-byte aligned. Technically we could steal 2 bits...
     static constexpr size_t PTR_STOLEN_BIT = 0x1;
@@ -226,13 +243,12 @@ protected:
         char _b[8];
     } m_alleleStorage; // 8
     static_assert(sizeof(m_alleleStorage) == 8, "Allele storage size changed");
-    BpPosition m_position;    // 8
-    float m_time;             // 4
-    EXTERNAL_ID m_originalId; // 4
-    uint16_t m_refPosition;   // 2
-    // Have 6 spare bits here due to alignment
+    BpPosition m_position; // 8
+    float m_time;          // 4
+    uint16_t m_altIndex;   // 2
+    uint16_t unused{};     // 2
 };
-static_assert(sizeof(Mutation) == 32, "Mutation size changed");
+static_assert(sizeof(Mutation) == 24, "Mutation size changed");
 
 /**
  * std::less-style comparison for Mutations that only looks at position and allele (ignores

@@ -11,11 +11,13 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * should have received a copy of the GNU General Public License
+ * You should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "grgl/map_mutations.h"
 #include "grg_helpers.h"
+#include "grgl/common.h"
+#include "grgl/csr_storage.h"
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
 #include "grgl/visitor.h"
@@ -59,31 +61,25 @@ public:
                const grgl::DfsPass dfsPass = grgl::DfsPass::DFS_PASS_NONE) override {
         release_assert(direction == TraversalDirection::DIRECTION_UP);
         release_assert(dfsPass == DfsPass::DFS_PASS_NONE);
+        release_assert(grg->hasUpEdges());
 
 #if CLEANUP_SAMPLE_SETS_MAPPING
         if (m_refCounts.empty()) {
             m_refCounts.resize(grg->numNodes());
         }
 #endif
-        bool isRoot = grg->numUpEdges(nodeId) == 0;
-
-        const auto& alreadySeeded = m_nodeToSamples.find(nodeId);
-        if (alreadySeeded != m_nodeToSamples.end()) {
-            m_collectedNodes.emplace_back(nodeId, m_nodeToSamples[nodeId].size());
-            return true;
-        }
-
+        const bool isRoot = grg->numUpEdges(nodeId) == 0;
+        const bool isSample = grg->isSample(nodeId);
         const size_t ploidy = grg->getPloidy();
-        auto& nodeData = grg->getNodeData(nodeId);
-        const bool computeCoals =
-            !grg->isSample(nodeId) && (ploidy == 2) && (NodeData::COAL_COUNT_NOT_SET == nodeData.numIndividualCoals);
+        const auto numCoals = grg->getNumIndividualCoals(nodeId);
+        const bool computeCoals = !isSample && (ploidy == 2) && (COAL_COUNT_NOT_SET == numCoals);
 
         size_t individualCoalCount = 0;
         // Map from an individual to which child contained it.
         std::unordered_map<NodeIDSizeT, NodeIDSizeT> individualToChild;
         NodeIDList candidateNodes;
         NodeIDList samplesBeneath;
-        if (grg->isSample(nodeId)) {
+        if (isSample) {
             samplesBeneath.emplace_back(nodeId);
         }
 #if CLEANUP_SAMPLE_SETS_MAPPING
@@ -111,17 +107,24 @@ public:
         // Check if we had a mismatch in expected vs. total sample sets.
         release_assert(nodeId < m_sampleCounts.size());
         release_assert(m_sampleCounts[nodeId] <= grg->numSamples());
-        bool keepGoing = true;
         NodeIDSizeT missing = (m_sampleCounts[nodeId] - samplesBeneath.size());
 
         // We can only record coalescence counts if there are no samples missing.
         if (missing == 0 && computeCoals) {
-            nodeData.numIndividualCoals = individualCoalCount;
+            grg->setNumIndividualCoals(nodeId, individualCoalCount);
         }
 
         // If we've reached the root of the graph or have missing samples beneath us, we need to stop the search
         // and emit candidate nodes to map the mutation to.
-        if (missing > 0 || isRoot) {
+        const bool keepGoing = (missing == 0 && !isRoot);
+        if (missing == 0 && isRoot) {
+            m_collectedNodes.emplace_back(nodeId, samplesBeneath.size()); // Root is a candidate node.
+#if CLEANUP_SAMPLE_SETS_MAPPING
+            // Prevent candidates from having their samplesets garbage collected.
+            m_refCounts[nodeId] = MAX_GRG_NODES + 1;
+#endif
+            m_nodeToSamples.emplace(nodeId, std::move(samplesBeneath));
+        } else if (!keepGoing) {
             for (const auto& candidate : candidateNodes) {
                 m_collectedNodes.emplace_back(candidate, m_nodeToSamples[candidate].size());
 #if CLEANUP_SAMPLE_SETS_MAPPING
@@ -129,10 +132,7 @@ public:
                 m_refCounts[candidate] = MAX_GRG_NODES + 1;
 #endif
             }
-            keepGoing = false;
-        }
-
-        if (keepGoing) {
+        } else {
             m_nodeToSamples.emplace(nodeId, std::move(samplesBeneath));
         }
 
@@ -150,6 +150,15 @@ public:
         return keepGoing;
     }
 
+    NodeIDList getSamplesForCandidate(NodeID candidateId) {
+        NodeIDList result;
+        auto findIt = m_nodeToSamples.find(candidateId);
+        release_assert(findIt != m_nodeToSamples.end());
+        result = std::move(findIt->second);
+        m_nodeToSamples.erase(findIt);
+        return std::move(result);
+    }
+
     std::vector<NodeSamples> m_collectedNodes;
     std::unordered_map<NodeID, NodeIDList> m_nodeToSamples;
 
@@ -161,9 +170,9 @@ private:
 #endif
 };
 
-static bool setsOverlap(const NodeIDSet& set1, const NodeIDList& set2) {
-    for (auto nodeId : set2) {
-        if (set1.find(nodeId) != set1.end()) {
+static bool setsOverlap(const NodeIDSet& alreadyCovered, const NodeIDList& candidateSet) {
+    for (auto nodeId : candidateSet) {
+        if (alreadyCovered.find(nodeId) != alreadyCovered.end()) {
             return true;
         }
     }
@@ -179,25 +188,27 @@ static bool setsOverlap(const NodeIDSet& set1, const NodeIDList& set2) {
 //    been covered.
 
 static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
-                                    const std::vector<NodeID>& topoOrder,
                                     const std::vector<NodeIDSizeT>& sampleCounts,
                                     const Mutation& newMutation,
                                     const NodeIDList& mutSamples,
                                     MutationMappingStats& stats,
                                     const NodeID shapeNodeIdMax) {
+    // The topological order of nodeIDs is maintained through-out this algorithm, because newly added
+    // nodes are only ever _root nodes_ (at the time they are added).
+    release_assert(grg->nodesAreOrdered());
+
     const size_t ploidy = grg->getPloidy();
     // The set of nodes that we have covered so far (greedily extended)
     NodeIDSet covered;
 
     TopoCandidateCollectorVisitor collector(sampleCounts);
     if (mutSamples.size() > 1) {
-        NodeIDList seeds;
-        for (const NodeID nodeId : mutSamples) {
-            seeds.push_back(nodeId);
-        }
-        grg->visitTopo(collector, grgl::TraversalDirection::DIRECTION_UP, seeds, &topoOrder);
+        grg->visitTopo(collector, grgl::TraversalDirection::DIRECTION_UP, mutSamples);
     }
     std::vector<NodeSamples>& candidates = collector.m_collectedNodes;
+    std::sort(candidates.begin(), candidates.end());
+    auto endOfUnique = std::unique(candidates.begin(), candidates.end());
+    candidates.erase(endOfUnique, candidates.end());
     std::sort(candidates.begin(), candidates.end(), cmpNodeSamples);
 
     if (candidates.empty()) {
@@ -220,13 +231,15 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     size_t individualCoalCount = 0;
     // Map from an individual to which child contained it.
     std::unordered_map<NodeIDSizeT, NodeIDSizeT> individualToChild;
-    const NodeID mutNodeId = grg->makeNode();
+    const NodeID mutNodeId = grg->makeNode(1, true);
     grg->addMutation(newMutation, mutNodeId);
     NodeIDList addedNodes;
-    while (!candidates.empty()) {
+    const size_t numMutSamples = mutSamples.size();
+    while (!candidates.empty() && covered.size() < numMutSamples) {
         const auto& candidate = candidates.back();
         const auto candidateId = std::get<0>(candidate);
-        const NodeIDList& candidateSet = collector.m_nodeToSamples.at(candidateId);
+        const NodeIDList candidateSet = collector.getSamplesForCandidate(candidateId);
+        release_assert(!candidateSet.empty());
         // Different candidates may cover different subsets of the sample set that
         // we are currently trying to cover. Those sample sets MUST be non-overlapping
         // or we will introduce a diamond into the graph:
@@ -284,7 +297,7 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
         }
     }
     if (ploidy == 2) {
-        grg->getNodeData(mutNodeId).numIndividualCoals = individualCoalCount;
+        grg->setNumIndividualCoals(mutNodeId, individualCoalCount);
     }
 
     if (!uncovered.empty()) {
@@ -315,29 +328,22 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
                   << " ms" << std::endl;                                                                               \
     } while (0)
 
-    const size_t mutationCount = mutations.countMutations();
-    // Note: if we change the algorithm to add more than just |mutations| nodes, we need to
-    // increase this to avoid re-doubling the vector sizes.
-    const size_t extraNodeCapacity = 0;
-    const size_t extraReserveCount = (mutationCount + extraNodeCapacity);
+    if (!grg->nodesAreOrdered()) {
+        throw ApiMisuseFailure(
+            "mapMutations can only be used on GRGs with ordered nodes; saving/loading a GRG will do this.");
+    }
 
     MutationMappingStats stats;
     stats.reuseSizeHist.resize(STATS_HIST_SIZE, 0);
-    stats.totalMutations = mutationCount;
+    stats.totalMutations = mutations.countMutations();
 
     // For the whole graph, count the number of samples under each node.
     DfsSampleCountVisitor countVisitor;
-    grg->visitDfs(countVisitor, grgl::TraversalDirection::DIRECTION_DOWN, grg->getRootNodes());
+    fastCompleteDFS(grg, countVisitor);
     std::vector<NodeIDSizeT>& sampleCounts = countVisitor.m_sampleCounts;
-    sampleCounts.reserve(sampleCounts.size() + extraReserveCount);
-
-    // Now get a topological order for the entire graph. We'll update this order
-    // later as we add new mutation nodes.
-    std::vector<NodeID> topoOrder = grg->topologicalSort(DIRECTION_DOWN);
-    topoOrder.reserve(topoOrder.size() + extraReserveCount);
 
     std::cout << "Mapping " << stats.totalMutations << " mutations\n";
-    size_t onePercent = (stats.totalMutations / ONE_HUNDRED_PERCENT) + 1;
+    const size_t onePercent = (stats.totalMutations / ONE_HUNDRED_PERCENT) + 1;
     size_t completed = 0;
 
     // The low-water mark for nodes. If a NodeID is greater than or equal to this, then it
@@ -361,22 +367,16 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
             }
             // Step 1: Add mutation node and create edges to existing nodes.
             NodeIDList addedNodes =
-                greedyAddMutation(grg, topoOrder, sampleCounts, unmapped.mutation, mutSamples, stats, shapeNodeIdMax);
+                greedyAddMutation(grg, sampleCounts, unmapped.mutation, mutSamples, stats, shapeNodeIdMax);
 
-            // Step 2: Add the new mutation node to the topological order.
-            topoOrder.resize(topoOrder.size() + addedNodes.size());
+            // Step 2: Add the new mutation node to the sample counts.
             sampleCounts.resize(sampleCounts.size() + addedNodes.size());
             for (const auto& nodeId : addedNodes) {
-                NodeIDSizeT maxOrder = 0;
                 NodeIDSizeT sumSamples = 0;
                 for (const auto& childId : grg->getDownEdges(nodeId)) {
-                    maxOrder = std::max<NodeIDSizeT>(maxOrder, topoOrder[childId]);
                     release_assert(sampleCounts[childId] > 0);
                     sumSamples += sampleCounts[childId];
                 }
-                topoOrder[nodeId] = maxOrder;
-
-                // Step 3: Update sample count for the new node.
                 sampleCounts[nodeId] = sumSamples;
             }
         } else {

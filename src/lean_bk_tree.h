@@ -1,3 +1,19 @@
+/* Genotype Representation Graph Library (GRGL)
+ * Copyright (C) 2024 April Wei
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 #ifndef GRGL_LEAN_BK_TREE_H
 #define GRGL_LEAN_BK_TREE_H
 
@@ -11,16 +27,13 @@
 
 namespace grgl {
 
-template <typename ElementType>
-class LeanBKTree;
+template <typename ElementType> class LeanBKTree;
 
-template <typename ElementType>
-class LeanBKTreeNode {
+template <typename ElementType> class LeanBKTreeNode {
 public:
     explicit LeanBKTreeNode(const ElementType& element)
-        : m_elements({element})
-        , m_isDeleted(false) {
-    }
+        : m_elements({element}),
+          m_isDeleted(false) {}
 
     void addElement(ElementType element) {
         if (m_isDeleted) {
@@ -31,13 +44,13 @@ public:
         }
     }
 
-    template <typename Container>
-    void moveElements(Container& result) {
+    template <typename Container> void moveElements(Container& result) {
         for (size_t i = 0; i < m_elements.size(); i++) {
             result.push_back(m_elements[i]);
         }
         m_isDeleted = true;
     }
+
 private:
     using ChildPair = std::pair<size_t, std::shared_ptr<LeanBKTreeNode<ElementType>>>;
 
@@ -51,17 +64,14 @@ private:
     friend class LeanBKTree<ElementType>;
 };
 
-template <typename ElementType>
-class LeanBKTree {
+template <typename ElementType> class LeanBKTree {
 public:
     using NodePointer = std::shared_ptr<LeanBKTreeNode<ElementType>>;
 
     explicit LeanBKTree(std::function<size_t(const ElementType&, const ElementType&)> distFunc)
-        : m_distFunc(distFunc) {
-    }
+        : m_distFunc(distFunc) {}
 
-    NodePointer insert(const ElementType& element,
-                       size_t& comparisons) {
+    NodePointer insert(const ElementType& element, size_t& comparisons) {
         if (!m_rootNode) {
             m_rootNode = std::make_shared<LeanBKTreeNode<ElementType>>(element);
             return m_rootNode;
@@ -90,10 +100,8 @@ public:
         abort();
     }
 
-    std::vector<NodePointer> lookup(const ElementType& queryElement,
-                                    size_t& nearestDistance,
-                                    size_t& comparisons,
-                                    bool collectAll = true) {
+    std::vector<NodePointer>
+    lookup(const ElementType& queryElement, size_t& nearestDistance, size_t& comparisons, bool collectAll = true) {
         size_t distBest = std::numeric_limits<size_t>::max();
         if (!m_rootNode) {
             nearestDistance = distBest;
@@ -131,11 +139,12 @@ public:
         nearestDistance = distBest;
         return results;
     }
+
 private:
     NodePointer m_rootNode{};
     std::function<size_t(const ElementType&, const ElementType&)> m_distFunc;
 };
 
-}
+} // namespace grgl
 
 #endif /* GRGL_LEAN_BK_TREE_H */

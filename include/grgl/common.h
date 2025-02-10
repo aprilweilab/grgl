@@ -11,7 +11,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * should have received a copy of the GNU General Public License
+ * You should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #ifndef GRGL_COMMON_H
@@ -19,11 +19,20 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <utility>
 
 namespace grgl {
+
+#define release_assert(condition)                                                                                      \
+    do {                                                                                                               \
+        if (!(condition)) {                                                                                            \
+            std::cerr << "release_assert(" #condition ") failed at " << __FILE__ << ":" << __LINE__ << std::endl;      \
+            abort();                                                                                                   \
+        }                                                                                                              \
+    } while (0)
 
 /**
  * Exception thrown when the GRG API is used incorrectly (bad parameters, incorrect preconditions, etc.).
@@ -33,6 +42,15 @@ public:
     explicit ApiMisuseFailure(char const* const message)
         : std::runtime_error(message) {}
 };
+
+#define api_exc_check(condition, msg)                                                                                  \
+    do {                                                                                                               \
+        if (!(condition)) {                                                                                            \
+            std::stringstream ssErr;                                                                                   \
+            ssErr << msg;                                                                                              \
+            throw ApiMisuseFailure(ssErr.str().c_str());                                                               \
+        }                                                                                                              \
+    } while (0)
 
 /**
  * Exception thrown when the input file does not meet conditions needed for GRG.
@@ -113,6 +131,29 @@ inline bool operator==(const FloatRange& a, const FloatRange& b) {
 inline std::size_t hash_combine(std::size_t hash1, std::size_t hash2) {
     return hash1 ^ (hash2 + 0x9e3779b9 + (hash1 << 6U) + (hash1 >> 2U));
 }
+
+constexpr uint64_t GRG_FILE_MAGIC = 0xE9366C64DDC8C5B0;
+constexpr uint16_t GRG_FILE_MAJOR_VERSION = 5;
+constexpr uint16_t GRG_FILE_MINOR_VERSION = 0;
+
+#pragma pack(push, 1)
+struct GRGFileHeader {
+    uint64_t magic;
+    uint16_t versionMajor;
+    uint16_t versionMinor;
+    uint16_t ploidy;
+    uint16_t populationCount;
+    uint64_t sampleCount;
+    uint64_t mutationCount;
+    uint64_t nodeCount;
+    uint64_t edgeCount;
+    uint64_t rangeStart; // in BP
+    uint64_t rangeEnd;   // in BP
+    uint64_t flags;
+    uint64_t unused[7];
+};
+#pragma pack(pop)
+static_assert(sizeof(GRGFileHeader) == 128, "GRG header size changed");
 
 } // namespace grgl
 

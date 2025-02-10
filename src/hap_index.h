@@ -1,20 +1,36 @@
+/* Genotype Representation Graph Library (GRGL)
+ * Copyright (C) 2024 April Wei
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 #ifndef GRG_HAP_INDEX_H
 #define GRG_HAP_INDEX_H
 
-#include <vector>
-#include <unordered_map>
-#include <cstdint>
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <list>
+#include <unordered_map>
+#include <vector>
 
 #include "grgl/common.h"
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
-#include "util.h"
-#include "lean_bk_tree.h"
 #include "hap_helpers.h"
+#include "lean_bk_tree.h"
+#include "util.h"
 
 namespace grgl {
 
@@ -26,8 +42,7 @@ using NodeToHapVect = std::vector<HaplotypeVector>;
 class HaplotypeIndex {
 public:
     explicit HaplotypeIndex(std::function<size_t(const NodeID&, const NodeID&)> distFunc)
-        : m_bkTree(std::move(distFunc)) {
-    }
+        : m_bkTree(std::move(distFunc)) {}
 
     virtual ~HaplotypeIndex() = default;
 
@@ -56,12 +71,13 @@ public:
         std::cout << " -- Index Stats --" << std::endl;
         std::cout << "  -> Comparisons: " << m_comparisons << std::endl;
     }
+
 private:
     LeanBKTree<NodeID> m_bkTree;
     // Keep track of how many comparisons we do.
     size_t m_comparisons{};
 };
 
-}
+} // namespace grgl
 
 #endif /* GRG_HAP_INDEX_H */

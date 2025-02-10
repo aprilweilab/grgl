@@ -17,7 +17,6 @@ try:
 finally:
     os.chdir(orig_dir)
 
-
 extensions = ["breathe", "sphinx.ext.autodoc", "sphinx.ext.autosummary"]
 
 html_theme = "sphinx_rtd_theme"
@@ -28,8 +27,6 @@ breathe_projects = {
 }
 breathe_default_project = "grgl"
 
-
 autosummary_generate = True  # Turn on sphinx.ext.autosummary
 
-# Add any paths that contain templates here, relative to this directory.
-#templates_path = ['_templates']
+project = "GRGL"

@@ -12,3 +12,8 @@ build.log
 /grg-merge
 /grgl
 /grgp
+doc/_build/
+doc/doc/
+doc/html/
+*.swp
+gperftools-2.15/

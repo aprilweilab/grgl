@@ -7,29 +7,24 @@ import subprocess
 import sys
 
 C_MODULE_NAME = "_grgl"
-ARG_DEBUG = "--debug-build"
-ARG_BGEN = "--bgen"
-ARG_COPYBINS = "--copy-bins"
-ARG_GSL = "--gsl"
+
+env_debug = int(os.environ.get("GRGL_DEBUG", 0))
+env_bgen = int(os.environ.get("GRGL_BGEN", 0))
+env_copy_bins = int(os.environ.get("GRGL_COPY_BINS", 0))
+env_gsl = int(os.environ.get("GRGL_GSL", 0))
 
 THISDIR = os.path.realpath(os.path.dirname(__file__))
 
-copy_bins = False # Copy executables to the top-level directory?
+
+copy_bins = bool(env_copy_bins) # Copy executables to the top-level directory?
 extra_cmake_args = []
 build_type = "Release"
-for arg in sys.argv[1:]:
-    if arg == ARG_DEBUG:
-        build_type = "Debug"
-        sys.argv.remove(ARG_DEBUG)
-    elif arg == ARG_BGEN:
-        extra_cmake_args.append("-DENABLE_BGEN=ON")
-        sys.argv.remove(ARG_BGEN)
-    elif arg == ARG_COPYBINS:
-        copy_bins = True
-        sys.argv.remove(ARG_COPYBINS)
-    elif arg == ARG_GSL:
-        extra_cmake_args.append("-DENABLE_GSL=ON")
-        sys.argv.remove(ARG_GSL)
+if bool(env_debug):
+    build_type = "Debug"
+if bool(env_bgen):
+    extra_cmake_args.append("-DENABLE_BGEN=ON")
+if bool(env_gsl):
+    extra_cmake_args.append("-DENABLE_GSL=ON")
 
 class CMakeExtension(Extension):
     def __init__(self, name, cmake_lists_dir=".", sources=[], extra_executables=[], **kwa):
@@ -37,7 +32,18 @@ class CMakeExtension(Extension):
         self.cmake_lists_dir = os.path.abspath(cmake_lists_dir)
         self.extra_executables = extra_executables
 
+def all_files(dir_name):
+    result = []
+    for root, dirs, files in os.walk(dir_name):
+        for f in files:
+            result.append(os.path.join(root, f))
+    return result
+
 class CMakeBuild(build_ext):
+    def get_source_files(self):
+        return (["CMakeLists.txt", ] + all_files("src/") + all_files("include/") + all_files("third-party/")
+                + all_files("extra/") + all_files("test/"))
+
     def build_extensions(self):
         try:
             out = subprocess.check_output(["cmake", "--version"])
@@ -83,6 +89,8 @@ with open(os.path.join(THISDIR, "include", "grgl", "version.h")) as vf:
         if line.startswith("#define GRGL_MINOR_VERSION"):
             minor_version = int(line.split(" ")[-1])
 version = f"{major_version}.{minor_version}"
+with open(os.path.join(THISDIR, "README.md")) as f:
+    long_description = f.read()
 
 setup(name=PACKAGE_NAME,
       packages=find_packages(),
@@ -101,5 +109,7 @@ setup(name=PACKAGE_NAME,
       ],
       entry_points = {
         "console_scripts": ["grg=pygrgl.cli:main"],
-      }
+      },
+      long_description=long_description,
+      long_description_content_type="text/markdown",
 )

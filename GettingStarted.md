@@ -86,6 +86,10 @@ any of `.vcf`, `.vcf.gz`, or `.bgen` to `.igd`.
 ```
 grg convert <.vcf/.vcf.gz/.bgen file> <.igd output filename>
 ```
+Then GRG can be constructed from IGD.
+```
+grg construct <.igd filename>
+```
 
 ### Converting Tree-Sequence to GRG
 

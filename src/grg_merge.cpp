@@ -11,7 +11,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * should have received a copy of the GNU General Public License
+ * You should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "common_visitors.h"
@@ -106,7 +106,7 @@ public:
             m_nodeIdToTargetNodeId[nodeId] = targetNodeId;
             m_targetHashToNodeId[digest] = targetNodeId;
             // Copy node data.
-            m_targetGrg.getNodeData(targetNodeId) = grg->getNodeData(nodeId);
+            m_targetGrg.setNumIndividualCoals(targetNodeId, grg->getNumIndividualCoals(nodeId));
 
             // And reconnect all the child nodes appropriately. We only do child because
             // we are doing a bottom-up topological graph search.

@@ -11,7 +11,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * should have received a copy of the GNU General Public License
+ * You should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "grgl/ts2grg.h"
@@ -206,9 +206,8 @@ convertTreeSeqToGRG(const tsk_treeseq_t* treeSeq, bool binaryMutations, bool use
         TSKIT_OK_OR_THROW(tsk_treeseq_get_node(treeSeq, tsNodeId, &node), "Failed getting node");
         constructionContext.addNodeMapping(tsNodeId, i);
 
-        auto& grgNodeData = grg->getNodeData((NodeID)i);
         if (node.population != TSK_NULL) {
-            grgNodeData.populationId = node.population;
+            grg->setPopulationId((NodeID)i, node.population);
         }
     }
 
@@ -244,7 +243,6 @@ convertTreeSeqToGRG(const tsk_treeseq_t* treeSeq, bool binaryMutations, bool use
             std::string ancestralState = std::string(site->ancestral_state, site->ancestral_state_length);
             for (tsk_size_t j = 0; j < site->mutations_length; j++) {
                 const tsk_id_t tsMutNode = site->mutations[j].node;
-                EXTERNAL_ID originalId = NO_ORIGINAL_ID;
                 std::string derivedState =
                     std::string(site->mutations[j].derived_state, site->mutations[j].derived_state_length);
                 if (binaryMutations) {
@@ -256,15 +254,13 @@ convertTreeSeqToGRG(const tsk_treeseq_t* treeSeq, bool binaryMutations, bool use
                         // such as from VCF, a pain, but there isn't a great alternative.
                         derivedState = Mutation::ALLELE_0;
                     }
-                } else {
-                    originalId = site->mutations[j].id;
                 }
                 double mutTime = site->mutations[j].time;
                 if (useNodeTimes) {
                     TSKIT_OK_OR_THROW(tsk_tree_get_time(&currentTree, tsMutNode, &mutTime), "Failed to get node time");
                 }
-                const Mutation theMutation = Mutation(
-                    (uint64_t)site->position, std::move(derivedState), ancestralState, (float)mutTime, originalId);
+                const Mutation theMutation =
+                    Mutation((uint64_t)site->position, std::move(derivedState), ancestralState, (float)mutTime);
                 // Clients can pass a predicate that only includes certain mutations.
                 NodeID mutationNodeId = addMutationFromTree(constructionContext, grg, treeSeq, &currentTree, tsMutNode);
                 grg->addMutation(theMutation, mutationNodeId);

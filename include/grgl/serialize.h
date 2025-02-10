@@ -11,12 +11,14 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * should have received a copy of the GNU General Public License
+ * You should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #ifndef GRG_SERIALIZE_H
 #define GRG_SERIALIZE_H
 
+#include "grgl/grgnode.h"
+#include "grgl/visitor.h"
 #include <iosfwd>
 #include <memory>
 #include <stdexcept>
@@ -36,25 +38,30 @@ class GRG;
 class MutableGRG;
 using GRGPtr = std::shared_ptr<GRG>;
 using MutableGRGPtr = std::shared_ptr<MutableGRG>;
+using IFSPointer = std::shared_ptr<std::istream>;
 
 /**
  * Serialize the GRG to the given outstream.
  *
  * @param[in] grg The GRG to be serialized.
  * @param[in] out The (binary) output stream.
- * @param[in] useVarInt (optional) `true` by default. Set to `false` to avoid using variable-sized
- *      integer encoding in the serialization. The only reason to do this is if you are using another
- *      library/program to read GRG files and it does not support variable integer encoding.
  */
-void writeGrg(const GRGPtr& grg, std::ostream& out, bool useVarInt = true, bool allowSimplify = true);
+std::pair<NodeIDSizeT, size_t> writeGrg(const GRGPtr& grg, std::ostream& out, bool allowSimplify = true);
+
+class GRGOutputFilter;
+
+std::pair<NodeIDSizeT, size_t> simplifyAndSerialize(const GRGPtr& grg,
+                                                    std::ostream& outStream,
+                                                    const GRGOutputFilter& filter,
+                                                    bool allowSimplify = true);
 
 /**
  * Deserialize the GRG from the given input stream.
  *
  * @param[in] inStream The (binary) input stream.
  */
-MutableGRGPtr readMutableGrg(std::istream& inStream);
-GRGPtr readImmutableGrg(std::istream& inStream, bool loadUpEdges = true, bool loadDownEdges = true);
+MutableGRGPtr readMutableGrg(IFSPointer& inStream);
+GRGPtr readImmutableGrg(IFSPointer& inStream, bool loadUpEdges = true);
 
 }; // namespace grgl
 

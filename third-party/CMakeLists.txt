@@ -1,5 +1,17 @@
 cmake_minimum_required(VERSION 3.10)
 project(grgl)
+include(CheckCXXCompilerFlag)
+unset(COMPILER_SUPPORTS_AVX CACHE)
+unset(COMPILER_SUPPORTS_AVX2 CACHE)
+# Apple's clang does not properly detect the (lack of) these options.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+  message("Using AppleClang, so AVX manually disabled")
+  set(COMPILER_SUPPORTS_AVX OFF)
+  set(COMPILER_SUPPORTS_AVX2 OFF)
+else()
+  check_cxx_compiler_flag(-mavx COMPILER_SUPPORTS_AVX)
+  check_cxx_compiler_flag(-mavx2 COMPILER_SUPPORTS_AVX2)
+endif()
 
 ################ TSKIT converted to CMake ################
 # Source files and compiler options copied from tskit/c/meson.build
@@ -40,3 +52,32 @@ include_directories(${CMAKE_CURRENT_LIST_DIR}/tskit/c/
 if (${ENABLE_BGEN})
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/bgen/)
 endif()
+
+############## libvbyte converted to CMake ###############
+if (${COMPILER_SUPPORTS_AVX2})
+  set(VBYTE_SOURCES
+      ${CMAKE_CURRENT_LIST_DIR}/libvbyte/varintdecode.c
+      ${CMAKE_CURRENT_LIST_DIR}/libvbyte/vbyte.cc)
+  set(AVX_OPTION -mavx -mavx2)
+elseif (${COMPILER_SUPPORTS_AVX})
+  set(VBYTE_SOURCES
+      ${CMAKE_CURRENT_LIST_DIR}/libvbyte/varintdecode.c
+      ${CMAKE_CURRENT_LIST_DIR}/libvbyte/vbyte.cc)
+  target_compile_options(vbyte PRIVATE -mavx)
+  set(AVX_OPTION -mavx)
+else()
+  set(VBYTE_SOURCES
+      ${CMAKE_CURRENT_LIST_DIR}/libvbyte/vbyte.cc)
+  set(AVX_OPTION)
+endif()
+add_library(vbyte STATIC ${VBYTE_SOURCES})
+target_compile_options(vbyte PRIVATE
+                       -Wall
+                       -Wextra
+                       -pedantic
+                       -fPIC
+                       ${AVX_OPTION}
+                       )
+include_directories(${CMAKE_CURRENT_LIST_DIR}/libvbyte)
+
+##########################################################

@@ -63,10 +63,10 @@ TEST(Construct, WithPopIds) {
     ASSERT_EQ(popDescriptions.size(), 4);
     ASSERT_EQ(popDescriptions[0], "Population4"); // Based on order of individuals in file
     // Test a bunch of sample nodes
-    ASSERT_EQ(popDescriptions.at(grg->getNodeData(0).populationId), "Population4");
-    ASSERT_EQ(popDescriptions.at(grg->getNodeData(12).populationId), "Population2");
-    ASSERT_EQ(popDescriptions.at(grg->getNodeData(13).populationId), "Population2");
-    ASSERT_EQ(popDescriptions.at(grg->getNodeData(8).populationId), "Population3");
+    ASSERT_EQ(popDescriptions.at(grg->getPopulationId(0)), "Population4");
+    ASSERT_EQ(popDescriptions.at(grg->getPopulationId(12)), "Population2");
+    ASSERT_EQ(popDescriptions.at(grg->getPopulationId(13)), "Population2");
+    ASSERT_EQ(popDescriptions.at(grg->getPopulationId(8)), "Population3");
 
 	remove_file(filename);
 }

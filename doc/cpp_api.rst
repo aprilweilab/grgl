@@ -1,7 +1,7 @@
 .. _cpp_docs:
 
-C++ API Documentation
----------------------
+C++ API
+-------
 
 Exception Types
 ~~~~~~~~~~~~~~~

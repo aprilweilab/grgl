@@ -14,19 +14,37 @@
  * should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+#include <pybind11/numpy.h>
 #include <pybind11/operators.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
 #include "grg_helpers.h"
+#include "grgl/common.h"
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
+#include "grgl/node_data.h"
 #include "grgl/serialize.h"
 #include "grgl/ts2grg.h"
+#include "grgl/version.h"
 #include "grgl/visitor.h"
 
 namespace py = pybind11;
+
+#include <iostream>
+
+py::array_t<double> dotProduct(grgl::GRGPtr& grg, py::array_t<double> input, grgl::TraversalDirection direction) {
+    py::buffer_info buffer = input.request();
+
+    const size_t outSize =
+        (direction == grgl::TraversalDirection::DIRECTION_DOWN) ? grg->numSamples() : grg->numMutations();
+    py::array_t<double> result(outSize);
+    py::buffer_info resultBuf = result.request();
+    memset(resultBuf.ptr, 0, outSize * sizeof(double));
+    grg->dotProduct((const double*)buffer.ptr, (size_t)buffer.size, direction, (double*)resultBuf.ptr, (size_t)outSize);
+    return std::move(result);
+}
 
 class NodeNumberingIterator : public grgl::GRGVisitor {
 public:
@@ -75,29 +93,7 @@ getTopoOrder(const grgl::GRGPtr& grg, grgl::TraversalDirection direction, const 
 
 size_t hashMutation(const grgl::Mutation* self) { return std::hash<grgl::Mutation>()(*self); }
 
-std::vector<std::pair<grgl::NodeID, grgl::MutationId>> getNodeMutationPairs(const grgl::GRGPtr& grg) {
-    std::vector<std::pair<grgl::NodeID, grgl::MutationId>> result;
-    for (const auto& nodeAndMutId : grg->getNodeMutationPairs()) {
-        result.emplace_back(nodeAndMutId.first, nodeAndMutId.second);
-    }
-    return std::move(result);
-}
-
 PYBIND11_MODULE(_grgl, m) {
-    py::class_<grgl::GRG::NodeListIterator>(m, "GRG_NodeListIterator")
-        .def(
-            "__iter__",
-            [](const grgl::GRG::NodeListIterator& nli) { return py::make_iterator(nli.begin(), nli.end()); },
-            py::keep_alive<0, 1>() /* Essential: keep object alive while iterator exists */);
-
-    py::class_<grgl::NodeData>(m, "NodeData")
-        .def_readonly("num_individual_coals", &grgl::NodeData::numIndividualCoals, R"^(
-            The number of individuals that coalesce at this node.
-            )^")
-        .def_readwrite("population_id", &grgl::NodeData::populationId, R"^(
-            The population ID (integer) for the population associated with this node.
-            )^");
-
     py::class_<grgl::Mutation>(m, "Mutation")
         .def(py::init<double, std::string, const std::string&, double>(),
              py::arg("position"),
@@ -138,6 +134,14 @@ PYBIND11_MODULE(_grgl, m) {
             )^")
         .def_property_readonly("num_samples", &grgl::GRG::numSamples, R"^(
                 The number of sample nodes in the GRG.
+            )^")
+        .def_property_readonly("bp_range", &grgl::GRG::getBPRange, R"^(
+                The range in base-pair positions that this GRG covers, from its list of mutations.
+            )^")
+        .def_property_readonly("specified_bp_range", &grgl::GRG::getSpecifiedBPRange, R"^(
+                The range in base-pair positions that this GRG covers, as specified during the
+                GRG construction. This range may exceed the bp_range if the GRG was constructed
+                from a range of the genome that did not immediately start/end with a mutation.
             )^")
         .def_property_readonly("nodes_are_ordered", &grgl::GRG::nodesAreOrdered, R"^(
                 Returns true if the NodeIDs are already in topological order from
@@ -200,14 +204,6 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: The parents of the given node as a list of NodeIDs.
                 :rtype: List[int]
             )^")
-        .def("get_node_data", &grgl::GRG::getNodeData, R"^(
-                Get the NodeData object associated with the NodeID.
-
-                :param node_id: The NodeID to get data for.
-                :type node_id: int
-                :return: The NodeData object.
-                :rtype: pygrgl.NodeData
-            )^")
         .def("get_sample_nodes", &grgl::GRG::getSampleNodes, R"^(
                 Get the NodeIDs for the sample nodes.
 
@@ -220,12 +216,22 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: The list of NodeIDs that are root nodes.
                 :rtype: List[int]
             )^")
-        .def("get_node_mutation_pairs", &getNodeMutationPairs, R"^(
+        .def("get_node_mutation_pairs", &grgl::GRG::getNodeMutationPairs, R"^(
                 Get a list of pairs (NodeID, MutationID). Each Mutation typically
                 is associated to a single Node, but rarely it can have more than one
                 Node, in which case it will show up in more than one pair.
+                Results are ordered by NodeID, ascending.
 
                 :return: A list of pairs of NodeID and MutationID.
+                :rtype: List[Tuple[int, int]]
+            )^")
+        .def("get_mutation_node_pairs", &grgl::GRG::getMutationsToNodeOrdered, R"^(
+                Get a list of pairs (MutationID, NodeID). Each Mutation typically
+                is associated to a single Node, but rarely it can have more than one
+                Node, in which case it will show up in more than one pair.
+                Results are ordered by MutationID, ascending.
+
+                :return: A list of pairs of MutationID and NodeID.
                 :rtype: List[Tuple[int, int]]
             )^")
         .def("get_mutations_for_node", &grgl::GRG::getMutationsForNode, py::arg("node_id"), R"^(
@@ -291,6 +297,43 @@ PYBIND11_MODULE(_grgl, m) {
 
                 :return: The mutation count.
                 :rtype: int
+            )^")
+        .def("get_population_id", &grgl::GRG::getPopulationId, py::arg("node_id"), R"^(
+                Get the population ID for the given node. Can be used to index into the list returned by
+                get_populations().
+
+                :param node_id: The node to retrieve.
+                :type node_id: int
+                :return: The population ID.
+                :rtype: int
+            )^")
+        .def("set_population_id", &grgl::GRG::setPopulationId, py::arg("node_id"), py::arg("population_id"), R"^(
+                Set the population ID for the given node.
+
+                :param node_id: The node to access.
+                :type node_id: int
+                :param population_id: The population ID to associate with the node.
+                :type population_id: int
+            )^")
+        .def("get_num_individual_coals", &grgl::GRG::getNumIndividualCoals, py::arg("node_id"), R"^(
+                Get the number of individuals that coalesced at the given node (not below or above).
+
+                :param node_id: The node to retrieve.
+                :type node_id: int
+                :return: The number of individuals that coalesced, or pygrgl.COAL_COUNT_NOT_SET.
+                :rtype: int
+            )^")
+        .def("set_num_individual_coals",
+             &grgl::GRG::setNumIndividualCoals,
+             py::arg("node_id"),
+             py::arg("num_coals"),
+             R"^(
+                Set the number of individuals that coalesced at the given node (not below or above).
+
+                :param node_id: The node to access.
+                :type node_id: int
+                :param num_coals: The number of individuals that coalesced, or pygrgl.COAL_COUNT_NOT_SET.
+                :type num_coals: int
             )^");
     grgClass.doc() = "A Genotype Representation Graph (GRG) representing a particular dataset. "
                      "This is the immutable portion of the API, so every graph has these operations. "
@@ -308,11 +351,14 @@ PYBIND11_MODULE(_grgl, m) {
 
     py::class_<grgl::MutableGRG, std::shared_ptr<grgl::MutableGRG>>(m, "MutableGRG", grgClass)
         .def(py::init<size_t, size_t>(), R"^()^")
-        .def("make_node", &grgl::MutableGRG::makeNode, py::arg("count") = 1, R"^(
+        .def("make_node", &grgl::MutableGRG::makeNode, py::arg("count") = 1, py::arg("force_ordered") = false, R"^(
             Create one or more new nodes in the graph.
 
             :param count: How many nodes to create (optional, default to 1).
             :type count: int
+            :param force_ordered: Set to True if you are sure adding this node will maintain the topological
+                order of the NodeIDs within the graph.
+            :type count: bool
         )^")
         .def("connect", &grgl::MutableGRG::connect, py::arg("source"), py::arg("target"), R"^(
             Add a down edge from source to target, and an up edge from target to source.
@@ -348,7 +394,6 @@ PYBIND11_MODULE(_grgl, m) {
           &grgl::loadImmutableGRG,
           py::arg("filename"),
           py::arg("load_up_edges") = true,
-          py::arg("load_down_edges") = true,
           R"^(
         Load a GRG file from disk. Immutable GRGs are much faster to traverse than mutable
         GRGs and take up less RAM, so this is the preferred method if you are using a GRG
@@ -358,8 +403,6 @@ PYBIND11_MODULE(_grgl, m) {
         :type filename: str
         :param load_up_edges: If False, do not load the graph "up" edges (saves RAM).
         :type load_up_edges: bool
-        :param load_down_edges: If False, do not load the graph "down" edges (saves RAM).
-        :type load_down_edges: bool
         :return: The GRG.
         :rtype: pygrgl.GRG
     )^");
@@ -367,8 +410,37 @@ PYBIND11_MODULE(_grgl, m) {
     m.def("save_grg", &grgl::saveGRG, py::arg("grg"), py::arg("filename"), py::arg("allow_simplify") = true, R"^(
         Save the GRG to disk, simplifying it (if possible) in the process.
 
+        :param grg: The GRG
+        :type filename: pygrgl.GRG
         :param filename: The file to save to.
         :type filename: str
+        :param allow_simplify: Set to False to disallow removing nodes/edges from the graph that do not
+            significantly contribute to the mutation-to-samples mapping.
+        :type allow_simplify: bool
+    )^");
+
+    m.def("save_subset",
+          &grgl::saveGRGSubset,
+          py::arg("grg"),
+          py::arg("filename"),
+          py::arg("direction"),
+          py::arg("seed_list"),
+          py::arg("bp_range") = std::pair<grgl::BpPosition, grgl::BpPosition>(),
+          R"^(
+        Save a subset of the GRG to disk, specified by a vector masking either mutation IDs or sample IDs.
+
+        :param grg: The GRG
+        :type filename: pygrgl.GRG
+        :param filename: The file to save to.
+        :type filename: str
+        :param direction: Downward means the seeds should be a list of MutationID that should be kept in
+            the graph. Upward means the seeds should be a list of sample NodeID that should be kept.
+        :type direction: pygrgl.TraversalDirection
+        :param seed_list: A list of MutationID or NodeID (see direction parameter).
+        :type seed_list: List[int]
+        :param bp_range: A pair of integers specifying the base-pair range that this GRG covers. This is just
+            meta-data, and does not change the filtering behavior.
+        :type bp_range: Tuple[int, int]
     )^");
 
     m.def("grg_from_trees", &grgl::grgFromTrees, py::arg("filename"), py::arg("binary_mutations") = false, R"^(
@@ -456,8 +528,41 @@ PYBIND11_MODULE(_grgl, m) {
         :rtype: List[int]
     )^");
 
-    m.attr("INVALID_NODE") = INVALID_NODE_ID;
-    m.attr("COAL_COUNT_NOT_SET") = grgl::NodeData::COAL_COUNT_NOT_SET;
+    m.def("dot_product", &dotProduct, py::arg("grg"), py::arg("input"), py::arg("direction"), R"^(
+        Compute one of two possible dot products across the entire graph. The input vector :math:`V` can be
+        either :math:`1 \times N` (:math:`N` is number of samples) or :math:`1 \times M` (:math:`M` is number of
+        mutations). The given direction determines which input vector is expected. Let :math:`X` be the
+        :math:`N \times M` genotype matrix.
+        For an :math:`1 \times N` input :math:`V`, the product performed is :math:`V \cdot X` which gives a
+        :math:`1 \times M` result. I.e., the input vector is a value per sample and the output vector is
+        a value per mutation.
+        For an :math:`1 \times M` input :math:`V`, the product performed is :math:`V \cdot X^T` which gives a
+        :math:`1 \times N` result. I.e., the input vector is a value per mutation and the output vector is
+        a value per sample.
 
-    m.attr("__version__") = "dev";
+        Dot product in the graph works by seeding the input nodes (samples or mutations) with the corresponding
+        values from the input vector and then traversing the graph in the relevant direction (up or down). The
+        ancestor/descendant values are summed at each node, until the terminal nodes (mutations or samples) are
+        reached.
+
+        :param grg: The GRG to perform the computation against.
+        :type grg: pygrgl.GRG or pygrgl.MutableGRG
+        :param input: The numpy array of input values :math:`V`.
+        :type seed_list: numpy.array
+        :param direction: The direction to traverse, up (input is per sample) or down (input is per mutation).
+        :type direction: pygrgl.TraversalDirection
+        :return: The numpy array of output values.
+        :rtype: numpy.array
+
+    )^");
+
+    m.attr("INVALID_NODE") = INVALID_NODE_ID;
+    m.attr("COAL_COUNT_NOT_SET") = grgl::COAL_COUNT_NOT_SET;
+
+    std::stringstream versionString;
+    versionString << GRGL_MAJOR_VERSION << "." << GRGL_MINOR_VERSION;
+    m.attr("__version__") = versionString.str();
+    std::stringstream fileVersionString;
+    fileVersionString << grgl::GRG_FILE_MAJOR_VERSION << "." << grgl::GRG_FILE_MINOR_VERSION;
+    m.attr("GRG_FILE_VERSION") = fileVersionString.str();
 }

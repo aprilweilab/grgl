@@ -1,23 +1,45 @@
 ![](https://github.com/aprilweilab/grgl/actions/workflows/cmake-multi-platform.yml/badge.svg)
 ![](https://readthedocs.org/projects/grgl/badge/?version=latest)
 
+# Genotype Representation Graphs
+
+A Genotype Representation Graph (GRG) is a compact way to store reference-aligned genotype data for large
+genetic datasets. These datasets are typically stored in tabular formats (VCF, BCF, BGEN, etc.) and then
+compressed using off-the-shelf compression. In contrast, a GRG contains Mutation nodes (representing variants)
+and Sample nodes (representing haploid samples), where there is a path from a Mutation node to a Sample
+node if-and-only-if that sample contains that mutation. These paths go through internal nodes that represent
+common ancestry between multiple samples, and this can result in significant compression (10-15x smaller than
+.vcf.gz). Calculations on the whole dataset can be performed very quickly on GRG, using GRGL. See our paper
+["Enabling efficient analysis of biobank-scale data with genotype representation graphs"](https://www.nature.com/articles/s43588-024-00739-9)
+for more details.
+
 # Genotype Representation Graph Library (GRGL)
 
 GRGL can be used as a library in both C++ and Python. Support is currently limited to Linux and MacOS.
 It contains both an API [(see docs)](https://grgl.readthedocs.io/) and a [set of command-line tools](https://github.com/aprilweilab/grgl/blob/main/GettingStarted.md).
 
-## Building (non-Python)
+## Installing from pip
+
+If you just want to use the tools (e.g., constructing GRG or converting tree-sequence to GRG) and the Python API then you can install via pip (from [PyPi](http://pypi.org/project/pygrgl/)).
+
+```
+pip install pygrgl
+```
+
+This will use prebuilt packages for most modern Linux situations, and will build from source for MacOS. In order to build from source it will require CMake (at least v3.14), zlib development headers, and a clang or GCC compiler that supports C++11.
+
+## Building (C++ only)
 
 Make sure you clone with `git clone --recursive`!
 
-If you only intend to use GRGL from C++, or use the command-line tools, you can just build it via `CMake`:
+If you only intend to use GRGL from C++, you can just build it via `CMake`:
 ```
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j4
 ```
 
-See below to install the libraries and tools to your system. It is recommended to install it to a custom location (prefix) since removing packages installed via `make install` is a pain otherwise. Example:
+See below to install the libraries to your system. It is recommended to install it to a custom location (prefix) since removing packages installed via `make install` is a pain otherwise. Example:
 ```
 mkdir /path/to/grgl_installation/
 mkdir build && cd build
@@ -39,18 +61,7 @@ python setup.py bdist_wheel               # Compiles C++, builds a wheel in the 
 pip install --force-reinstall dist/*.whl  # Install from wheel
 ```
 
-Or for development you can install the folder with pip:
-```
-python3 -m venv /path/to/MyEnv
-source /path/to/MyEnv/bin/activate
-pip install --install-option="--copy-bins" -v -e .
-```
-
-BGEN support is disabled by default. If you want to enable it:
-* `python setup.py bdist_wheel --bgen`
-* or `pip install --install-option="--bgen" --install-option="--copy-bins" -v -e .`
-
-Build and installation should take at most a few minutes on the typical computer.
+Build and installation should take at most a few minutes on the typical computer. For more details on build options, see DEVELOPING.md.
 
 ## Building (Docker)
 
@@ -81,9 +92,19 @@ Load a GRG and emit some simple statistics about the GRG itself:
 grg process stats my_arg_data.grg
 ```
 
-To construct a GRG from a VCF file, use the `grg_from_vcf.py` script (after building grgl):
+To construct a GRG from a VCF file, use the `grg construct` command:
 ```
 grg construct --parts 20 -j 1 path/to/foo.vcf
+```
+
+**WARNING:** VCF access for GRG is not indexed, and in general really slow. For anything beyond toy datasets, it is recommended to convert
+VCF files to [IGD](https://github.com/aprilweilab/picovcf) first. You can use the `grg convert` tool (available as part of GRGL)
+ or `igdtools` from [picovcf](https://github.com/aprilweilab/picovcf).
+
+To convert a VCF(.gz) to an IGD and then build a GRG:
+```
+grg convert path/to/foo.vcf foo.igd
+grg construct --parts 20 -j 1 foo.igd
 ```
 
 Construction for small datasets (such as those included as tests in this repository) should be very fast, a few minutes at most. Really large datasets (such as Biobank-scale) can take on the order of a day when using lots of threads (e.g., 70).

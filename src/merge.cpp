@@ -11,7 +11,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * should have received a copy of the GNU General Public License
+ * You should have received a copy of the GNU General Public License
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include <args.hxx>
@@ -73,7 +73,10 @@ int main(int argc, char** argv) {
     }
 
     std::ofstream outStream(*outfile, std::ios::binary);
-    grgl::writeGrg(grg1, outStream, true, !noSimplify);
+    auto counts = grgl::writeGrg(grg1, outStream, !noSimplify);
+    std::cout << "Wrote simplified GRG with:" << std::endl;
+    std::cout << "  Nodes: " << counts.first << std::endl;
+    std::cout << "  Edges: " << counts.second << std::endl;
     std::cout << "Wrote GRG to " << *outfile << std::endl;
     return 0;
 }

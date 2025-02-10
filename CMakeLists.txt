@@ -18,7 +18,7 @@ include(CheckSymbolExists)
 check_symbol_exists(posix_fadvise "fcntl.h" HAVE_POSIX_FADVISE)
 
 # Global flags that affect more than one target.
-add_compile_options(-DCOMPACT_NODE_IDS -DVCF_GZ_SUPPORT)
+add_compile_options(-DCOMPACT_NODE_IDS -DVCF_GZ_SUPPORT -Werror)
 
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -66,11 +66,13 @@ if (${ENABLE_CHECKERS})
 endif()
 
 set(GRGL_TEST_SOURCES
+    ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_bloom_filter.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_common.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_construct.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_bloom_filter.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_csr_storage.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_grg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_main.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_map_muts.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_mutation.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_serialize.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_util.cpp
@@ -95,6 +97,7 @@ set(GRGL_CORE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/mut_iterator.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/serialize.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/ts2grg.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/windowing.cpp
   )
 
 include_directories(${CMAKE_CURRENT_LIST_DIR}/include/
@@ -150,7 +153,7 @@ add_executable(grgl_tool
                ${CMAKE_CURRENT_LIST_DIR}/src/grgl.cpp
                )
 set_target_properties(grgl_tool PROPERTIES OUTPUT_NAME "grgl")
-target_link_libraries(grgl_tool tskit grgl ${BGEN_LIBS} z)
+target_link_libraries(grgl_tool tskit grgl ${BGEN_LIBS} z vbyte)
 
 # Tool for processing GRG files (stats, etc).
 add_executable(grgp_tool
@@ -158,7 +161,7 @@ add_executable(grgp_tool
                ${CMAKE_CURRENT_LIST_DIR}/src/calculations.cpp
                )
 set_target_properties(grgp_tool PROPERTIES OUTPUT_NAME "grgp")
-target_link_libraries(grgp_tool grgl ${GRGP_LIBS})
+target_link_libraries(grgp_tool grgl ${GRGP_LIBS} vbyte)
 if (${ENABLE_GSL})
   add_dependencies(grgp_tool ${GRGP_DEPS})
 endif()
@@ -169,7 +172,7 @@ add_executable(grgl_merge
                ${CMAKE_CURRENT_LIST_DIR}/src/merge.cpp
                )
 set_target_properties(grgl_merge PROPERTIES OUTPUT_NAME "grg-merge")
-target_link_libraries(grgl_merge grgl)
+target_link_libraries(grgl_merge grgl vbyte)
 
 # Tool for converting file formats.
 add_executable(gconverter
@@ -203,7 +206,7 @@ install(TARGETS grgl_tool grgl_merge gconverter gindexer vcftime)
 if(PYTHON_SUPPORT)
     add_subdirectory(third-party/pybind11)
     pybind11_add_module(_grgl src/python/_grgl.cpp)
-    target_link_libraries(_grgl PRIVATE grgl tskit)
+    target_link_libraries(_grgl PRIVATE grgl tskit vbyte)
 endif()
 
 
@@ -236,6 +239,6 @@ if(ENABLE_TESTS)
 
   # Now simply link against gtest or gtest_main as needed. Eg
   add_executable(grgl_test ${GRGL_TEST_SOURCES})
-  target_link_libraries(grgl_test gtest_main tskit grgl z ${BGEN_LIBS})
-  add_test(NAME grgl_test COMMAND grgl_test)
+  target_link_libraries(grgl_test gtest_main tskit grgl z ${BGEN_LIBS} vbyte)
+  add_test(NAME grgl_test COMMAND grgl_test vbyte)
 endif()
