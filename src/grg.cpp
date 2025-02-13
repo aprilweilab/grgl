@@ -154,100 +154,141 @@ void GRG::visitDfs(GRGVisitor& visitor, TraversalDirection direction, const Node
 
 class ValueSumVisitor : public GRGVisitor {
 public:
-    explicit ValueSumVisitor(std::vector<double>& nodeValues)
-        : m_nodeValues(nodeValues) {}
+    explicit ValueSumVisitor(std::vector<double>& nodeValues, const size_t numRows = 1)
+        : m_nodeValues(nodeValues),
+          m_numRows(numRows) {}
 
     bool visit(const grgl::GRGPtr& grg,
                const grgl::NodeID nodeId,
                const grgl::TraversalDirection direction,
                const grgl::DfsPass dfsPass) override {
         if (dfsPass != grgl::DfsPass::DFS_PASS_THERE) {
-            double transitiveValue = 0.0;
+            const size_t base = nodeId * m_numRows;
             if (direction == DIRECTION_DOWN) {
                 for (const auto& child : grg->getDownEdges(nodeId)) {
-                    transitiveValue += m_nodeValues[child];
+                    const size_t cbase = child * m_numRows;
+                    for (size_t j = 0; j < m_numRows; j++) {
+                        m_nodeValues[base + j] += m_nodeValues[cbase + j];
+                    }
                 }
             } else {
                 for (const auto& parent : grg->getUpEdges(nodeId)) {
-                    transitiveValue += m_nodeValues[parent];
+                    const size_t pbase = parent * m_numRows;
+                    for (size_t j = 0; j < m_numRows; j++) {
+                        m_nodeValues[base + j] += m_nodeValues[pbase + j];
+                    }
                 }
             }
-            m_nodeValues[nodeId] += transitiveValue;
         }
         return true;
     }
 
 private:
     std::vector<double>& m_nodeValues;
+    const size_t m_numRows;
 };
 
-void GRG::dotProduct(const double* inputData,
-                     size_t inputLength,
-                     TraversalDirection direction,
-                     double* outputData,
-                     size_t outputLength) {
+void GRG::matrixMultiplication(const double* inputMatrix,
+                               size_t inputCols,
+                               size_t inputRows,
+                               TraversalDirection direction,
+                               double* outputMatrix,
+                               size_t outputSize) {
+    release_assert(inputCols > 0);
+    release_assert(inputRows > 0);
+    const size_t outputCols = outputSize / inputRows;
+    release_assert(outputSize % inputRows == 0);
     if (direction == DIRECTION_DOWN) {
-        if (inputLength != numMutations()) {
+        if (inputCols != numMutations()) {
             throw ApiMisuseFailure("Input vector is not size M (numMutations())");
         }
-        if (outputLength != numSamples()) {
+        if (outputCols != numSamples()) {
             throw ApiMisuseFailure("Output vector is not size N (numSamples())");
         }
-        std::vector<double> nodeValues(numNodes());
+    } else {
+        if (inputCols != numSamples()) {
+            throw ApiMisuseFailure("Input vector is not size N (numSamples())");
+        }
+        if (outputCols != numMutations()) {
+            throw ApiMisuseFailure("Output vector is not size M (numMutations())");
+        }
+    }
+
+    // TODO: could use AVX/SSE for the K addition operations below.
+
+    // The node value storage stores the different row values consecutively (so
+    // similar to column-major order), in contrast to the input/output matrices
+    // which are row-major.
+    std::vector<double> nodeValues(numNodes() * inputRows);
+    if (direction == DIRECTION_DOWN) {
         for (const auto& nodeIdAndMutId : this->getNodeMutationPairs()) {
             const NodeID& nodeId = nodeIdAndMutId.first;
             const MutationId& mutId = nodeIdAndMutId.second;
-            assert(mutId < inputLength);
+            assert(mutId < inputCols);
             if (nodeId != INVALID_NODE_ID) {
-                nodeValues[nodeId] += inputData[mutId];
+                const size_t base = nodeId * inputRows;
+                for (size_t row = 0; row < inputRows; row++) {
+                    const size_t rowStart = row * inputCols;
+                    nodeValues[base + row] += inputMatrix[rowStart + mutId];
+                }
             }
         }
         if (this->nodesAreOrdered()) {
             for (NodeID i = numNodes(); i > 0; i--) {
                 const NodeID nodeId = i - 1;
-                const double myValue = nodeValues[nodeId];
+                const size_t base = nodeId * inputRows;
                 for (NodeID childId : this->getDownEdges(nodeId)) {
-                    nodeValues[childId] += myValue;
+                    const size_t cbase = childId * inputRows;
+                    for (size_t j = 0; j < inputRows; j++) {
+                        nodeValues[cbase + j] += nodeValues[base + j];
+                    }
                 }
             }
         } else {
-            ValueSumVisitor valueSumVisitor(nodeValues);
+            ValueSumVisitor valueSumVisitor(nodeValues, inputRows);
             this->visitDfs(valueSumVisitor, DIRECTION_UP, getSampleNodes());
         }
-        for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
-            assert(sampleId < outputLength);
-            outputData[sampleId] = nodeValues[sampleId];
+        for (size_t row = 0; row < inputRows; row++) {
+            const size_t rowStart = row * outputCols;
+            for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
+                const size_t base = sampleId * inputRows;
+                assert(rowStart + sampleId < outputSize);
+                outputMatrix[rowStart + sampleId] = nodeValues[base + row];
+            }
         }
     } else {
-        if (inputLength != numSamples()) {
-            throw ApiMisuseFailure("Input vector is not size N (numSamples())");
-        }
-        if (outputLength != numMutations()) {
-            throw ApiMisuseFailure("Output vector is not size M (numMutations())");
-        }
-        std::vector<double> nodeValues(numNodes());
         for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
-            assert(sampleId < inputLength);
-            nodeValues[sampleId] = inputData[sampleId];
+            assert(sampleId < inputCols);
+            const size_t base = sampleId * inputRows;
+            for (size_t row = 0; row < inputRows; row++) {
+                const size_t rowStart = row * inputCols;
+                nodeValues[base + row] = inputMatrix[rowStart + sampleId];
+            }
         }
         if (this->nodesAreOrdered()) {
             for (NodeID nodeId = numSamples(); nodeId < numNodes(); nodeId++) {
-                double value = 0.0;
+                const size_t base = nodeId * inputRows;
                 for (NodeID childId : this->getDownEdges(nodeId)) {
-                    value += nodeValues[childId];
+                    const size_t cbase = childId * inputRows;
+                    for (size_t j = 0; j < inputRows; j++) {
+                        nodeValues[base + j] += nodeValues[cbase + j];
+                    }
                 }
-                nodeValues[nodeId] += value;
             }
         } else {
-            ValueSumVisitor valueSumVisitor(nodeValues);
+            ValueSumVisitor valueSumVisitor(nodeValues, inputRows);
             this->visitDfs(valueSumVisitor, DIRECTION_DOWN, getRootNodes());
         }
-        for (const auto& nodeIdAndMutId : this->getNodeMutationPairs()) {
-            const NodeID& nodeId = nodeIdAndMutId.first;
-            const MutationId& mutId = nodeIdAndMutId.second;
-            assert(mutId < outputLength);
-            if (nodeId != INVALID_NODE_ID) {
-                outputData[mutId] += nodeValues[nodeId];
+        for (size_t row = 0; row < inputRows; row++) {
+            const size_t rowStart = row * outputCols;
+            for (const auto& nodeIdAndMutId : this->getNodeMutationPairs()) {
+                const NodeID& nodeId = nodeIdAndMutId.first;
+                const MutationId& mutId = nodeIdAndMutId.second;
+                assert(rowStart + mutId < outputSize);
+                if (nodeId != INVALID_NODE_ID) {
+                    const size_t base = nodeId * inputRows;
+                    outputMatrix[rowStart + mutId] += nodeValues[base + row];
+                }
             }
         }
     }
