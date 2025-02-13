@@ -4,7 +4,7 @@ Python API
 ----------
 
 .. automodule:: pygrgl
-    :members: grg_to_cyto_json, load_mutable_grg, load_immutable_grg, save_grg, save_subset, grg_from_trees, get_bfs_order, get_dfs_order, get_topo_order, dot_product, INVALID_NODE, COAL_COUNT_NOT_SET, GRG_FILE_VERSION
+    :members: grg_to_cyto_json, load_mutable_grg, load_immutable_grg, save_grg, save_subset, grg_from_trees, get_bfs_order, get_dfs_order, get_topo_order, dot_product, matmul, INVALID_NODE, COAL_COUNT_NOT_SET, GRG_FILE_VERSION
 
 .. automodule:: pygrgl.display
     :members: grg_to_cyto

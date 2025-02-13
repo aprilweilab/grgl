@@ -19,9 +19,7 @@ import argparse
 import os
 import sys
 import subprocess
-import time
 from multiprocessing import Pool
-from typing import Optional, List
 from .common import which, time_call
 
 

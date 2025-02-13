@@ -27,9 +27,6 @@ Main GRG Classes
 .. doxygenclass:: grgl::Mutation
     :members:
 
-.. doxygenstruct:: grgl::NodeData
-    :members:
-
 
 Serialization and Conversion
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -41,6 +38,8 @@ Serialization and Conversion
 .. doxygenfunction:: grgl::readImmutableGrg
 
 .. doxygenfunction:: grgl::convertTreeSeqToGRG
+
+.. doxygenfunction:: grgl::simplifyAndSerialize
 
 Visitors
 ~~~~~~~~
