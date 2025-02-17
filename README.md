@@ -8,10 +8,13 @@ genetic datasets. These datasets are typically stored in tabular formats (VCF, B
 compressed using off-the-shelf compression. In contrast, a GRG contains Mutation nodes (representing variants)
 and Sample nodes (representing haploid samples), where there is a path from a Mutation node to a Sample
 node if-and-only-if that sample contains that mutation. These paths go through internal nodes that represent
-common ancestry between multiple samples, and this can result in significant compression (10-15x smaller than
-.vcf.gz). Calculations on the whole dataset can be performed very quickly on GRG, using GRGL. See our paper
+common ancestry between multiple samples, and this can result in significant compression **(30-50x smaller than
+.vcf.gz)**. Calculations on the whole dataset can be performed very quickly on GRG, using GRGL. See our paper
 ["Enabling efficient analysis of biobank-scale data with genotype representation graphs"](https://www.nature.com/articles/s43588-024-00739-9)
 for more details.
+
+Since the publication of the paper, [version 2.0](https://github.com/aprilweilab/grgl/releases/tag/v2.0) has been released,
+which further reduced the GRG size (by about half) and significantly sped up graph load time (by about 20x).
 
 # Genotype Representation Graph Library (GRGL)
 
@@ -28,9 +31,25 @@ pip install pygrgl
 
 This will use prebuilt packages for most modern Linux situations, and will build from source for MacOS. In order to build from source it will require CMake (at least v3.14), zlib development headers, and a clang or GCC compiler that supports C++11.
 
+## Building (Python)
+
+The Python installation installs the command line tools and Python libraries (the C++ executables are packaged as part of this). Make sure you clone with `git clone --recursive`!
+
+Requires Python 3.7 or newer to be installed (including development headers). It is recommended that you build/install in a virtual environment.
+```
+python3 -m venv /path/to/MyEnv
+source /path/to/MyEnv/bin/activate
+python setup.py bdist_wheel               # Compiles C++, builds a wheel in the dist/ directory
+pip install --force-reinstall dist/*.whl  # Install from wheel
+```
+
+Build and installation should take at most a few minutes on the typical computer. For more details on build options, see [DEVELOPING.md](https://github.com/aprilweilab/grgl/blob/main/DEVELOPING.md).
+
 ## Building (C++ only)
 
-Make sure you clone with `git clone --recursive`!
+The C++ build is only necessary for folks who want to include GRGL as a library in their C++ project. Typically, you would include our
+CMake into your project via [add\_subdirectory](https://cmake.org/cmake/help/latest/command/add_subdirectory.html), but you can also build
+standalone as below. Make sure you clone with `git clone --recursive`!
 
 If you only intend to use GRGL from C++, you can just build it via `CMake`:
 ```
@@ -49,20 +68,6 @@ make install
 # There should now be bin/, lib/, etc., directories under /path/to/grgl_installation/
 ```
 
-## Building (Python)
-
-Make sure you clone with `git clone --recursive`!
-
-Requires Python 3.7 or newer to be installed (including development headers). It is recommended that you build/install in a virtual environment.
-```
-python3 -m venv /path/to/MyEnv
-source /path/to/MyEnv/bin/activate
-python setup.py bdist_wheel               # Compiles C++, builds a wheel in the dist/ directory
-pip install --force-reinstall dist/*.whl  # Install from wheel
-```
-
-Build and installation should take at most a few minutes on the typical computer. For more details on build options, see DEVELOPING.md.
-
 ## Building (Docker)
 
 We've included a Dockerfile if you want to use GRGL in a container.
@@ -74,7 +79,7 @@ docker build . -t grgl:latest
 
 Example to run, constructing a GRG from an example VCF file:
 ```
-docker run -v $PWD:/working -it grgl:latest bash -c "cd /working && grg construct /working/test/inputs/msprime.example.vcf
+docker run -v $PWD:/working -it grgl:latest bash -c "cd /working && grg construct /working/test/inputs/msprime.example.vcf"
 ```
 
 ## Usage (Command line)
