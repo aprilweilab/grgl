@@ -51,6 +51,11 @@ def add_options(subparser):
         action="store_true",
         help="Maintain all topology below mutations (at the cost of a larger graph).",
     )
+    subparser.add_argument(
+        "--ts-coals",
+        action="store_true",
+        help="Compute individual coalescence information at each GRG node (more expensive).",
+    )
 
 
 def convert_command(arguments):
@@ -70,6 +75,8 @@ def convert_command(arguments):
             command_args.append("--no-simplify")
         if arguments.maintain_topo:
             command_args.append("--maintain-topo")
+        if arguments.ts_coals:
+            command_args.append("--ts-coals")
     elif is_igd(arguments.output_file):
         if is_trees(arguments.input_file):
             print("Can only convert .trees files to GRGs", file=sys.stderr)

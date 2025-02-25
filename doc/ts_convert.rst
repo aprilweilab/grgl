@@ -33,6 +33,12 @@ The following properties of a tree sequence *are* maintained when converted to a
 - All Mutations from the TS are copied into the GRG. Mutations in the TS can have no samples
   reachable beneath them (due to recurrent mutations "blocking" them), and these are copied into
   the GRG as a :py:class:`pygrgl.Mutation` with no associated node in the graph.
+- Recurrent mutations are copied over as-is. This means that two mutations with the same position,
+  but different derived alleles, are in the same tree, affecting the same subset of samples. The
+  GRG will contain both of these Mutation nodes (even if one matches the reference) and the path
+  between the mutations should also be maintained. Many calculations (such as the example allele
+  frequency calculation shown in the documentation) do not adjust for this case, so a few sites
+  will have approximate values when recurrent mutations are present.
 
 The following properties of a tree sequence are *not* maintained when converted to a GRG:
 
@@ -53,3 +59,20 @@ In the presence of recombination you can also end up with a GRG child node conta
 older than a Mutation on the parent node (though rarely). The GRG conversion flag ``--use-node-times``
 can avoid this Mutations-out-of-order problem by associating the coalesence time from the node below
 the Mutation in the TS with the :py:class:`pygrgl.Mutation` in the GRG.
+
+
+Node coalescence counts
+~~~~~~~~~~~~~~~~~~~~~~~
+
+`GWAS <examples_and_applications.html>`_ and zygosity information (see ``grg process zygosity --help``)
+both require the GRG to have coalescence information at each node. This is just a count of the number of
+diploid individuals that coalesced at any given node (both of their haploid samples are reachable from
+the node, but not reachable together from any of the node's children). This information is automatically
+calculated when you construct a GRG via ``grg construct``. In order to get this information in TS-converted
+GRGs, you need to pass ``--ts-coals`` flags to the ``grg convert`` command.
+
+Conversion from tree-sequence to GRG is very fast, on the order of seconds or minutes for very large datasets.
+That said, setting flag ``--ts-coals`` can slow it down significantly, especially for datasets with a
+lot of individual samples.
+
+See also :py:meth:`pygrgl.GRG.get_num_individual_coals` and :py:meth:`pygrgl.GRG.set_num_individual_coals`.

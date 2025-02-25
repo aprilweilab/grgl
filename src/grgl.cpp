@@ -111,6 +111,9 @@ int main(int argc, char** argv) {
         "maintain-topo",
         "When converting tree-seq, maintain all topology below mutations (at the cost of a larger graph)",
         {"maintain-topo"});
+    args::Flag tsComputeCoals(
+        parser, "ts-coals", "When converting tree-seq, compute node individual coalescences.", {"ts-coals"});
+
     args::ValueFlag<std::string> populationIds(parser,
                                                "population-ids",
                                                "Format: \"filename:fieldname\". Read population ids from the given "
@@ -202,7 +205,7 @@ int main(int argc, char** argv) {
         TSKIT_OK_OR_EXIT(tsk_treeseq_load(&treeSeq, infile->c_str(), 0), "Failed to load tree-seq");
 
         try {
-            theGRG = grgl::convertTreeSeqToGRG(&treeSeq, binaryMutations, tsNodeTimes, maintainTopo);
+            theGRG = grgl::convertTreeSeqToGRG(&treeSeq, binaryMutations, tsNodeTimes, maintainTopo, tsComputeCoals);
         } catch (grgl::TskitApiFailure& e) {
             std::cerr << e.what();
             return 2;

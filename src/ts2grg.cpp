@@ -15,6 +15,7 @@
  * with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 #include "grgl/ts2grg.h"
+#include "grgl/common.h"
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
@@ -23,6 +24,7 @@
 #include "tskit_util.h"
 #include "util.h"
 
+#include <cassert>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -49,15 +51,22 @@ public:
     explicit TsToGrgContext(size_t numNodes)
         : m_pendingSplit(numNodes) {}
 
-    void addNodeMapping(tsk_id_t tsNodeId, NodeID grgNodeId) {
+    void addNodeMapping(tsk_id_t tsNodeId, NodeID grgNodeId, NodeIDList uncoalesced = {}) {
         auto resultPair =
             this->m_argToGrg.insert(std::pair<tsk_id_t, std::list<NodeID>>(tsNodeId, std::list<NodeID>()));
         resultPair.first->second.push_back(grgNodeId);
+        const auto insertResult = m_nodeToUncoalesced.emplace(grgNodeId, uncoalesced);
+        assert(insertResult.second);
     }
 
-    NodeID getLatestMappedNode(tsk_id_t tsNodeId) {
+    std::pair<NodeID, NodeIDList> getLatestMappedNode(tsk_id_t tsNodeId) {
         auto findIt = this->m_argToGrg.find(tsNodeId);
-        return findIt->second.back();
+        const NodeID grgNode = findIt->second.back();
+        auto coalIt = m_nodeToUncoalesced.find(grgNode);
+        if (coalIt != m_nodeToUncoalesced.end()) {
+            return {grgNode, coalIt->second};
+        }
+        return {grgNode, {}};
     }
 
     inline bool isPendingSplit(const tsk_id_t tsNodeId) {
@@ -78,7 +87,18 @@ public:
         }
     }
 
-    inline void addPendingSplit(const tsk_id_t tsNodeId) { m_pendingSplit.at(tsNodeId) = true; }
+    inline void addPendingSplit(const tsk_id_t tsNodeId) {
+        m_pendingSplit.at(tsNodeId) = true;
+        // When we mark a node for splitting, the coalescence information at that node (as far as
+        // which samples have not yet coalesced) is invalidated.
+        auto itGrgNode = m_argToGrg.find(tsNodeId);
+        if (itGrgNode != m_argToGrg.end()) {
+            auto coalIt = m_nodeToUncoalesced.find(itGrgNode->second.back());
+            if (coalIt != m_nodeToUncoalesced.end()) {
+                m_nodeToUncoalesced.erase(coalIt);
+            }
+        }
+    }
 
     /**
      * Find the most recent common ancester in a forest with times on nodes.
@@ -90,12 +110,24 @@ public:
         tsk_id_t nodeB = origNodeB;
         double timeA = -1.0;
         double timeB = -1.0;
+        bool isSampleA = true;
+        bool isSampleB = true;
         if (nodeA != TSK_NULL) {
-            addPendingSplit(nodeA);
+            if (isSampleA) {
+                isSampleA = (bool)tsk_tree_is_sample(tree, nodeA);
+            }
+            if (!isSampleA) {
+                addPendingSplit(nodeA);
+            }
             TSKIT_OK_OR_THROW(tsk_tree_get_time(tree, nodeA, &timeA), "Getting node time");
         }
         if (nodeB != TSK_NULL) {
-            addPendingSplit(nodeB);
+            if (isSampleB) {
+                isSampleB = (bool)tsk_tree_is_sample(tree, nodeB);
+            }
+            if (!isSampleB) {
+                addPendingSplit(nodeB);
+            }
             TSKIT_OK_OR_THROW(tsk_tree_get_time(tree, nodeB, &timeB), "Getting node time");
         }
         while (nodeA != nodeB) {
@@ -104,14 +136,24 @@ public:
                 // Can occur if there are multiple roots to the tree.
                 if (TSK_NULL != nodeA) {
                     TSKIT_OK_OR_THROW(tsk_tree_get_time(tree, nodeA, &timeA), "Getting node time");
-                    addPendingSplit(nodeA);
+                    if (isSampleA) {
+                        isSampleA = (bool)tsk_tree_is_sample(tree, nodeA);
+                    }
+                    if (!isSampleA) {
+                        addPendingSplit(nodeA);
+                    }
                 }
             } else {
                 TSKIT_OK_OR_THROW(tsk_tree_get_parent(tree, nodeB, &nodeB), "Getting parent");
                 // Can occur if there are multiple roots to the tree.
                 if (TSK_NULL != nodeB) {
                     TSKIT_OK_OR_THROW(tsk_tree_get_time(tree, nodeB, &timeB), "Getting node time");
-                    addPendingSplit(nodeB);
+                    if (isSampleB) {
+                        isSampleB = (bool)tsk_tree_is_sample(tree, nodeB);
+                    }
+                    if (!isSampleB) {
+                        addPendingSplit(nodeB);
+                    }
                 }
             }
         }
@@ -139,9 +181,15 @@ public:
     void markPendingUntilRoot(const tsk_tree_t* tree, const std::list<tsk_id_t>& leaves) {
         std::unordered_set<tsk_id_t> seen;
         for (const tsk_id_t node : leaves) {
+            bool isSample = true;
             tsk_id_t activeNode = node;
             while (activeNode != TSK_NULL) {
-                addPendingSplit(activeNode);
+                if (isSample) {
+                    isSample = (bool)tsk_tree_is_sample(tree, activeNode);
+                }
+                if (!isSample) {
+                    addPendingSplit(activeNode);
+                }
                 auto insertPair = seen.emplace(activeNode);
                 // We didn't actually insert b/c it was already there -- we can stop traversing.
                 if (!insertPair.second) {
@@ -153,16 +201,22 @@ public:
     }
 
 private:
+    // Map from tskit ID to GRG IDs, for nodes.
     std::unordered_map<tsk_id_t, std::list<NodeID>> m_argToGrg;
+    // Map from GRG node to a list of uncoalesced individuals at that node.
+    std::unordered_map<NodeID, NodeIDList> m_nodeToUncoalesced;
+    // Position "i" being true means that tskit node with ID "i" will be duplicated on
+    // the next use.
     std::vector<bool> m_pendingSplit;
 };
 
 // TODO make this non-recursive.
-static NodeID addMutationFromTree(TsToGrgContext& context,
-                                  MutableGRGPtr& grg,
-                                  const tsk_treeseq_t* treeSeq,
-                                  const tsk_tree_t* tree,
-                                  tsk_id_t tsNodeId) {
+static std::pair<NodeID, NodeIDList> addMutationFromTree(TsToGrgContext& context,
+                                                         MutableGRGPtr& grg,
+                                                         const tsk_treeseq_t* treeSeq,
+                                                         const tsk_tree_t* tree,
+                                                         const tsk_id_t tsNodeId,
+                                                         const bool computeCoals = false) {
     const bool isSample = tsk_treeseq_is_sample(treeSeq, tsNodeId);
     const bool canReuse = context.hasExistingNode(tsNodeId) && (isSample || !context.isPendingSplit(tsNodeId));
     if (canReuse) {
@@ -171,18 +225,37 @@ static NodeID addMutationFromTree(TsToGrgContext& context,
     context.removePendingSplit(tsNodeId);
     release_assert(!isSample);
 
+    NodeIDSizeT coalCount = 0;
+    NodeIDSet uncoalescedSet;
     NodeID newNodeId = grg->makeNode();
     for (tsk_id_t childNodeId = tree->left_child[tsNodeId]; childNodeId != TSK_NULL;
          childNodeId = tree->right_sib[childNodeId]) {
-        const NodeID childId = addMutationFromTree(context, grg, treeSeq, tree, childNodeId);
+        const auto childPair = addMutationFromTree(context, grg, treeSeq, tree, childNodeId, computeCoals);
+        const NodeID childId = childPair.first;
         grg->connect(newNodeId, childId);
+        if (computeCoals) {
+            for (NodeID indivId : childPair.second) {
+                auto insertPair = uncoalescedSet.emplace(indivId);
+                if (!insertPair.second) {
+                    coalCount++; // Coalescence!
+                    uncoalescedSet.erase(insertPair.first);
+                }
+            }
+        }
     }
-    context.addNodeMapping(tsNodeId, newNodeId);
-    return newNodeId;
+    NodeIDList uncoalesced;
+    if (computeCoals) {
+        for (NodeID indivId : uncoalescedSet) {
+            uncoalesced.emplace_back(indivId);
+        }
+        grg->setNumIndividualCoals(newNodeId, coalCount);
+    }
+    context.addNodeMapping(tsNodeId, newNodeId, uncoalesced);
+    return {newNodeId, std::move(uncoalesced)};
 }
 
-MutableGRGPtr
-convertTreeSeqToGRG(const tsk_treeseq_t* treeSeq, bool binaryMutations, bool useNodeTimes, bool maintainTopology) {
+MutableGRGPtr convertTreeSeqToGRG(
+    const tsk_treeseq_t* treeSeq, bool binaryMutations, bool useNodeTimes, bool maintainTopology, bool computeCoals) {
     const size_t initialNodeCount = tsk_treeseq_get_num_nodes(treeSeq);
     const size_t numSamples = tsk_treeseq_get_num_samples(treeSeq);
     const size_t numIndividuals = tsk_treeseq_get_num_individuals(treeSeq);
@@ -198,17 +271,49 @@ convertTreeSeqToGRG(const tsk_treeseq_t* treeSeq, bool binaryMutations, bool use
         TSKIT_OK_OR_THROW(tsk_treeseq_get_population(treeSeq, i, &population), "Failed getting population");
         grg->addPopulation(std::string(population.metadata, population.metadata_length));
     }
+
+    // We have to do some extra sanity checks when computing coalescences.
+    std::vector<tsk_id_t> sampleToIndiv(numSamples, TSK_NULL);
+    if (computeCoals) {
+        if (ploidy != 2) {
+            throw ApiMisuseFailure("Can only compute individual coalescences with diploid data.");
+        }
+        for (tsk_id_t i = 0; i < numIndividuals; i++) {
+            tsk_individual_t individual;
+            TSKIT_OK_OR_THROW(tsk_treeseq_get_individual(treeSeq, i, &individual), "Failed getting individuals");
+            release_assert(individual.nodes_length == 2);
+            if ((individual.nodes[0] / 2) != (individual.nodes[1] / 2)) {
+                throw ApiMisuseFailure("Cannot convert coalescences if tree-seq does not have ordered individuals");
+            }
+            sampleToIndiv.at(individual.nodes[0]) = i;
+            sampleToIndiv.at(individual.nodes[1]) = i;
+        }
+    }
+
     // Setup the GRG sample nodes to have the first block of IDs.
+    tsk_id_t maxSample = 0;
     const tsk_id_t* sampleMap = tsk_treeseq_get_samples(treeSeq);
     for (size_t i = 0; i < numSamples; i++) {
         const tsk_id_t tsNodeId = sampleMap[i];
+        if (tsNodeId > maxSample) {
+            maxSample = tsNodeId;
+        }
         tsk_node_t node;
         TSKIT_OK_OR_THROW(tsk_treeseq_get_node(treeSeq, tsNodeId, &node), "Failed getting node");
-        constructionContext.addNodeMapping(tsNodeId, i);
+        NodeIDList individual;
+        if (computeCoals) {
+            individual.emplace_back(sampleToIndiv.at(tsNodeId));
+        }
+        constructionContext.addNodeMapping(tsNodeId, i, std::move(individual));
 
         if (node.population != TSK_NULL) {
             grg->setPopulationId((NodeID)i, node.population);
         }
+    }
+    // GRG can theoretically store datasets where the last few "generations" of the trees are samples, and not just
+    // the leaves, but it is untested. This checks that the K samples are the first K node IDs.
+    if (maxSample >= numSamples) {
+        throw ApiMisuseFailure("tree-sequences with non-consecutive, non-leafy samples cannot be converted to GRG.");
     }
 
     // Compute which nodes are involved in edge additions/deletions for each interval.
@@ -262,7 +367,9 @@ convertTreeSeqToGRG(const tsk_treeseq_t* treeSeq, bool binaryMutations, bool use
                 const Mutation theMutation =
                     Mutation((uint64_t)site->position, std::move(derivedState), ancestralState, (float)mutTime);
                 // Clients can pass a predicate that only includes certain mutations.
-                NodeID mutationNodeId = addMutationFromTree(constructionContext, grg, treeSeq, &currentTree, tsMutNode);
+                const auto nodeAndCoals =
+                    addMutationFromTree(constructionContext, grg, treeSeq, &currentTree, tsMutNode, computeCoals);
+                const NodeID mutationNodeId = nodeAndCoals.first;
                 grg->addMutation(theMutation, mutationNodeId);
             }
         }
