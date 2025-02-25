@@ -32,6 +32,10 @@
 #include "node_data.h"
 #include "visitor.h"
 
+#if USE_AVX
+#include <immintrin.h>
+#endif
+
 namespace grgl {
 
 // Returned by the edge-count functionality when there are no edges loaded/stored for the up direction, as opposed to
@@ -336,11 +340,12 @@ public:
     MutationId addMutation(const Mutation& mutation, NodeID nodeId);
 
     // Internal method, used by Python API and the main API below.
-    void matrixMultiplication(const double* inputMatrix,
+    template <typename T>
+    void matrixMultiplication(const T* inputMatrix,
                               size_t inputCols,
                               size_t inputRows,
                               TraversalDirection direction,
-                              double* outputMatrix,
+                              T* outputMatrix,
                               size_t outputSize);
 
     /**
@@ -379,15 +384,15 @@ public:
      *      as input, and TraversalDirection::DIRECTION_UP for samples as input.
      * @return The resulting matrix as described above, in row-major order.
      */
-    std::vector<double>
-    matMul(const std::vector<double>& inputMatrix, const size_t numRows, TraversalDirection direction) {
+    template <typename T>
+    std::vector<T> matMul(const std::vector<T>& inputMatrix, const size_t numRows, TraversalDirection direction) {
         if (numRows == 0 || (inputMatrix.size() % numRows != 0)) {
             throw ApiMisuseFailure("inputMatrix must be divisible by numRows");
         }
         const size_t numCols = inputMatrix.size() / numRows;
         const size_t outSize =
             (numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? numSamples() : numMutations()));
-        std::vector<double> result(outSize);
+        std::vector<T> result(outSize);
         matrixMultiplication(inputMatrix.data(), numCols, numRows, direction, result.data(), outSize);
         return std::move(result);
     }
@@ -665,6 +670,111 @@ private:
 
 using CSRGRGPtr = std::shared_ptr<CSRGRG>;
 using ConstCSRGRGPtr = std::shared_ptr<const CSRGRG>;
+
+// This header is just separated out to try to keep grg.h well organized. It contains templated
+// functions/classes that are needed my matrix multiplication.
+#include "internal_mult.h"
+
+template <typename T>
+void GRG::matrixMultiplication(const T* inputMatrix,
+                               size_t inputCols,
+                               size_t inputRows,
+                               TraversalDirection direction,
+                               T* outputMatrix,
+                               size_t outputSize) {
+    release_assert(inputCols > 0);
+    release_assert(inputRows > 0);
+    const size_t outputCols = outputSize / inputRows;
+    release_assert(outputSize % inputRows == 0);
+    if (direction == DIRECTION_DOWN) {
+        if (inputCols != numMutations()) {
+            throw ApiMisuseFailure("Input vector is not size M (numMutations())");
+        }
+        if (outputCols != numSamples()) {
+            throw ApiMisuseFailure("Output vector is not size N (numSamples())");
+        }
+    } else {
+        if (inputCols != numSamples()) {
+            throw ApiMisuseFailure("Input vector is not size N (numSamples())");
+        }
+        if (outputCols != numMutations()) {
+            throw ApiMisuseFailure("Output vector is not size M (numMutations())");
+        }
+    }
+
+    // The node value storage stores the different row values consecutively (so
+    // similar to column-major order), in contrast to the input/output matrices
+    // which are row-major.
+    std::vector<T> nodeValues(numNodes() * inputRows);
+    if (direction == DIRECTION_DOWN) {
+        for (const auto& nodeIdAndMutId : this->getNodeMutationPairs()) {
+            const NodeID& nodeId = nodeIdAndMutId.first;
+            const MutationId& mutId = nodeIdAndMutId.second;
+            assert(mutId < inputCols);
+            if (nodeId != INVALID_NODE_ID) {
+                const size_t base = nodeId * inputRows;
+                for (size_t row = 0; row < inputRows; row++) {
+                    const size_t rowStart = row * inputCols;
+                    nodeValues[base + row] += inputMatrix[rowStart + mutId];
+                }
+            }
+        }
+        if (this->nodesAreOrdered()) {
+            for (NodeID i = numNodes(); i > 0; i--) {
+                const NodeID nodeId = i - 1;
+                const size_t base = nodeId * inputRows;
+                for (NodeID childId : this->getDownEdges(nodeId)) {
+                    const size_t cbase = childId * inputRows;
+                    vectorAdd<T>(&nodeValues[cbase], &nodeValues[base], inputRows);
+                }
+            }
+        } else {
+            ValueSumVisitor<T> valueSumVisitor(nodeValues, inputRows);
+            this->visitDfs(valueSumVisitor, DIRECTION_UP, getSampleNodes());
+        }
+        for (size_t row = 0; row < inputRows; row++) {
+            const size_t rowStart = row * outputCols;
+            for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
+                const size_t base = sampleId * inputRows;
+                assert(rowStart + sampleId < outputSize);
+                outputMatrix[rowStart + sampleId] = nodeValues[base + row];
+            }
+        }
+    } else {
+        for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
+            assert(sampleId < inputCols);
+            const size_t base = sampleId * inputRows;
+            for (size_t row = 0; row < inputRows; row++) {
+                const size_t rowStart = row * inputCols;
+                nodeValues[base + row] = inputMatrix[rowStart + sampleId];
+            }
+        }
+        if (this->nodesAreOrdered()) {
+            for (NodeID nodeId = numSamples(); nodeId < numNodes(); nodeId++) {
+                const size_t base = nodeId * inputRows;
+                for (NodeID childId : this->getDownEdges(nodeId)) {
+                    const size_t cbase = childId * inputRows;
+                    vectorAdd<T>(&nodeValues[base], &nodeValues[cbase], inputRows);
+                }
+            }
+        } else {
+            ValueSumVisitor<T> valueSumVisitor(nodeValues, inputRows);
+            this->visitDfs(valueSumVisitor, DIRECTION_DOWN, getRootNodes());
+        }
+        for (size_t row = 0; row < inputRows; row++) {
+            const size_t rowStart = row * outputCols;
+            for (const auto& nodeIdAndMutId : this->getNodeMutationPairs()) {
+                const NodeID& nodeId = nodeIdAndMutId.first;
+                const MutationId& mutId = nodeIdAndMutId.second;
+                assert(rowStart + mutId < outputSize);
+                if (nodeId != INVALID_NODE_ID) {
+                    const size_t base = nodeId * inputRows;
+                    outputMatrix[rowStart + mutId] += nodeValues[base + row];
+                }
+            }
+        }
+    }
+}
 
 } // namespace grgl
 

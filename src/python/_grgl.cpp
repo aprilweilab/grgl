@@ -34,6 +34,7 @@ namespace py = pybind11;
 
 #include <iostream>
 
+// TODO: switch to using py::array and detect datatypes, just like matmul()
 py::array_t<double> dotProduct(grgl::GRGPtr& grg,
                                py::array_t<double, py::array::c_style | py::array::forcecast> input,
                                grgl::TraversalDirection direction) {
@@ -51,24 +52,46 @@ py::array_t<double> dotProduct(grgl::GRGPtr& grg,
     return std::move(result);
 }
 
-py::array_t<double> matMul(grgl::GRGPtr& grg,
-                           py::array_t<double, py::array::c_style | py::array::forcecast> input,
-                           grgl::TraversalDirection direction) {
-    py::buffer_info buffer = input.request();
+template <typename T>
+inline py::array_t<T> dispatchMult(grgl::GRGPtr& grg,
+                                   py::buffer_info& buffer,
+                                   size_t rows,
+                                   size_t inCols,
+                                   size_t outCols,
+                                   grgl::TraversalDirection direction) {
+    const size_t outSize = rows * outCols;
+    py::array_t<T> result({rows, outCols});
+    py::buffer_info resultBuf = result.request();
+    memset(resultBuf.ptr, 0, outSize * sizeof(T));
+    grg->matrixMultiplication((const T*)buffer.ptr, inCols, rows, direction, (T*)resultBuf.ptr, outSize);
+    return std::move(result);
+}
+
+py::array matMul(grgl::GRGPtr& grg, py::handle input, grgl::TraversalDirection direction) {
+    py::array arr = py::array::ensure(input, py::array::c_style | py::array::forcecast);
+    py::buffer_info buffer = arr.request();
     if (buffer.ndim != 2) {
         throw grgl::ApiMisuseFailure("matmul() only support two dimensional numpy arrays as input.");
     }
     const size_t rows = buffer.shape.at(0);
     const size_t cols = buffer.shape.at(1);
+    if (rows == 0 || cols == 0) {
+        throw grgl::ApiMisuseFailure("matmul() requires non-zero dimensions.");
+    }
     const size_t outCols =
         (direction == grgl::TraversalDirection::DIRECTION_DOWN) ? grg->numSamples() : grg->numMutations();
-    const size_t outSize = rows * outCols;
-    py::array_t<double> result({rows, outCols});
-    py::buffer_info resultBuf = result.request();
-    memset(resultBuf.ptr, 0, outSize * sizeof(double));
-    grg->matrixMultiplication(
-        (const double*)buffer.ptr, cols, rows, direction, (double*)resultBuf.ptr, (size_t)outSize);
-    return std::move(result);
+    if (py::isinstance<py::array_t<double>>(input)) {
+        return dispatchMult<double>(grg, buffer, rows, cols, outCols, direction);
+    } else if (py::isinstance<py::array_t<float>>(input)) {
+        return dispatchMult<float>(grg, buffer, rows, cols, outCols, direction);
+    } else if (py::isinstance<py::array_t<std::int64_t>>(input)) {
+        return dispatchMult<int64_t>(grg, buffer, rows, cols, outCols, direction);
+    } else if (py::isinstance<py::array_t<std::int32_t>>(input)) {
+        return dispatchMult<int32_t>(grg, buffer, rows, cols, outCols, direction);
+    }
+    std::stringstream ssErr;
+    ssErr << "Unsupported numpy dtype: " << arr.dtype();
+    throw grgl::ApiMisuseFailure(ssErr.str().c_str());
 }
 
 class NodeNumberingIterator : public grgl::GRGVisitor {
