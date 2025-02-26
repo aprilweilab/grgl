@@ -25,6 +25,7 @@
 #include "grgl/common.h"
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
+#include "grgl/mutation.h"
 #include "grgl/visitor.h"
 #include "util.h"
 
@@ -114,23 +115,29 @@ void emitAlleleFrequency(grgl::GRGPtr& grg,
     while (i < mutIdAndNodes.size()) {
         size_t samplesWithMut = 0;
         const grgl::MutationId mutId = mutIdAndNodes[i].first;
-        const grgl::Mutation& mut = grg->getMutationById(mutId);
-        if (bpRange.first != bpRange.second &&
-            (bpRange.first > mut.getPosition() || bpRange.second <= mut.getPosition())) {
+        const grgl::Mutation* mut = &grg->getMutationById(mutId);
+        const grgl::BpPosition position = mut->getPosition();
+        const std::string& ref = mut->getRefAllele();
+        const std::string& alt = mut->getAllele();
+        if (bpRange.first != bpRange.second && (bpRange.first > position || bpRange.second <= position)) {
             i++;
             continue;
         }
-        // Accumulate values for all nodes associated with the Mutation. They are guaranteed to be consecutive by
-        // the getMutationsToNodeOrder() method.
+        // Accumulate values for all Mutations capturing the same (position, alleles) values.
         do {
             const grgl::NodeID& nodeId = mutIdAndNodes[i].second;
             if (nodeId != INVALID_NODE_ID) {
                 samplesWithMut += visitorForDfs.m_samplesBeneath[nodeId];
             }
             i++;
-        } while (i < mutIdAndNodes.size() && mutIdAndNodes[i].first == mutId);
-        outStream << mut.getPosition() << SEP << mut.getRefAllele() << SEP << mut.getAllele() << SEP << samplesWithMut
-                  << SEP << grg->numSamples() << std::endl;
+            if (i < mutIdAndNodes.size()) {
+                const grgl::MutationId& nextMutId = mutIdAndNodes[i].first;
+                mut = &grg->getMutationById(nextMutId);
+            }
+        } while (i < mutIdAndNodes.size() && position == mut->getPosition() && ref == mut->getRefAllele() &&
+                 alt == mut->getAllele());
+        outStream << position << SEP << ref << SEP << alt << SEP << samplesWithMut << SEP << grg->numSamples()
+                  << std::endl;
     }
 }
 
@@ -383,8 +390,11 @@ void emitZygosityInfo(grgl::GRGPtr& grg,
         size_t samplesWithMut = 0;
         size_t homozygWithMut = 0;
         const grgl::MutationId mutId = mutIdAndNodes[i].first;
-        // Accumulate values for all nodes associated with the Mutation. They are guaranteed to be consecutive by
-        // the getMutationsToNodeOrder() method.
+        const grgl::Mutation* mut = &grg->getMutationById(mutId);
+        const grgl::BpPosition position = mut->getPosition();
+        const std::string& ref = mut->getRefAllele();
+        const std::string& alt = mut->getAllele();
+        // Accumulate values for all Mutations capturing the same (position, alleles) values.
         do {
             const grgl::NodeID& nodeId = mutIdAndNodes[i].second;
             if (nodeId != INVALID_NODE_ID) {
@@ -392,12 +402,17 @@ void emitZygosityInfo(grgl::GRGPtr& grg,
                 homozygWithMut += visitorForDfs.m_homozygousBeneath[nodeId];
             }
             i++;
-        } while (i < mutIdAndNodes.size() && mutIdAndNodes[i].first == mutId);
+            if (i < mutIdAndNodes.size()) {
+                const grgl::MutationId& nextMutId = mutIdAndNodes[i].first;
+                mut = &grg->getMutationById(nextMutId);
+            }
+        } while (i < mutIdAndNodes.size() && position == mut->getPosition() && ref == mut->getRefAllele() &&
+                 alt == mut->getAllele());
+
         const size_t heteroWithMut = samplesWithMut - (2 * homozygWithMut);
         const size_t neitherWithMut = totalIndividuals - (homozygWithMut + heteroWithMut);
         assert(neitherWithMut + heteroWithMut + homozygWithMut == totalIndividuals);
-        const grgl::Mutation& mut = grg->getMutationById(mutId);
-        outStream << mut.getPosition() << SEP << mut.getRefAllele() << SEP << mut.getAllele() << SEP << neitherWithMut
-                  << SEP << heteroWithMut << SEP << homozygWithMut << std::endl;
+        outStream << position << SEP << ref << SEP << alt << SEP << neitherWithMut << SEP << heteroWithMut << SEP
+                  << homozygWithMut << std::endl;
     }
 }

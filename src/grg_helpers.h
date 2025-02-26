@@ -257,13 +257,17 @@ equivalentGRGs(const GRGPtr& grg1, const GRGPtr& grg2, std::string& disagreeReas
     return !failed;
 }
 
-inline MutableGRGPtr grgFromTrees(const std::string& filename, bool binaryMutations = false) {
+inline MutableGRGPtr grgFromTrees(const std::string& filename,
+                                  bool binaryMutations = false,
+                                  bool useNodeTimes = false,
+                                  bool maintainTopology = false,
+                                  bool computeCoals = false) {
     tsk_treeseq_t treeSeq;
     if (0 != tsk_treeseq_load(&treeSeq, filename.c_str(), 0)) {
         throw TskitApiFailure("Failed to load treeseq file");
     }
 
-    return grgl::convertTreeSeqToGRG(&treeSeq, binaryMutations);
+    return grgl::convertTreeSeqToGRG(&treeSeq, binaryMutations, useNodeTimes, maintainTopology, computeCoals);
 }
 
 } // namespace grgl
