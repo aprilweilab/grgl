@@ -443,13 +443,31 @@ PYBIND11_MODULE(_grgl, m) {
         :type bp_range: Tuple[int, int]
     )^");
 
-    m.def("grg_from_trees", &grgl::grgFromTrees, py::arg("filename"), py::arg("binary_mutations") = false, R"^(
+    m.def("grg_from_trees",
+          &grgl::grgFromTrees,
+          py::arg("filename"),
+          py::arg("binary_mutations") = false,
+          py::arg("use_node_times") = false,
+          py::arg("maintain_topology") = false,
+          py::arg("compute_coals") = false,
+          R"^(
         Convert a .trees (TSKit tree-sequence) file to a GRG.
 
         :param filename: The tree-sequence (.trees) file to load.
         :type filename: str
         :param binary_mutations: Set to True to flatten all mutations to be bi-allelic (optional).
         :type binary_mutations: bool
+        :param use_node_times: Mutations will be assigned the time from the node below them, instead of
+            the tskit Mutation object.
+        :type use_node_times: bool
+        :param maintain_topology: Generates a slightly larger GRG, but ensures that we capture all tree
+            topology changes induced by recombination, not just the changes that result in a different
+            set of samples beneath a node.
+        :type maintain_topology: bool
+        :param compute_coals: Compute the per-node coalescence counts. I.e., how many individuals coalesced
+            exactly at the node (separate children have both haploid copies of the individual). This is an
+            expensive computation, slowing down the TS to GRG conversion when there are a lot of samples.
+        :type compute_coals: bool
         :return: The GRG.
         :rtype: pygrgl.GRG
     )^");
