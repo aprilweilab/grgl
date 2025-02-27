@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.14)
 project(grgl)
+include(CheckCXXCompilerFlag)
+unset(COMPILER_SUPPORTS_AVX CACHE)
+unset(COMPILER_SUPPORTS_AVX2 CACHE)
 include(ExternalProject)
 
 option(PYTHON_SUPPORT "Build Python loadable module" OFF)
@@ -26,6 +29,23 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
   message(FATAL_ERROR "In-source builds not allowed. Please make a build directory and run CMake from there.\n")
 endif()
+
+# Apple's clang does not properly detect the (lack of) these options.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+  message("Using AppleClang, so AVX manually disabled")
+  set(COMPILER_SUPPORTS_AVX OFF)
+  set(COMPILER_SUPPORTS_AVX2 OFF)
+else()
+  check_cxx_compiler_flag(-mavx COMPILER_SUPPORTS_AVX)
+  check_cxx_compiler_flag(-mavx2 COMPILER_SUPPORTS_AVX2)
+endif()
+
+# The current potential use for AVX (beyond libvbyte, which is enabled elsewhere) is not
+# sufficient performance improvement to enable. Enabling means we should support dynamic
+# detection as well, since the Python bdist's are built with AVX available.
+#if(${COMPILER_SUPPORTS_AVX} OR ${COMPILER_SUPPORTS_AVX2})
+#  add_compile_options(-DUSE_AVX=1 -mavx)
+#endif()
 
 if (${ENABLE_CHECKERS})
   find_program(CLANGTIDY clang-tidy)
@@ -73,6 +93,7 @@ set(GRGL_TEST_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_grg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_main.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_map_muts.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_mult.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_mutation.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_serialize.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_util.cpp

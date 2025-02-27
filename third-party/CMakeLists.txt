@@ -1,18 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
 project(grgl)
-include(CheckCXXCompilerFlag)
-unset(COMPILER_SUPPORTS_AVX CACHE)
-unset(COMPILER_SUPPORTS_AVX2 CACHE)
-# Apple's clang does not properly detect the (lack of) these options.
-if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-  message("Using AppleClang, so AVX manually disabled")
-  set(COMPILER_SUPPORTS_AVX OFF)
-  set(COMPILER_SUPPORTS_AVX2 OFF)
-else()
-  check_cxx_compiler_flag(-mavx COMPILER_SUPPORTS_AVX)
-  check_cxx_compiler_flag(-mavx2 COMPILER_SUPPORTS_AVX2)
-endif()
-
 ################ TSKIT converted to CMake ################
 # Source files and compiler options copied from tskit/c/meson.build
 add_library(tskit STATIC

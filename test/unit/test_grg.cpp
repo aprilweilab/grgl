@@ -51,14 +51,14 @@ TEST(GRG, DotProductGood) {
     // Top-down dot-product
     std::vector<double> mutValues(3, 1.0); // Input vector [1, 2, 1]
     mutValues.at(1) = 2.0;
-    auto result1 = grg->dotProduct(mutValues, TraversalDirection::DIRECTION_DOWN);
+    auto result1 = grg->matMul(mutValues, 1, TraversalDirection::DIRECTION_DOWN);
     ASSERT_EQ(result1.size(), grg->numSamples());
     std::vector<double> expect = {1.0, 2.0, 3.0, 3.0};
     ASSERT_EQ(result1, expect);
 
     // Bottom-up dot-product (this is just allele freq counts)
     std::vector<double> sampleValues(4, 1.0); // Input vector [1, 1, 1, 1]
-    auto result2 = grg->dotProduct(sampleValues, TraversalDirection::DIRECTION_UP);
+    auto result2 = grg->matMul(sampleValues, 1, TraversalDirection::DIRECTION_UP);
     ASSERT_EQ(result2.size(), grg->numMutations());
     expect = {1.0, 2.0, 4.0};
     ASSERT_EQ(result2, expect);
@@ -74,19 +74,55 @@ TEST(GRG, DotProductGood) {
     ASSERT_TRUE(grg->nodesAreOrdered());
 
     // Top-down dot-product
-    auto result3 = grg->dotProduct(mutValues, TraversalDirection::DIRECTION_DOWN);
+    auto result3 = grg->matMul(mutValues, 1, TraversalDirection::DIRECTION_DOWN);
     ASSERT_EQ(result3.size(), grg->numSamples());
     expect = {1.0, 2.0, 3.0, 3.0};
     ASSERT_EQ(result3, expect);
 
     // Bottom-up dot-product (this is just allele freq counts)
-    auto result4 = grg->dotProduct(sampleValues, TraversalDirection::DIRECTION_UP);
+    auto result4 = grg->matMul(sampleValues, 1, TraversalDirection::DIRECTION_UP);
     ASSERT_EQ(result4.size(), grg->numMutations());
     expect = {1.0, 2.0, 4.0};
     ASSERT_EQ(result4, expect);
 }
 
-TEST(GRG, DotProductBad) {
+TEST(GRG, MatrixMultGood) {
+    GRGPtr grg = depth3BinTree(/*keepNodeOrder=*/false);
+    ASSERT_TRUE(grg->numEdges() == 6);
+    ASSERT_TRUE(grg->numNodes() == 7);
+    ASSERT_FALSE(grg->nodesAreOrdered());
+
+    Mutation m1(5, "A", "G");
+    grg->addMutation(m1, 1); // Attach directly to sample 1
+    Mutation m2(6, "A", "G");
+    grg->addMutation(m2, 5); // Affects the two samples beneath 5
+    Mutation m3(7, "A", "G");
+    grg->addMutation(m3, 6); // Affects all four samples beneath 6
+
+    // Top-down multiplication
+    std::vector<double> mutValues(6, 1.0);
+    mutValues.at(1) = 2.0;
+    mutValues.at(3) = 0.0;
+    auto result1 = grg->matMul(mutValues, 2, TraversalDirection::DIRECTION_DOWN);
+    ASSERT_EQ(result1.size(), 2*grg->numSamples());
+    std::vector<double> expect = {1.0, 2.0, 3.0, 3.0, 1.0, 1.0, 2.0, 2.0};
+    ASSERT_EQ(result1, expect);
+
+    // Bottom-up multiplication. This is just allele freq counts, and then the allele
+    // frequencies (second row)
+    std::vector<double> sampleValues(8, 1.0);
+    for (size_t i = 4; i < sampleValues.size(); i++) {
+        sampleValues[i] /= (double)grg->numSamples();
+    }
+    auto result2 = grg->matMul(sampleValues, 2, TraversalDirection::DIRECTION_UP);
+    ASSERT_EQ(result2.size(), 2*grg->numMutations());
+    expect = {1.0, 2.0, 4.0, 0.25, 0.5, 1.0};
+    for (size_t i = 0; i < result2.size(); i++) {
+        ASSERT_NEAR(result2.at(i), expect.at(i), 0.001);
+    }
+}
+
+TEST(GRG, MatMulBad) {
     GRGPtr grg = depth3BinTree();
     Mutation m1(5, "A", "G");
     grg->addMutation(m1, 1); // Attach directly to sample 1
@@ -97,14 +133,28 @@ TEST(GRG, DotProductBad) {
 	// Wrong input size
     std::vector<double> mutValues(4);
     ASSERT_THROW(
-        grg->dotProduct(mutValues, TraversalDirection::DIRECTION_DOWN),
+        grg->matMul(mutValues, 1, TraversalDirection::DIRECTION_DOWN),
         ApiMisuseFailure
     );
 
 	// Wrong input size
     std::vector<double> sampleValues(3);
     ASSERT_THROW(
-        grg->dotProduct(sampleValues, TraversalDirection::DIRECTION_UP),
+        grg->matMul(sampleValues, 1, TraversalDirection::DIRECTION_UP),
+        ApiMisuseFailure
+    );
+
+    // Input size is not divisible by # of rows
+    std::vector<double> sampleValues2(9);
+    ASSERT_THROW(
+        grg->matMul(sampleValues2, 2, TraversalDirection::DIRECTION_UP),
+        ApiMisuseFailure
+    );
+
+	// Wrong input size
+    std::vector<double> sampleValues3(9);
+    ASSERT_THROW(
+        grg->matMul(sampleValues3, 9, TraversalDirection::DIRECTION_UP),
         ApiMisuseFailure
     );
 }

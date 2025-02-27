@@ -15,6 +15,7 @@ EXPECT_DIR = os.path.join(THIS_DIR, "expect")
 INPUT_DIR = os.path.join(THIS_DIR, "input")
 SCRIPTS_DIR = os.path.join(THIS_DIR, "..", "..", "scripts")
 
+
 def get_freqs_unordered(lines: List[str]) -> Dict[Tuple[str, str, str], int]:
     fmap = {}
     for line in lines:
@@ -27,9 +28,19 @@ def get_freqs_unordered(lines: List[str]) -> Dict[Tuple[str, str, str], int]:
         fmap[(float(pos), ref, alt)] = int(freq)
     return fmap
 
-def construct_grg(input_file:str, output_file: Optional[str] = None) -> str:
-    cmd = ["grg", "construct", "-p", "10", "-t", "2", "-j", str(JOBS),
-            os.path.join(INPUT_DIR, input_file)]
+
+def construct_grg(input_file: str, output_file: Optional[str] = None) -> str:
+    cmd = [
+        "grg",
+        "construct",
+        "-p",
+        "10",
+        "-t",
+        "2",
+        "-j",
+        str(JOBS),
+        os.path.join(INPUT_DIR, input_file),
+    ]
     if output_file is not None:
         cmd.extend(["-o", output_file])
     else:
@@ -64,7 +75,10 @@ class TestGrgConstruction(unittest.TestCase):
         api_result = pygrgl.dot_product(grg, input_vector, pygrgl.TraversalDirection.UP)
         for i in range(len(api_result)):
             m = grg.get_mutation_by_id(i)
-            self.assertEqual(api_result[i], expect_freqs_unordered[(m.position, m.ref_allele, m.allele)])
+            self.assertEqual(
+                api_result[i],
+                expect_freqs_unordered[(m.position, m.ref_allele, m.allele)],
+            )
 
         if CLEANUP:
             os.remove(grg_filename)
@@ -79,7 +93,9 @@ class TestGrgConstruction(unittest.TestCase):
         assert not os.path.exists(split_dir), f"{split_dir} already exists; remove it"
 
         # Split the GRG
-        subprocess.check_output(["grg", "split", "-j", str(4), grg_filename, str(100000)])
+        subprocess.check_output(
+            ["grg", "split", "-j", str(4), grg_filename, str(100000)]
+        )
         saw_freqs = {}
         for grg_part in glob.glob(f"{split_dir}/*.grg"):
             af = subprocess.check_output(["grg", "process", "freq", grg_part])
@@ -97,11 +113,14 @@ class TestGrgConstruction(unittest.TestCase):
         if CLEANUP:
             os.remove(grg_filename)
 
+
 class TestCoalescence(unittest.TestCase):
     def test_coal_counts(self):
         grg_filename = construct_grg("test-200-samples.vcf.gz", "test.coal_counts.grg")
         zyg_info = subprocess.check_output(["grg", "process", "zygosity", grg_filename])
-        saw_lines = list(filter(lambda l: l.strip(), zyg_info.decode("utf-8").split("\n")))
+        saw_lines = list(
+            filter(lambda l: l.strip(), zyg_info.decode("utf-8").split("\n"))
+        )
 
         # Compare computed zygosity information against expected. The expected info was checked against
         # the real values using this pyigd script:
@@ -115,5 +134,6 @@ class TestCoalescence(unittest.TestCase):
         if CLEANUP:
             os.remove(grg_filename)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
