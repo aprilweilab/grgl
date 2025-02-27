@@ -33,7 +33,6 @@ private:
     const size_t m_numRows;
 };
 
-// TODO: unit test
 template <> inline void vectorAdd<double>(double* vect1, const double* vect2, const size_t count) {
     size_t j = 0;
 #if USE_AVX
@@ -41,10 +40,10 @@ template <> inline void vectorAdd<double>(double* vect1, const double* vect2, co
     __m256d dst, src;
     const size_t leftover = count & (batchSize - 1);
     for (size_t i = 0; i + batchSize <= count; i += batchSize) {
-        dst = __builtin_ia32_loadupd256(&vect1[i]);
-        src = __builtin_ia32_loadupd256(&vect2[i]);
-        dst = __builtin_ia32_addpd256(dst, src);
-        __builtin_ia32_storeupd256(&vect1[i], dst);
+        dst = _mm256_loadu_pd(&vect1[i]);
+        src = _mm256_loadu_pd(&vect2[i]);
+        dst = _mm256_add_pd(dst, src);
+        _mm256_storeu_pd(&vect1[i], dst);
     }
     j = count - leftover;
 #endif
@@ -60,10 +59,10 @@ template <> inline void vectorAdd<float>(float* vect1, const float* vect2, const
     __m256 dst, src;
     const size_t leftover = count & (batchSize - 1);
     for (size_t i = 0; i + batchSize <= count; i += batchSize) {
-        dst = __builtin_ia32_loadups256(&vect1[i]);
-        src = __builtin_ia32_loadups256(&vect2[i]);
-        dst = __builtin_ia32_addps256(dst, src);
-        __builtin_ia32_storeups256(&vect1[i], dst);
+        dst = _mm256_loadu_ps(&vect1[i]);
+        src = _mm256_loadu_ps(&vect2[i]);
+        dst = _mm256_add_ps(dst, src);
+        _mm256_storeu_ps(&vect1[i], dst);
     }
     j = count - leftover;
 #endif
@@ -81,7 +80,7 @@ template <> inline void vectorAdd<int64_t>(int64_t* vect1, const int64_t* vect2,
     for (size_t i = 0; i + batchSize <= count; i += batchSize) {
         dst = _mm_loadu_si128((__m128i*)&vect1[i]);
         src = _mm_loadu_si128((__m128i*)&vect2[i]);
-        dst = _mm_add_epi64(dst, src); // Cycle 2: [A AB BC CD]
+        dst = _mm_add_epi64(dst, src);
         _mm_storeu_si128((__m128i*)&vect1[i], dst);
     }
     j = count - leftover;
@@ -95,13 +94,13 @@ template <> inline void vectorAdd<int32_t>(int32_t* vect1, const int32_t* vect2,
     size_t j = 0;
 #if USE_AVX
     constexpr size_t batchSize = 4;
-    __m128i dst, src;
+    __m128i dst1, src1;
     const size_t leftover = count & (batchSize - 1);
     for (size_t i = 0; i + batchSize <= count; i += batchSize) {
-        dst = _mm_loadu_si128((__m128i*)&vect1[i]);
-        src = _mm_loadu_si128((__m128i*)&vect2[i]);
-        dst = _mm_add_epi32(dst, src); // Cycle 2: [A AB BC CD]
-        _mm_storeu_si128((__m128i*)&vect1[i], dst);
+        dst1 = _mm_loadu_si128((__m128i*)&vect1[i]);
+        src1 = _mm_loadu_si128((__m128i*)&vect2[i]);
+        dst1 = _mm_add_epi32(dst1, src1);
+        _mm_storeu_si128((__m128i*)&vect1[i], dst1);
     }
     j = count - leftover;
 #endif
