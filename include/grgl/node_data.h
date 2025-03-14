@@ -52,21 +52,23 @@ public:
         }
         const NodeID index = nodeId - numSamples;
         if (index < m_nodeData_numCoals.size()) {
-            const auto& coalCount = m_nodeData_numCoals[index];
+            const auto coalCount = m_nodeData_numCoals.read_atomic(index);
             assert(coalCount == COAL_COUNT_NOT_SET || coalCount < numSamples);
             return coalCount;
         }
         return COAL_COUNT_NOT_SET;
     }
 
+    void allocNumCoals(const NodeIDSizeT nonSampleNodes) {
+        m_nodeData_numCoals.resize(nonSampleNodes, COAL_COUNT_NOT_SET);
+    }
+
     void setNumCoals(const NodeIDSizeT numSamples, NodeID nodeId, NodeIDSizeT coalCount) {
         if (nodeId >= numSamples) {
             const NodeID index = nodeId - numSamples;
-            if (index >= m_nodeData_numCoals.size()) {
-                m_nodeData_numCoals.resize(index + 1, COAL_COUNT_NOT_SET);
-            }
+            release_assert(index < m_nodeData_numCoals.size());
             assert(coalCount == COAL_COUNT_NOT_SET || coalCount < numSamples);
-            m_nodeData_numCoals.ref(index) = coalCount;
+            m_nodeData_numCoals.store_atomic(index, coalCount);
         }
     }
 

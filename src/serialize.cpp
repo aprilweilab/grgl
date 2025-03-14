@@ -251,6 +251,8 @@ public:
                         m_edgeCSR.flushBuckets(m_outStream);
                         assert_deserialization(m_outStream.good(), "Writing GRG failed");
                     }
+                    release_assert(newNodeId >= m_newSampleCount);
+                    m_newNodeData.allocNumCoals((newNodeId - m_newSampleCount) + 1);
                     m_newNodeData.setNumCoals(m_newSampleCount, newNodeId, parentCoals);
                 } else {
                     m_nodeIdMap[nodeId] = INVALID_NODE_ID;
