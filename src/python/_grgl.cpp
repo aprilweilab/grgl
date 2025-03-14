@@ -34,22 +34,40 @@ namespace py = pybind11;
 
 #include <iostream>
 
-// TODO: switch to using py::array and detect datatypes, just like matmul()
-py::array_t<double> dotProduct(grgl::GRGPtr& grg,
-                               py::array_t<double, py::array::c_style | py::array::forcecast> input,
-                               grgl::TraversalDirection direction) {
-    py::buffer_info buffer = input.request();
-    if (buffer.ndim != 1) {
-        throw grgl::ApiMisuseFailure("dot_product() only support single dimension numpy arrays as input. see matmul()");
-    }
-    const size_t outSize =
-        (direction == grgl::TraversalDirection::DIRECTION_DOWN) ? grg->numSamples() : grg->numMutations();
-    py::array_t<double> result(outSize);
+template <typename T>
+inline py::array_t<T> dispatchDotProd(
+    grgl::GRGPtr& grg, py::buffer_info& buffer, size_t inCols, size_t outCols, grgl::TraversalDirection direction) {
+    py::array_t<T> result(outCols);
     py::buffer_info resultBuf = result.request();
-    memset(resultBuf.ptr, 0, outSize * sizeof(double));
-    grg->matrixMultiplication(
-        (const double*)buffer.ptr, (size_t)buffer.size, 1, direction, (double*)resultBuf.ptr, (size_t)outSize);
+    memset(resultBuf.ptr, 0, outCols * sizeof(T));
+    grg->matrixMultiplication((const T*)buffer.ptr, inCols, 1, direction, (T*)resultBuf.ptr, outCols);
     return std::move(result);
+}
+
+py::array dotProduct(grgl::GRGPtr& grg, py::handle input, grgl::TraversalDirection direction) {
+    py::array arr = py::array::ensure(input, py::array::c_style | py::array::forcecast);
+    py::buffer_info buffer = arr.request();
+    if (buffer.ndim != 1) {
+        throw grgl::ApiMisuseFailure("dot_product() only support one-dimensional numpy arrays as input.");
+    }
+    const size_t cols = buffer.shape.at(0);
+    if (cols == 0) {
+        throw grgl::ApiMisuseFailure("dot_product() requires non-empty array input.");
+    }
+    const size_t outCols =
+        (direction == grgl::TraversalDirection::DIRECTION_DOWN) ? grg->numSamples() : grg->numMutations();
+    if (py::isinstance<py::array_t<double>>(input)) {
+        return dispatchDotProd<double>(grg, buffer, cols, outCols, direction);
+    } else if (py::isinstance<py::array_t<float>>(input)) {
+        return dispatchDotProd<float>(grg, buffer, cols, outCols, direction);
+    } else if (py::isinstance<py::array_t<std::int64_t>>(input)) {
+        return dispatchDotProd<int64_t>(grg, buffer, cols, outCols, direction);
+    } else if (py::isinstance<py::array_t<std::int32_t>>(input)) {
+        return dispatchDotProd<int32_t>(grg, buffer, cols, outCols, direction);
+    }
+    std::stringstream ssErr;
+    ssErr << "Unsupported numpy dtype: " << arr.dtype();
+    throw grgl::ApiMisuseFailure(ssErr.str().c_str());
 }
 
 template <typename T>

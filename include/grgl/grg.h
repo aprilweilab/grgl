@@ -672,7 +672,7 @@ using CSRGRGPtr = std::shared_ptr<CSRGRG>;
 using ConstCSRGRGPtr = std::shared_ptr<const CSRGRG>;
 
 // This header is just separated out to try to keep grg.h well organized. It contains templated
-// functions/classes that are needed my matrix multiplication.
+// functions/classes that are needed by matrix multiplication.
 #include "internal_mult.h"
 
 template <typename T>
