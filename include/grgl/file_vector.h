@@ -74,6 +74,8 @@ public:
         release_assert(file->good());
         file->seekg(start);
         m_data.resize(length);
+        // We expect/require 8-byte alignment on the vector, for atomic operations below.
+        release_assert((((size_t)(void*)m_data.data()) & 0x7U) == 0x0);
         file->read((char*)m_data.data(), sizeof(T) * m_data.size());
         const size_t expectedBytes = sizeof(T) * m_data.size();
         if (file->gcount() != expectedBytes) {
@@ -100,6 +102,30 @@ public:
     void reserve(size_t numElements) override {
         api_exc_check(numElements >= m_flushedItems, "Cannot shrink EagerFileVector beyond what has been flushed");
         m_data.reserve(numElements - m_flushedItems);
+    }
+
+    /**
+     * Store a value atomically to the vector.
+     * On the architectures we support, just the proper size and alignment of the write will
+     * make it atomic. If you are using this in a lock-free algorithm, you likely want to use
+     * memory barriers as well (this method does not provide ordering, just atomicity).
+     */
+    void store_atomic(const size_t index, T value) {
+        static_assert(sizeof(void*) >= 4, "Architecture problem");
+        static_assert(sizeof(T) == 4 || sizeof(T) == sizeof(void*), "Data type must be atomically read/writeable");
+        *((volatile T*)&m_data[index - m_flushedItems]) = value;
+    }
+
+    /**
+     * Read a value atomically from the vector.
+     * On the architectures we support, just the proper size and alignment of the read will
+     * make it atomic. If you are using this in a lock-free algorithm, you likely want to use
+     * memory barriers as well (this method does not provide ordering, just atomicity).
+     */
+    T read_atomic(const size_t index) {
+        static_assert(sizeof(void*) >= 4, "Architecture problem");
+        static_assert(sizeof(T) == 4 || sizeof(T) == sizeof(void*), "Data type must be atomically read/writeable");
+        return *((volatile T*)&m_data[index - m_flushedItems]);
     }
 
     T& ref(size_t index) override {
