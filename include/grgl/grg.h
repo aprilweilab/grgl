@@ -406,6 +406,10 @@ public:
 
     /**
      * Set the number of individuals that coalesce at this node.
+     *
+     * The value is updated atomically, so this can be used from threaded code (as long
+     * as the rest of the GRG, e.g. number of nodes, is not changing).
+     *
      * @param[in] nodeId The node to modify.
      * @param[in] coals The number of individuals that coalesce, between 0...numSamples()/ploidy.
      */
@@ -514,6 +518,9 @@ public:
         }
         if (!forceOrdered) {
             this->m_nodesAreOrdered = false;
+        }
+        if (this->m_nodes.size() > this->m_numSamples) {
+            this->m_nodeData.allocNumCoals((this->m_nodes.size() - this->m_numSamples) + 1);
         }
         return nextId;
     }
