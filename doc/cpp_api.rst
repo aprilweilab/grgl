@@ -39,6 +39,8 @@ Serialization and Conversion
 
 .. doxygenfunction:: grgl::convertTreeSeqToGRG
 
+.. doxygenfunction:: grgl::simplifyAndSerialize
+
 Visitors
 ~~~~~~~~
 

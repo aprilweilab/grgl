@@ -32,6 +32,10 @@
 #include "node_data.h"
 #include "visitor.h"
 
+#if USE_AVX
+#include <immintrin.h>
+#endif
+
 namespace grgl {
 
 // Returned by the edge-count functionality when there are no edges loaded/stored for the up direction, as opposed to
@@ -336,40 +340,60 @@ public:
     MutationId addMutation(const Mutation& mutation, NodeID nodeId);
 
     // Internal method, used by Python API and the main API below.
-    void dotProduct(const double* inputData,
-                    size_t inputLength,
-                    TraversalDirection direction,
-                    double* outputData,
-                    size_t outputLength);
+    template <typename T>
+    void matrixMultiplication(const T* inputMatrix,
+                              size_t inputCols,
+                              size_t inputRows,
+                              TraversalDirection direction,
+                              T* outputMatrix,
+                              size_t outputSize);
 
     /**
-     * Compute one of two possible dot products across the entire graph. The input vector \f$V\f$ can be
-     * either \f$1 \times N\f$ (\f$N\f$ is number of samples) or \f$1 \times M\f$ (\f$M\f$ is number of
-     * mutations). The given direction determines which input vector is expected. Let \f$X\f$ be the
-     * \f$N \times M\f$ genotype matrix.
-     * For an \f$1 \times N\f$ input \f$V\f$, the product performed is \f$V \cdot X\f$ which gives a
-     * \f$1 \times M\f$ result. I.e., the input vector is a value per sample and the output vector is
-     * a value per mutation.
-     * For an \f$1 \times M\f$ input \f$V\f$, the product performed is \f$V \cdot X^T\f$ which gives a
-     * \f$1 \times N\f$ result. I.e., the input vector is a value per mutation and the output vector is
-     * a value per sample.
+     * Compute one of two possible matrix multiplications across the entire
+     * graph. The input matrix \f$V\f$ can be either \f$K \times N\f$ (\f$N\f$
+     * is number of samples) or \f$K \times M\f$ (\f$M\f$ is number of
+     * mutations). The given direction determines which input matrix is
+     * expected. Let \f$X\f$ be the \f$N \times M\f$ genotype matrix. For an
+     * \f$K \times N\f$ input \f$V\f$, the product performed is \f$V \times X\f$
+     * which gives a \f$K \times M\f$ result. I.e., the input matrix is a column
+     * per sample and the output matrix is a column per mutation. For an \f$K
+     * \times M\f$ input \f$V\f$, the product performed is \f$V \times X^T\f$
+     * which gives a \f$K \times N\f$ result. I.e., the input matrix is a column
+     * per mutation and the output matrix is a column per sample.
      *
-     * Dot product in the graph works by seeding the input nodes (samples or mutations) with the corresponding
-     * values from the input vector and then traversing the graph in the relevant direction (up or down). The
-     * ancestor/descendant values are summed at each node, until the terminal nodes (mutations or samples) are
-     * reached.
+     * The simplest case to consider is a vector input (e.g., a \f$1 \times N\f$
+     * matrix). This vector-matrix product in the graph works by seeding the
+     * input nodes (samples in this example) with the corresponding values from
+     * the input vector and then traversing the graph in the relevant direction
+     * (up or down). The ancestor/descendant values are summed at each node,
+     * until the terminal nodes (mutations in this example) are reached. The
+     * values at the terminal nodes are then the output vector.
+     * When a \f$K\f$-row matrix is input, instead of a vector, the only
+     * difference is that each node stores \f$K\f$ values instead of 1.
      *
-     * @param[in] inputData The \f$1 \times N\f$ or \f$1 \times M\f$ input vector. For samples, the \f$i\f$th
-     *      entry in the vector is the value for sample \f$i\f$. Similarly for mutations, the ordering follows
-     *      the MutationId ordering.
-     * @param[in] direction Use TraversalDirection::DIRECTION_DOWN for mutations as input, and
-     *      TraversalDirection::DIRECTION_UP for samples as input.
-     * @return The resulting vector as described above.
+     * Note: the RAM used will be \f$O(K * nodes)\f$ where \f$nodes\f$ is the
+     * total number of nodes in the graph.
+     *
+     * @param[in] inputMatrix The \f$K \times N\f$ or \f$K \times M\f$ input
+     *      matrix in row-major order. For samples, the \f$i\f$th column are
+     *      the values for sample \f$i\f$. Similarly for mutations, the ordering
+     *      follows the MutationId ordering.
+     * @param[in] numRows The number of rows in the matrix. The size of the input
+     *      must be divisible by numRows, and determines the number of columns.
+     * @param[in] direction Use TraversalDirection::DIRECTION_DOWN for mutations
+     *      as input, and TraversalDirection::DIRECTION_UP for samples as input.
+     * @return The resulting matrix as described above, in row-major order.
      */
-    std::vector<double> dotProduct(const std::vector<double>& inputData, TraversalDirection direction) {
-        const size_t outSize = (direction == TraversalDirection::DIRECTION_DOWN) ? numSamples() : numMutations();
-        std::vector<double> result(outSize);
-        dotProduct(inputData.data(), inputData.size(), direction, result.data(), outSize);
+    template <typename T>
+    std::vector<T> matMul(const std::vector<T>& inputMatrix, const size_t numRows, TraversalDirection direction) {
+        if (numRows == 0 || (inputMatrix.size() % numRows != 0)) {
+            throw ApiMisuseFailure("inputMatrix must be divisible by numRows");
+        }
+        const size_t numCols = inputMatrix.size() / numRows;
+        const size_t outSize =
+            (numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? numSamples() : numMutations()));
+        std::vector<T> result(outSize);
+        matrixMultiplication(inputMatrix.data(), numCols, numRows, direction, result.data(), outSize);
         return std::move(result);
     }
 
@@ -646,6 +670,111 @@ private:
 
 using CSRGRGPtr = std::shared_ptr<CSRGRG>;
 using ConstCSRGRGPtr = std::shared_ptr<const CSRGRG>;
+
+// This header is just separated out to try to keep grg.h well organized. It contains templated
+// functions/classes that are needed by matrix multiplication.
+#include "internal_mult.h"
+
+template <typename T>
+void GRG::matrixMultiplication(const T* inputMatrix,
+                               size_t inputCols,
+                               size_t inputRows,
+                               TraversalDirection direction,
+                               T* outputMatrix,
+                               size_t outputSize) {
+    release_assert(inputCols > 0);
+    release_assert(inputRows > 0);
+    const size_t outputCols = outputSize / inputRows;
+    release_assert(outputSize % inputRows == 0);
+    if (direction == DIRECTION_DOWN) {
+        if (inputCols != numMutations()) {
+            throw ApiMisuseFailure("Input vector is not size M (numMutations())");
+        }
+        if (outputCols != numSamples()) {
+            throw ApiMisuseFailure("Output vector is not size N (numSamples())");
+        }
+    } else {
+        if (inputCols != numSamples()) {
+            throw ApiMisuseFailure("Input vector is not size N (numSamples())");
+        }
+        if (outputCols != numMutations()) {
+            throw ApiMisuseFailure("Output vector is not size M (numMutations())");
+        }
+    }
+
+    // The node value storage stores the different row values consecutively (so
+    // similar to column-major order), in contrast to the input/output matrices
+    // which are row-major.
+    std::vector<T> nodeValues(numNodes() * inputRows);
+    if (direction == DIRECTION_DOWN) {
+        for (const auto& nodeIdAndMutId : this->getNodeMutationPairs()) {
+            const NodeID& nodeId = nodeIdAndMutId.first;
+            const MutationId& mutId = nodeIdAndMutId.second;
+            assert(mutId < inputCols);
+            if (nodeId != INVALID_NODE_ID) {
+                const size_t base = nodeId * inputRows;
+                for (size_t row = 0; row < inputRows; row++) {
+                    const size_t rowStart = row * inputCols;
+                    nodeValues[base + row] += inputMatrix[rowStart + mutId];
+                }
+            }
+        }
+        if (this->nodesAreOrdered()) {
+            for (NodeID i = numNodes(); i > 0; i--) {
+                const NodeID nodeId = i - 1;
+                const size_t base = nodeId * inputRows;
+                for (NodeID childId : this->getDownEdges(nodeId)) {
+                    const size_t cbase = childId * inputRows;
+                    vectorAdd<T>(&nodeValues[cbase], &nodeValues[base], inputRows);
+                }
+            }
+        } else {
+            ValueSumVisitor<T> valueSumVisitor(nodeValues, inputRows);
+            this->visitDfs(valueSumVisitor, DIRECTION_UP, getSampleNodes());
+        }
+        for (size_t row = 0; row < inputRows; row++) {
+            const size_t rowStart = row * outputCols;
+            for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
+                const size_t base = sampleId * inputRows;
+                assert(rowStart + sampleId < outputSize);
+                outputMatrix[rowStart + sampleId] = nodeValues[base + row];
+            }
+        }
+    } else {
+        for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
+            assert(sampleId < inputCols);
+            const size_t base = sampleId * inputRows;
+            for (size_t row = 0; row < inputRows; row++) {
+                const size_t rowStart = row * inputCols;
+                nodeValues[base + row] = inputMatrix[rowStart + sampleId];
+            }
+        }
+        if (this->nodesAreOrdered()) {
+            for (NodeID nodeId = numSamples(); nodeId < numNodes(); nodeId++) {
+                const size_t base = nodeId * inputRows;
+                for (NodeID childId : this->getDownEdges(nodeId)) {
+                    const size_t cbase = childId * inputRows;
+                    vectorAdd<T>(&nodeValues[base], &nodeValues[cbase], inputRows);
+                }
+            }
+        } else {
+            ValueSumVisitor<T> valueSumVisitor(nodeValues, inputRows);
+            this->visitDfs(valueSumVisitor, DIRECTION_DOWN, getRootNodes());
+        }
+        for (size_t row = 0; row < inputRows; row++) {
+            const size_t rowStart = row * outputCols;
+            for (const auto& nodeIdAndMutId : this->getNodeMutationPairs()) {
+                const NodeID& nodeId = nodeIdAndMutId.first;
+                const MutationId& mutId = nodeIdAndMutId.second;
+                assert(rowStart + mutId < outputSize);
+                if (nodeId != INVALID_NODE_ID) {
+                    const size_t base = nodeId * inputRows;
+                    outputMatrix[rowStart + mutId] += nodeValues[base + row];
+                }
+            }
+        }
+    }
+}
 
 } // namespace grgl
 

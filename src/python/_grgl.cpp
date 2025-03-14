@@ -34,16 +34,82 @@ namespace py = pybind11;
 
 #include <iostream>
 
-py::array_t<double> dotProduct(grgl::GRGPtr& grg, py::array_t<double> input, grgl::TraversalDirection direction) {
-    py::buffer_info buffer = input.request();
-
-    const size_t outSize =
-        (direction == grgl::TraversalDirection::DIRECTION_DOWN) ? grg->numSamples() : grg->numMutations();
-    py::array_t<double> result(outSize);
+template <typename T>
+inline py::array_t<T> dispatchDotProd(
+    grgl::GRGPtr& grg, py::buffer_info& buffer, size_t inCols, size_t outCols, grgl::TraversalDirection direction) {
+    py::array_t<T> result(outCols);
     py::buffer_info resultBuf = result.request();
-    memset(resultBuf.ptr, 0, outSize * sizeof(double));
-    grg->dotProduct((const double*)buffer.ptr, (size_t)buffer.size, direction, (double*)resultBuf.ptr, (size_t)outSize);
+    memset(resultBuf.ptr, 0, outCols * sizeof(T));
+    grg->matrixMultiplication((const T*)buffer.ptr, inCols, 1, direction, (T*)resultBuf.ptr, outCols);
     return std::move(result);
+}
+
+py::array dotProduct(grgl::GRGPtr& grg, py::handle input, grgl::TraversalDirection direction) {
+    py::array arr = py::array::ensure(input, py::array::c_style | py::array::forcecast);
+    py::buffer_info buffer = arr.request();
+    if (buffer.ndim != 1) {
+        throw grgl::ApiMisuseFailure("dot_product() only support one-dimensional numpy arrays as input.");
+    }
+    const size_t cols = buffer.shape.at(0);
+    if (cols == 0) {
+        throw grgl::ApiMisuseFailure("dot_product() requires non-empty array input.");
+    }
+    const size_t outCols =
+        (direction == grgl::TraversalDirection::DIRECTION_DOWN) ? grg->numSamples() : grg->numMutations();
+    if (py::isinstance<py::array_t<double>>(input)) {
+        return dispatchDotProd<double>(grg, buffer, cols, outCols, direction);
+    } else if (py::isinstance<py::array_t<float>>(input)) {
+        return dispatchDotProd<float>(grg, buffer, cols, outCols, direction);
+    } else if (py::isinstance<py::array_t<std::int64_t>>(input)) {
+        return dispatchDotProd<int64_t>(grg, buffer, cols, outCols, direction);
+    } else if (py::isinstance<py::array_t<std::int32_t>>(input)) {
+        return dispatchDotProd<int32_t>(grg, buffer, cols, outCols, direction);
+    }
+    std::stringstream ssErr;
+    ssErr << "Unsupported numpy dtype: " << arr.dtype();
+    throw grgl::ApiMisuseFailure(ssErr.str().c_str());
+}
+
+template <typename T>
+inline py::array_t<T> dispatchMult(grgl::GRGPtr& grg,
+                                   py::buffer_info& buffer,
+                                   size_t rows,
+                                   size_t inCols,
+                                   size_t outCols,
+                                   grgl::TraversalDirection direction) {
+    const size_t outSize = rows * outCols;
+    py::array_t<T> result({rows, outCols});
+    py::buffer_info resultBuf = result.request();
+    memset(resultBuf.ptr, 0, outSize * sizeof(T));
+    grg->matrixMultiplication((const T*)buffer.ptr, inCols, rows, direction, (T*)resultBuf.ptr, outSize);
+    return std::move(result);
+}
+
+py::array matMul(grgl::GRGPtr& grg, py::handle input, grgl::TraversalDirection direction) {
+    py::array arr = py::array::ensure(input, py::array::c_style | py::array::forcecast);
+    py::buffer_info buffer = arr.request();
+    if (buffer.ndim != 2) {
+        throw grgl::ApiMisuseFailure("matmul() only support two dimensional numpy arrays as input.");
+    }
+    const size_t rows = buffer.shape.at(0);
+    const size_t cols = buffer.shape.at(1);
+    if (rows == 0 || cols == 0) {
+        throw grgl::ApiMisuseFailure("matmul() requires non-zero dimensions.");
+    }
+    const size_t outCols =
+        (direction == grgl::TraversalDirection::DIRECTION_DOWN) ? grg->numSamples() : grg->numMutations();
+    if (py::isinstance<py::array_t<double>>(input)) {
+        return dispatchMult<double>(grg, buffer, rows, cols, outCols, direction);
+    } else if (py::isinstance<py::array_t<float>>(input)) {
+        return dispatchMult<float>(grg, buffer, rows, cols, outCols, direction);
+    } else if (py::isinstance<py::array_t<std::int64_t>>(input)) {
+        return dispatchMult<int64_t>(grg, buffer, rows, cols, outCols, direction);
+    } else if (py::isinstance<py::array_t<std::int32_t>>(input)) {
+        return dispatchMult<int32_t>(grg, buffer, rows, cols, outCols, direction);
+    }
+    std::stringstream ssErr;
+    ssErr << "Unsupported numpy dtype: " << arr.dtype();
+    throw grgl::ApiMisuseFailure(ssErr.str().c_str());
 }
 
 class NodeNumberingIterator : public grgl::GRGVisitor {
@@ -547,31 +613,55 @@ PYBIND11_MODULE(_grgl, m) {
     )^");
 
     m.def("dot_product", &dotProduct, py::arg("grg"), py::arg("input"), py::arg("direction"), R"^(
-        Compute one of two possible dot products across the entire graph. The input vector :math:`V` can be
-        either :math:`1 \times N` (:math:`N` is number of samples) or :math:`1 \times M` (:math:`M` is number of
-        mutations). The given direction determines which input vector is expected. Let :math:`X` be the
-        :math:`N \times M` genotype matrix.
-        For an :math:`1 \times N` input :math:`V`, the product performed is :math:`V \cdot X` which gives a
-        :math:`1 \times M` result. I.e., the input vector is a value per sample and the output vector is
-        a value per mutation.
-        For an :math:`1 \times M` input :math:`V`, the product performed is :math:`V \cdot X^T` which gives a
-        :math:`1 \times N` result. I.e., the input vector is a value per mutation and the output vector is
-        a value per sample.
-
-        Dot product in the graph works by seeding the input nodes (samples or mutations) with the corresponding
-        values from the input vector and then traversing the graph in the relevant direction (up or down). The
-        ancestor/descendant values are summed at each node, until the terminal nodes (mutations or samples) are
-        reached.
+        Special case of :py:meth:`matmul`, where input is a vector (1-dimensional numpy array) instead
+        of a matrix. Computes the vector-matrix product between the input vector and the genotype matrix
+        :math:`X` (or :math:`X^T`). See :py:meth:`matmul` for more details.
 
         :param grg: The GRG to perform the computation against.
         :type grg: pygrgl.GRG or pygrgl.MutableGRG
-        :param input: The numpy array of input values :math:`V`.
+        :param input: The numpy 1-dimensional array of input values :math:`V`.
         :type seed_list: numpy.array
         :param direction: The direction to traverse, up (input is per sample) or down (input is per mutation).
         :type direction: pygrgl.TraversalDirection
-        :return: The numpy array of output values.
+        :return: The numpy 1-dimensional array of output values.
         :rtype: numpy.array
 
+    )^");
+
+    m.def("matmul", &matMul, py::arg("grg"), py::arg("input"), py::arg("direction"), R"^(
+        Compute one of two possible matrix multiplications across the entire
+        graph. The input matrix :math:`V` can be either :math:`K \times N` (:math:`N`
+        is number of samples) or :math:`K \times M` (:math:`M` is number of
+        mutations). The given direction determines which input matrix is
+        expected. Let :math:`X` be the :math:`N \times M` genotype matrix. For an
+        :math:`K \times N` input :math:`V`, the product performed is :math:`V \times X`
+        which gives a :math:`K \times M` result. I.e., the input matrix is a column
+        per sample and the output matrix is a column per mutation. For an :math:`K
+        \times M` input :math:`V`, the product performed is :math:`V \times X^T`
+        which gives a :math:`K \times N` result. I.e., the input matrix is a column
+        per mutation and the output matrix is a column per sample.
+
+        The simplest case to consider is a vector input (e.g., a :math:`1 \times N`
+        matrix). This vector-matrix product in the graph works by seeding the
+        input nodes (samples in this example) with the corresponding values from
+        the input vector and then traversing the graph in the relevant direction
+        (up or down). The ancestor/descendant values are summed at each node,
+        until the terminal nodes (mutations in this example) are reached. The
+        values at the terminal nodes are then the output vector.
+        When a :math:`K`-row matrix is input, instead of a vector, the only
+        difference is that each node stores :math:`K` values instead of 1.
+
+        Note: the RAM used will be :math:`O(K * nodes)` where :math:`nodes` is the
+        total number of nodes in the graph.
+
+        :param grg: The GRG to perform the computation against.
+        :type grg: pygrgl.GRG or pygrgl.MutableGRG
+        :param input: The numpy 2-dimensional array of input values :math:`V`.
+        :type seed_list: numpy.array
+        :param direction: The direction to traverse, up (input is per sample) or down (input is per mutation).
+        :type direction: pygrgl.TraversalDirection
+        :return: The numpy 2-dimensional array of output values.
+        :rtype: numpy.array
     )^");
 
     m.attr("INVALID_NODE") = INVALID_NODE_ID;

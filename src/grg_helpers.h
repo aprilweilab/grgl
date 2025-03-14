@@ -95,6 +95,9 @@ static inline void dumpStats(const GRGPtr& grg) {
     std::cout << "Naive Edges: " << getNaiveEdgeCount(grg) << std::endl;
     std::cout << "Ploidy: " << grg->getPloidy() << std::endl;
     std::cout << "Populations: " << grg->getPopulations().size() << std::endl;
+    std::cout << "Range of mutations: " << grg->getBPRange().first << " - " << grg->getBPRange().second << std::endl;
+    std::cout << "Specified range: " << grg->getSpecifiedBPRange().first << " - " << grg->getSpecifiedBPRange().second
+              << std::endl;
     std::cout << "======================" << std::endl;
 }
 
