@@ -19,6 +19,7 @@
 #include "grgl/common.h"
 #include "grgl/csr_storage.h"
 #include "grgl/grgnode.h"
+#include "grgl/mut_iterator.h"
 #include "grgl/mutation.h"
 #include "grgl/visitor.h"
 #include "util.h"
@@ -177,6 +178,169 @@ static bool setsOverlap(const NodeIDSet& alreadyCovered, const NodeIDList& candi
         }
     }
     return false;
+}
+
+// TODO: need to preallocate coalescence vector
+static NodeIDList greedyAddMutationImmutable(const MutableGRGPtr& grg,
+                                             const std::vector<NodeIDSizeT>& sampleCounts,
+                                             const Mutation& newMutation,
+                                             const NodeIDList& mutSamples,
+                                             MutationMappingStats& stats,
+                                             const NodeID shapeNodeIdMax) {
+    // The topological order of nodeIDs is maintained through-out this algorithm, because newly added
+    // nodes are only ever _root nodes_ (at the time they are added).
+    release_assert(grg->nodesAreOrdered());
+
+    const size_t ploidy = grg->getPloidy();
+    // The set of nodes that we have covered so far (greedily extended)
+    NodeIDSet covered;
+
+    TopoCandidateCollectorVisitor collector(sampleCounts);
+    if (mutSamples.size() > 1) {
+        grg->visitTopo(collector, grgl::TraversalDirection::DIRECTION_UP, mutSamples);
+    }
+    std::vector<NodeSamples>& candidates = collector.m_collectedNodes;
+    std::sort(candidates.begin(), candidates.end());
+    auto endOfUnique = std::unique(candidates.begin(), candidates.end());
+    candidates.erase(endOfUnique, candidates.end());
+    std::sort(candidates.begin(), candidates.end(), cmpNodeSamples);
+
+    if (candidates.empty()) {
+        stats.mutationsWithNoCandidates++;
+    } else {
+        // Exact match scenario. Return early.
+        const auto& candidate = candidates.back();
+        const size_t candidateSetSize = std::get<1>(candidate);
+        if (candidateSetSize == mutSamples.size()) {
+            const auto candidateId = std::get<0>(candidate);
+            stats.reusedExactly++;
+            // grg->addMutation(newMutation, candidateId);
+            if (candidateId >= shapeNodeIdMax) {
+                stats.reusedMutNodes++;
+            }
+            return {candidateId};
+        }
+    }
+    NodeIDList newNodeList{};
+    size_t individualCoalCount = 0;
+    // Map from an individual to which child contained it.
+    std::unordered_map<NodeIDSizeT, NodeIDSizeT> individualToChild;
+    // const NodeID mutNodeId = grg->makeNode(1, true);
+    // grg->addMutation(newMutation, mutNodeId);
+    NodeIDList addedNodes;
+    const size_t numMutSamples = mutSamples.size();
+    while (!candidates.empty() && covered.size() < numMutSamples) {
+        const auto& candidate = candidates.back();
+        const auto candidateId = std::get<0>(candidate);
+        const NodeIDList candidateSet = collector.getSamplesForCandidate(candidateId);
+        release_assert(!candidateSet.empty());
+        // Different candidates may cover different subsets of the sample set that
+        // we are currently trying to cover. Those sample sets MUST be non-overlapping
+        // or we will introduce a diamond into the graph:
+        //  m-->n1-->s0
+        //  m-->n2-->s0
+        // However, there is no guarantee that there does not exist nodes (n1, n2)
+        // that both point to a sample (or samples) that we care about, so we have to
+        // track that here. We do that by only considering candidates that have no overlap
+        // with our already-covered set.
+        if (!setsOverlap(covered, candidateSet)) {
+            // Mark all the sample nodes as covered.
+            for (const auto sampleId : candidateSet) {
+                covered.emplace(sampleId);
+                if (ploidy == 2) {
+                    auto insertPair = individualToChild.emplace(sampleId / ploidy, candidateId);
+                    // The individual already existed from a _different node_, so the two samples will coalesce
+                    // at the new mutation node.
+                    if (!insertPair.second && candidateId != insertPair.first->second) {
+                        individualCoalCount++;
+                    }
+                }
+            }
+            if (candidateId >= shapeNodeIdMax) {
+                stats.reusedMutNodes++;
+            }
+
+            // Use this candidate (or the nodes below it) to cover the sample subset.
+            stats.reusedNodes++;
+            newNodeList.push_back(candidateId);
+            // grg->connect(mutNodeId, candidateId);
+            stats.reusedNodeCoverage += candidateSet.size();
+            if (candidateSet.size() >= stats.reuseSizeHist.size()) {
+                stats.reuseSizeBiggerThanHistMax++;
+            } else {
+                stats.reuseSizeHist[candidateSet.size()]++;
+            }
+        }
+        candidates.pop_back();
+    }
+
+    // Any leftovers, we just connect directly from the new mutation node to the
+    // samples.
+    NodeIDSet uncovered;
+    for (const NodeID sampleNodeId : mutSamples) {
+        const auto coveredIt = covered.find(sampleNodeId);
+        if (coveredIt == covered.end()) {
+            uncovered.emplace(sampleNodeId);
+            // The individual had already been seen and >=1 of the samples was previously uncovered,
+            // then the new node we create is going to be the coalescence location for that individual.
+            if (ploidy == 2) {
+                auto insertPair = individualToChild.emplace(sampleNodeId / ploidy, mutNodeId);
+                if (!insertPair.second) {
+                    individualCoalCount++;
+                }
+            }
+        }
+    }
+    NodeIDSizeT numCoals = 0;
+    if (ploidy == 2) {
+        numCoals = individualCoalCount;
+        grg->setNumIndividualCoals(mutNodeId, individualCoalCount);
+    }
+
+    if (!uncovered.empty()) {
+        stats.numWithSingletons++;
+    }
+
+    if (uncovered.size() > stats.maxSingletons) {
+        stats.maxSingletons = uncovered.size();
+    }
+
+    for (auto sampleNodeId : uncovered) {
+        newNodeList.push_back(sampleNodeId);
+        // grg->connect(mutNodeId, sampleNodeId);
+        stats.singletonSampleEdges++;
+    }
+    // This node needs to be last, for the way we update things.
+    return newNodeList;
+}
+
+static NodeIDList process_batch(const MutableGRGPtr& grg,
+                                const std::vector<NodeIDSizeT>& sampleCounts,
+                                const std::vector<Mutation>& mutations,
+                                const NodeIDList& mutSamples,
+                                MutationMappingStats& stats,
+                                const NodeID shapeNodeIdMax) {
+    int batch_size = mutations.size();
+    std::vector<NodeIDList> batch_tasks(batch_size);
+
+    for (int i = 0; i < batch_size; i++) {
+        batch_tasks[i] = greedyAddMutationImmutable(grg, sampleCounts, mutations[i], mutSamples, stats, shapeNodeIdMax);
+    }
+
+    std::vector<NodeID> addedNodes{};
+    for (int i = 0; i < batch_size; i++) {
+        const NodeIDList& nodes = batch_tasks[i];
+        if (nodes.size() == 1) {
+            grg->addMutation(mutations[i], nodes[0]);
+        } else {
+            const NodeID mutNodeId = grg->makeNode(1, true);
+            addedNodes.push_back(mutNodeId);
+            for (auto candidateNodeID : nodes) {
+                grg->connect(mutNodeId, candidateNodeID);
+            }
+        }
+    }
+    return addedNodes;
 }
 
 // Tracking individual coalescence is a bit spread out, but I think it is the most efficient way to do it.
@@ -367,7 +531,8 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
             }
             // Step 1: Add mutation node and create edges to existing nodes.
             NodeIDList addedNodes =
-                greedyAddMutation(grg, sampleCounts, unmapped.mutation, mutSamples, stats, shapeNodeIdMax);
+                process_batch(grg, sampleCounts, {unmapped.mutation}, mutSamples, stats, shapeNodeIdMax);
+            // greedyAddMutation(grg, sampleCounts, unmapped.mutation, mutSamples, stats, shapeNodeIdMax);
 
             // Step 2: Add the new mutation node to the sample counts.
             sampleCounts.resize(sampleCounts.size() + addedNodes.size());
@@ -402,5 +567,4 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
     }
     return stats;
 }
-
 }; // namespace grgl
