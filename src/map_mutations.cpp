@@ -181,12 +181,12 @@ static bool setsOverlap(const NodeIDSet& alreadyCovered, const NodeIDList& candi
 }
 
 // TODO: need to preallocate coalescence vector
-static NodeIDList greedyAddMutationImmutable(const MutableGRGPtr& grg,
-                                             const std::vector<NodeIDSizeT>& sampleCounts,
-                                             const Mutation& newMutation,
-                                             const NodeIDList& mutSamples,
-                                             MutationMappingStats& stats,
-                                             const NodeID shapeNodeIdMax) {
+static std::pair<NodeIDList, NodeIDSizeT> greedyAddMutationImmutable(const MutableGRGPtr& grg,
+                                                                     const std::vector<NodeIDSizeT>& sampleCounts,
+                                                                     const Mutation& newMutation,
+                                                                     const NodeIDList& mutSamples,
+                                                                     MutationMappingStats& stats,
+                                                                     const NodeID shapeNodeIdMax) {
     // The topological order of nodeIDs is maintained through-out this algorithm, because newly added
     // nodes are only ever _root nodes_ (at the time they are added).
     release_assert(grg->nodesAreOrdered());
@@ -218,7 +218,7 @@ static NodeIDList greedyAddMutationImmutable(const MutableGRGPtr& grg,
             if (candidateId >= shapeNodeIdMax) {
                 stats.reusedMutNodes++;
             }
-            return {candidateId};
+            return {{candidateId}, 0};
         }
     }
     NodeIDList newNodeList{};
@@ -284,7 +284,7 @@ static NodeIDList greedyAddMutationImmutable(const MutableGRGPtr& grg,
             // The individual had already been seen and >=1 of the samples was previously uncovered,
             // then the new node we create is going to be the coalescence location for that individual.
             if (ploidy == 2) {
-                auto insertPair = individualToChild.emplace(sampleNodeId / ploidy, mutNodeId);
+                auto insertPair = individualToChild.emplace(sampleNodeId / ploidy, grg->numNodes() + 1);
                 if (!insertPair.second) {
                     individualCoalCount++;
                 }
@@ -294,7 +294,7 @@ static NodeIDList greedyAddMutationImmutable(const MutableGRGPtr& grg,
     NodeIDSizeT numCoals = 0;
     if (ploidy == 2) {
         numCoals = individualCoalCount;
-        grg->setNumIndividualCoals(mutNodeId, individualCoalCount);
+        // grg->setNumIndividualCoals(mutNodeId, individualCoalCount);
     }
 
     if (!uncovered.empty()) {
@@ -311,7 +311,7 @@ static NodeIDList greedyAddMutationImmutable(const MutableGRGPtr& grg,
         stats.singletonSampleEdges++;
     }
     // This node needs to be last, for the way we update things.
-    return newNodeList;
+    return {newNodeList, numCoals};
 }
 
 static NodeIDList process_batch(const MutableGRGPtr& grg,
@@ -321,7 +321,7 @@ static NodeIDList process_batch(const MutableGRGPtr& grg,
                                 MutationMappingStats& stats,
                                 const NodeID shapeNodeIdMax) {
     int batch_size = mutations.size();
-    std::vector<NodeIDList> batch_tasks(batch_size);
+    std::vector<std::pair<NodeIDList, NodeIDSizeT>> batch_tasks(batch_size);
 
     for (int i = 0; i < batch_size; i++) {
         batch_tasks[i] = greedyAddMutationImmutable(grg, sampleCounts, mutations[i], mutSamples, stats, shapeNodeIdMax);
@@ -329,7 +329,8 @@ static NodeIDList process_batch(const MutableGRGPtr& grg,
 
     std::vector<NodeID> addedNodes{};
     for (int i = 0; i < batch_size; i++) {
-        const NodeIDList& nodes = batch_tasks[i];
+        const NodeIDList& nodes = batch_tasks[i].first;
+        NodeIDSizeT coalCount = batch_tasks[i].second;
         if (nodes.size() == 1) {
             grg->addMutation(mutations[i], nodes[0]);
         } else {
@@ -338,6 +339,7 @@ static NodeIDList process_batch(const MutableGRGPtr& grg,
             for (auto candidateNodeID : nodes) {
                 grg->connect(mutNodeId, candidateNodeID);
             }
+            grg->setNumIndividualCoals(mutNodeId, coalCount);
         }
     }
     return addedNodes;
