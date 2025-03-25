@@ -180,13 +180,12 @@ static bool setsOverlap(const NodeIDSet& alreadyCovered, const NodeIDList& candi
     return false;
 }
 
-// TODO: need to preallocate coalescence vector
 static std::pair<NodeIDList, NodeIDSizeT> greedyAddMutationImmutable(const MutableGRGPtr& grg,
                                                                      const std::vector<NodeIDSizeT>& sampleCounts,
-                                                                     const Mutation& newMutation,
                                                                      const NodeIDList& mutSamples,
                                                                      MutationMappingStats& stats,
-                                                                     const NodeID shapeNodeIdMax) {
+                                                                     const NodeID shapeNodeIdMax,
+                                                                     const int batchCount) {
     // The topological order of nodeIDs is maintained through-out this algorithm, because newly added
     // nodes are only ever _root nodes_ (at the time they are added).
     release_assert(grg->nodesAreOrdered());
@@ -284,7 +283,7 @@ static std::pair<NodeIDList, NodeIDSizeT> greedyAddMutationImmutable(const Mutab
             // The individual had already been seen and >=1 of the samples was previously uncovered,
             // then the new node we create is going to be the coalescence location for that individual.
             if (ploidy == 2) {
-                auto insertPair = individualToChild.emplace(sampleNodeId / ploidy, grg->numNodes() + 1);
+                auto insertPair = individualToChild.emplace(sampleNodeId / ploidy, grg->numNodes() + batchCount);
                 if (!insertPair.second) {
                     individualCoalCount++;
                 }
@@ -324,7 +323,7 @@ static NodeIDList process_batch(const MutableGRGPtr& grg,
     std::vector<std::pair<NodeIDList, NodeIDSizeT>> batch_tasks(batch_size);
 
     for (int i = 0; i < batch_size; i++) {
-        batch_tasks[i] = greedyAddMutationImmutable(grg, sampleCounts, mutations[i], mutSamples, stats, shapeNodeIdMax);
+        batch_tasks[i] = greedyAddMutationImmutable(grg, sampleCounts, mutSamples, stats, shapeNodeIdMax, i);
     }
 
     std::vector<NodeID> addedNodes{};
