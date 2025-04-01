@@ -334,6 +334,7 @@ static NodeIDList process_batch(const MutableGRGPtr& grg,
             grg->addMutation(mutations[i], nodes[0]);
         } else {
             const NodeID mutNodeId = grg->makeNode(1, true);
+            grg->addMutation(mutations[i], mutNodeId);
             addedNodes.push_back(mutNodeId);
             for (auto candidateNodeID : nodes) {
                 grg->connect(mutNodeId, candidateNodeID);
