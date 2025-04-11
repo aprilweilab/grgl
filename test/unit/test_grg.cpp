@@ -7,11 +7,12 @@
 #include "grgl/serialize.h"
 
 #include "common_grgs.h"
+#include "common_visitors.h"
 #include "grgl/visitor.h"
 
 #include <fstream>
 
-using namespace grgl;
+namespace grgl {
 
 TEST(GRG, Mutations) {
     Mutation m1(1, "A", "G");
@@ -173,4 +174,51 @@ TEST(GRG, NoUpEdges) {
 
     const NodeIDList rootsAfter = grg->getRootNodes();
     ASSERT_EQ(rootsBefore, rootsAfter);
+}
+
+TEST(GRG, TestTopoVisit) {
+    GRGPtr grg = depth3BinTree();
+    class TestVisitor : public GRGVisitor {
+    public:
+        bool visit(const grgl::GRGPtr& grg,
+                   const grgl::NodeID nodeId,
+                   const grgl::TraversalDirection direction,
+                   const grgl::DfsPass dfsPass) override {
+            m_visited++;
+            if (nodeId >= 4) {
+                return false;
+            }
+            return true;
+        }
+        NodeIDSizeT m_visited{};
+    };
+    TestVisitor visitor;
+    grg->visitTopo(visitor, TraversalDirection::DIRECTION_UP, grg->getSampleNodes());
+    ASSERT_EQ(visitor.m_visited, 6);
+
+    TestVisitor visitorDense;
+    grg->visitTopoNodeOrderedDense(visitorDense, TraversalDirection::DIRECTION_UP, grg->getSampleNodes());
+    ASSERT_EQ(visitorDense.m_visited, 6);
+
+    TestVisitor visitorSparse;
+    grg->visitTopoNodeOrderedSparse(visitorSparse, TraversalDirection::DIRECTION_UP, grg->getSampleNodes());
+    ASSERT_EQ(visitorSparse.m_visited, 6);
+}
+
+TEST(GRG, TestFrontier) {
+    GRGPtr grg = sample8Grg();
+
+    const NodeIDList downSeeds = {13, 11};
+    FrontierVisitor downVisitor(downSeeds);
+    grg->visitTopoNodeOrderedDense(downVisitor, TraversalDirection::DIRECTION_DOWN, downSeeds);
+    const NodeIDList expectedDown = {10, 8};
+    ASSERT_EQ(downVisitor.m_frontier, expectedDown);
+
+    const NodeIDList upSeeds = {1, 3};
+    FrontierVisitor upVisitor(upSeeds);
+    grg->visitTopoNodeOrderedDense(upVisitor, TraversalDirection::DIRECTION_UP, upSeeds);
+    const NodeIDList expectedUp = {11, 13};
+    ASSERT_EQ(upVisitor.m_frontier, expectedUp);
+}
+
 }

@@ -51,10 +51,10 @@ using NodeID = uint32_t;
 using NodeIDSizeT = uint32_t;
 
 // We support about 2 billion nodes per graph.
-#define MAX_GRG_NODES   (0x7fffffffU - 1)
-#define INVALID_NODE_ID (0x7fffffffU)
+static constexpr NodeIDSizeT MAX_GRG_NODES = 0x7fffffffU - 1;
+static constexpr NodeID INVALID_NODE_ID = 0x7fffffffU;
 // The upper bit is available for flags.
-#define GRG_NODE_FLAG_MASK (0x80000000U)
+static constexpr NodeID GRG_NODE_FLAG_MASK = 0x80000000U;
 
 using NodeMark = NodeID;
 constexpr NodeMark NODE_MARK_1 = 0x80000000U;

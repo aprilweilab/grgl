@@ -36,6 +36,11 @@
 #include <immintrin.h>
 #endif
 
+// To avoid dependency on gtest.
+#ifndef FRIEND_TEST
+#define FRIEND_TEST(x, y)
+#endif
+
 namespace grgl {
 
 // Returned by the edge-count functionality when there are no edges loaded/stored for the up direction, as opposed to
@@ -346,7 +351,8 @@ public:
                               size_t inputRows,
                               TraversalDirection direction,
                               T* outputMatrix,
-                              size_t outputSize);
+                              size_t outputSize,
+                              bool emitAllNodes = false);
 
     /**
      * Compute one of two possible matrix multiplications across the entire
@@ -443,7 +449,8 @@ public:
     }
 
 protected:
-    void visitTopoNodeOrdered(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
+    void visitTopoNodeOrderedDense(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
+    void visitTopoNodeOrderedSparse(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
 
     // m_mutIdsByNodeId gets appended to and then sorted periodically or as needed, using this
     // function. We rarely need to lookup Mutations by NodeID while modifying a GRG, so this ends
@@ -476,6 +483,10 @@ protected:
     bool m_mutsAreOrdered{false};
 
     friend void readGrgCommon(const GRGFileHeader& header, const GRGPtr& grg, IFSPointer& inStream);
+
+    // Google-test unit tests that need private/protected access.
+    FRIEND_TEST(GRG, TestTopoVisit);
+    FRIEND_TEST(GRG, TestFrontier);
 };
 
 using GRGPtr = std::shared_ptr<GRG>;
@@ -688,7 +699,8 @@ void GRG::matrixMultiplication(const T* inputMatrix,
                                size_t inputRows,
                                TraversalDirection direction,
                                T* outputMatrix,
-                               size_t outputSize) {
+                               size_t outputSize,
+                               bool emitAllNodes) {
     release_assert(inputCols > 0);
     release_assert(inputRows > 0);
     const size_t outputCols = outputSize / inputRows;
@@ -697,16 +709,19 @@ void GRG::matrixMultiplication(const T* inputMatrix,
         if (inputCols != numMutations()) {
             throw ApiMisuseFailure("Input vector is not size M (numMutations())");
         }
-        if (outputCols != numSamples()) {
+        if (!emitAllNodes && outputCols != numSamples()) {
             throw ApiMisuseFailure("Output vector is not size N (numSamples())");
         }
     } else {
         if (inputCols != numSamples()) {
             throw ApiMisuseFailure("Input vector is not size N (numSamples())");
         }
-        if (outputCols != numMutations()) {
+        if (!emitAllNodes && outputCols != numMutations()) {
             throw ApiMisuseFailure("Output vector is not size M (numMutations())");
         }
+    }
+    if (emitAllNodes && outputCols != numNodes()) {
+        throw ApiMisuseFailure("Output vector is not size numNodes()");
     }
 
     // The node value storage stores the different row values consecutively (so
@@ -739,12 +754,14 @@ void GRG::matrixMultiplication(const T* inputMatrix,
             ValueSumVisitor<T> valueSumVisitor(nodeValues, inputRows);
             this->visitDfs(valueSumVisitor, DIRECTION_UP, getSampleNodes());
         }
-        for (size_t row = 0; row < inputRows; row++) {
-            const size_t rowStart = row * outputCols;
-            for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
-                const size_t base = sampleId * inputRows;
-                assert(rowStart + sampleId < outputSize);
-                outputMatrix[rowStart + sampleId] = nodeValues[base + row];
+        if (!emitAllNodes) {
+            for (size_t row = 0; row < inputRows; row++) {
+                const size_t rowStart = row * outputCols;
+                for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
+                    const size_t base = sampleId * inputRows;
+                    assert(rowStart + sampleId < outputSize);
+                    outputMatrix[rowStart + sampleId] = nodeValues[base + row];
+                }
             }
         }
     } else {
@@ -768,16 +785,27 @@ void GRG::matrixMultiplication(const T* inputMatrix,
             ValueSumVisitor<T> valueSumVisitor(nodeValues, inputRows);
             this->visitDfs(valueSumVisitor, DIRECTION_DOWN, getRootNodes());
         }
+        if (!emitAllNodes) {
+            for (size_t row = 0; row < inputRows; row++) {
+                const size_t rowStart = row * outputCols;
+                for (const auto& nodeIdAndMutId : this->getNodeMutationPairs()) {
+                    const NodeID& nodeId = nodeIdAndMutId.first;
+                    const MutationId& mutId = nodeIdAndMutId.second;
+                    assert(rowStart + mutId < outputSize);
+                    if (nodeId != INVALID_NODE_ID) {
+                        const size_t base = nodeId * inputRows;
+                        outputMatrix[rowStart + mutId] += nodeValues[base + row];
+                    }
+                }
+            }
+        }
+    }
+    if (emitAllNodes) {
         for (size_t row = 0; row < inputRows; row++) {
             const size_t rowStart = row * outputCols;
-            for (const auto& nodeIdAndMutId : this->getNodeMutationPairs()) {
-                const NodeID& nodeId = nodeIdAndMutId.first;
-                const MutationId& mutId = nodeIdAndMutId.second;
-                assert(rowStart + mutId < outputSize);
-                if (nodeId != INVALID_NODE_ID) {
-                    const size_t base = nodeId * inputRows;
-                    outputMatrix[rowStart + mutId] += nodeValues[base + row];
-                }
+            for (NodeID nodeId = 0; nodeId < numNodes(); nodeId++) {
+                const size_t base = nodeId * inputRows;
+                outputMatrix[rowStart + nodeId] += nodeValues[base + row];
             }
         }
     }
