@@ -29,6 +29,11 @@
 
 namespace grgl {
 
+// This number needs to be more principled in how it is chosen. I somewhat randomly chose this,
+// as I want the pairwise case to definitely use the sparse topological search, but I don't really
+// know when the switch from dense to sparse is optimal. This only matters for large graphs.
+static constexpr size_t TOPO_DENSE_THRESHOLD = 10;
+
 using bitvect = std::vector<bool>;
 
 MutationId GRG::addMutation(const Mutation& mutation, const NodeID nodeId) {
@@ -216,7 +221,11 @@ void MutableGRG::visitTopo(GRGVisitor& visitor,
         if (sortOrder != nullptr) {
             throw ApiMisuseFailure("This GRG has its node topologically ordered; sortOrder unneeded");
         }
-        this->visitTopoNodeOrdered(visitor, direction, seedList);
+        if (seedList.size() > TOPO_DENSE_THRESHOLD) {
+            this->visitTopoNodeOrderedDense(visitor, direction, seedList);
+        } else {
+            this->visitTopoNodeOrderedSparse(visitor, direction, seedList);
+        }
         return;
     }
 
@@ -280,30 +289,33 @@ static bool cmpNodeIdLt(const NodeID& node1, const NodeID& node2) { return node1
 // This function takes a set of seeds though, so only a subset of nodes may be visited. Using this
 // linear bit-vector approach is actually significantly faster than using a heap of nodes, which is
 // what we did previously.
-void GRG::visitTopoNodeOrdered(GRGVisitor& visitor, const TraversalDirection direction, const NodeIDList& seedList) {
+void GRG::visitTopoNodeOrderedDense(GRGVisitor& visitor,
+                                    const TraversalDirection direction,
+                                    const NodeIDList& seedList) {
     GRGPtr sharedThis = shared_from_this();
-    // std::vector<bool> yesVisit(numNodes());
     static std::vector<bool> yesVisit;
     yesVisit.clear();
     yesVisit.resize(numNodes());
     for (const auto& seedId : seedList) {
         yesVisit.at(seedId) = true;
     }
-    size_t yesCount = seedList.size();
-    size_t seenCount = 0;
+    ssize_t toVisit = static_cast<ssize_t>(seedList.size());
     if (direction == TraversalDirection::DIRECTION_DOWN) {
         for (NodeID nodeIdP1 = numNodes(); nodeIdP1 > 0; nodeIdP1--) {
             const NodeID nodeId = nodeIdP1 - 1;
             if (yesVisit[nodeId]) {
+                assert(toVisit > 0);
+                toVisit--;
                 const bool keepGoing = visitor.visit(sharedThis, nodeId, direction, DFS_PASS_NONE);
                 if (keepGoing) {
                     for (const NodeID succId : this->getDownEdges(nodeId)) {
-                        yesVisit[succId] = true;
-                        yesCount++;
+                        if (!yesVisit[succId]) {
+                            yesVisit[succId] = true;
+                            toVisit++;
+                        }
                     }
                 }
-                seenCount++;
-                if (yesCount == seenCount) {
+                if (toVisit == 0) {
                     break;
                 }
             }
@@ -311,17 +323,66 @@ void GRG::visitTopoNodeOrdered(GRGVisitor& visitor, const TraversalDirection dir
     } else {
         for (NodeID nodeId = 0; nodeId < numNodes(); nodeId++) {
             if (yesVisit[nodeId]) {
+                assert(toVisit > 0);
+                toVisit--;
                 const bool keepGoing = visitor.visit(sharedThis, nodeId, direction, DFS_PASS_NONE);
                 if (keepGoing) {
                     for (const NodeID succId : this->getUpEdges(nodeId)) {
-                        yesVisit[succId] = true;
-                        yesCount++;
+                        if (!yesVisit[succId]) {
+                            yesVisit[succId] = true;
+                            toVisit++;
+                        }
                     }
                 }
-                seenCount++;
-                if (yesCount == seenCount) {
+                if (toVisit == 0) {
                     break;
                 }
+            }
+        }
+    }
+}
+
+void GRG::visitTopoNodeOrderedSparse(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList) {
+    GRGPtr sharedThis = shared_from_this();
+    NodeIDSet alreadySeen;
+    const NodeIDSizeT numNodes = this->numNodes();
+
+#define HEAP_ID(nodeId) (direction == DIRECTION_DOWN) ? (nodeId) : (numNodes - (nodeId))
+
+    std::vector<NodeID> heap;
+    for (const NodeID& seedId : seedList) {
+        heap.emplace_back(HEAP_ID(seedId));
+    }
+
+#ifndef NDEBUG
+    NodeIDSizeT prevPopped = (direction == DIRECTION_UP) ? 0 : numNodes;
+#endif
+    std::make_heap(heap.begin(), heap.end());
+    while (!heap.empty()) {
+        std::pop_heap(heap.begin(), heap.end());
+        const NodeID nodeId = HEAP_ID(heap.back());
+#ifndef NDEBUG
+        if (direction == DIRECTION_UP) {
+            assert(prevPopped <= nodeId);
+        } else {
+            assert(prevPopped >= nodeId);
+        }
+        prevPopped = nodeId;
+#endif
+        heap.pop_back();
+
+        auto insertIt = alreadySeen.insert(nodeId);
+        if (!insertIt.second) { // Was already inserted? Then skip this node.
+            continue;
+        }
+
+        const bool keepGoing = visitor.visit(sharedThis, nodeId, direction, DFS_PASS_NONE);
+        if (keepGoing) {
+            const auto& successors =
+                (direction == DIRECTION_UP) ? this->getUpEdges(nodeId) : this->getDownEdges(nodeId);
+            for (const auto& succId : successors) {
+                heap.emplace_back(HEAP_ID(succId));
+                std::push_heap(heap.begin(), heap.end());
             }
         }
     }
@@ -334,7 +395,11 @@ void CSRGRG::visitTopo(GRGVisitor& visitor,
     if (sortOrder != nullptr) {
         throw ApiMisuseFailure("CSRGRG has its node topologically ordered; sortOrder unneeded");
     }
-    this->visitTopoNodeOrdered(visitor, direction, seedList);
+    if (seedList.size() > TOPO_DENSE_THRESHOLD) {
+        this->visitTopoNodeOrderedDense(visitor, direction, seedList);
+    } else {
+        this->visitTopoNodeOrderedSparse(visitor, direction, seedList);
+    }
 }
 
 void MutableGRG::compact(NodeID nodeId) {

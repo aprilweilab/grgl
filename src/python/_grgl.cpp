@@ -19,6 +19,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "common_visitors.h"
 #include "grg_helpers.h"
 #include "grgl/common.h"
 #include "grgl/grg.h"
@@ -76,16 +77,17 @@ inline py::array_t<T> dispatchMult(grgl::GRGPtr& grg,
                                    size_t rows,
                                    size_t inCols,
                                    size_t outCols,
-                                   grgl::TraversalDirection direction) {
+                                   grgl::TraversalDirection direction,
+                                   bool emitAllNodes) {
     const size_t outSize = rows * outCols;
     py::array_t<T> result({rows, outCols});
     py::buffer_info resultBuf = result.request();
     memset(resultBuf.ptr, 0, outSize * sizeof(T));
-    grg->matrixMultiplication((const T*)buffer.ptr, inCols, rows, direction, (T*)resultBuf.ptr, outSize);
+    grg->matrixMultiplication((const T*)buffer.ptr, inCols, rows, direction, (T*)resultBuf.ptr, outSize, emitAllNodes);
     return std::move(result);
 }
 
-py::array matMul(grgl::GRGPtr& grg, py::handle input, grgl::TraversalDirection direction) {
+py::array matMul(grgl::GRGPtr& grg, py::handle input, grgl::TraversalDirection direction, bool emitAllNodes = false) {
     py::array arr = py::array::ensure(input, py::array::c_style | py::array::forcecast);
     py::buffer_info buffer = arr.request();
     if (buffer.ndim != 2) {
@@ -96,16 +98,17 @@ py::array matMul(grgl::GRGPtr& grg, py::handle input, grgl::TraversalDirection d
     if (rows == 0 || cols == 0) {
         throw grgl::ApiMisuseFailure("matmul() requires non-zero dimensions.");
     }
-    const size_t outCols =
-        (direction == grgl::TraversalDirection::DIRECTION_DOWN) ? grg->numSamples() : grg->numMutations();
+    const size_t outCols = (emitAllNodes                                              ? grg->numNodes()
+                            : (direction == grgl::TraversalDirection::DIRECTION_DOWN) ? grg->numSamples()
+                                                                                      : grg->numMutations());
     if (py::isinstance<py::array_t<double>>(input)) {
-        return dispatchMult<double>(grg, buffer, rows, cols, outCols, direction);
+        return dispatchMult<double>(grg, buffer, rows, cols, outCols, direction, emitAllNodes);
     } else if (py::isinstance<py::array_t<float>>(input)) {
-        return dispatchMult<float>(grg, buffer, rows, cols, outCols, direction);
+        return dispatchMult<float>(grg, buffer, rows, cols, outCols, direction, emitAllNodes);
     } else if (py::isinstance<py::array_t<std::int64_t>>(input)) {
-        return dispatchMult<int64_t>(grg, buffer, rows, cols, outCols, direction);
+        return dispatchMult<int64_t>(grg, buffer, rows, cols, outCols, direction, emitAllNodes);
     } else if (py::isinstance<py::array_t<std::int32_t>>(input)) {
-        return dispatchMult<int32_t>(grg, buffer, rows, cols, outCols, direction);
+        return dispatchMult<int32_t>(grg, buffer, rows, cols, outCols, direction, emitAllNodes);
     }
     std::stringstream ssErr;
     ssErr << "Unsupported numpy dtype: " << arr.dtype();
@@ -158,6 +161,15 @@ getTopoOrder(const grgl::GRGPtr& grg, grgl::TraversalDirection direction, const 
 }
 
 size_t hashMutation(const grgl::Mutation* self) { return std::hash<grgl::Mutation>()(*self); }
+
+// seedList is assumed to be unique! The frontier will be empty if you include duplicates in the
+// seedList.
+std::vector<grgl::NodeID>
+sharedFrontier(const grgl::GRGPtr& grg, grgl::TraversalDirection direction, const grgl::NodeIDList& seedList) {
+    grgl::FrontierVisitor visitor(seedList);
+    grg->visitTopo(visitor, direction, seedList);
+    return std::move(visitor.m_frontier);
+}
 
 PYBIND11_MODULE(_grgl, m) {
     py::class_<grgl::Mutation>(m, "Mutation")
@@ -620,7 +632,7 @@ PYBIND11_MODULE(_grgl, m) {
         :param grg: The GRG to perform the computation against.
         :type grg: pygrgl.GRG or pygrgl.MutableGRG
         :param input: The numpy 1-dimensional array of input values :math:`V`.
-        :type seed_list: numpy.array
+        :type input: numpy.array
         :param direction: The direction to traverse, up (input is per sample) or down (input is per mutation).
         :type direction: pygrgl.TraversalDirection
         :return: The numpy 1-dimensional array of output values.
@@ -628,7 +640,13 @@ PYBIND11_MODULE(_grgl, m) {
 
     )^");
 
-    m.def("matmul", &matMul, py::arg("grg"), py::arg("input"), py::arg("direction"), R"^(
+    m.def("matmul",
+          &matMul,
+          py::arg("grg"),
+          py::arg("input"),
+          py::arg("direction"),
+          py::arg("emit_all_nodes") = false,
+          R"^(
         Compute one of two possible matrix multiplications across the entire
         graph. The input matrix :math:`V` can be either :math:`K \times N` (:math:`N`
         is number of samples) or :math:`K \times M` (:math:`M` is number of
@@ -657,14 +675,36 @@ PYBIND11_MODULE(_grgl, m) {
         :param grg: The GRG to perform the computation against.
         :type grg: pygrgl.GRG or pygrgl.MutableGRG
         :param input: The numpy 2-dimensional array of input values :math:`V`.
-        :type seed_list: numpy.array
+        :type input: numpy.array
         :param direction: The direction to traverse, up (input is per sample) or down (input is per mutation).
         :type direction: pygrgl.TraversalDirection
+        :param emit_all_nodes: False by default. Set to True if you want each output row in the matrix to
+            have a value for every node, not just every sample/mutation (depending on direction).
+        :type emit_all_nodes: bool
         :return: The numpy 2-dimensional array of output values.
         :rtype: numpy.array
     )^");
 
-    m.attr("INVALID_NODE") = INVALID_NODE_ID;
+    m.def("shared_frontier", &sharedFrontier, py::arg("grg"), py::arg("direction"), py::arg("seeds"), R"^(
+        Get the list of nodes that corresponds to the shared frontier in the graph
+        in the given direction. The frontier are the _first_ nodes, along each path,
+        that are reached by all seeds nodes in the input.
+
+        Do not pass duplicate Node IDs in "seeds"! There is no checking for duplication,
+        but you will get incorrect results if you pass in duplicates.
+
+        :param grg: The GRG to perform the computation against.
+        :type grg: pygrgl.GRG or pygrgl.MutableGRG
+        :param direction: The direction to traverse, up (terminate at mutations or shared nodes) or
+            down (terminate at samples or shared node).
+        :type direction: pygrgl.TraversalDirection
+        :param seeds: List of node IDs to start the search from.
+        :type seeds: List[int]
+        :return: A list of node IDs representing the frontier.
+        :rtype: List[int]
+    )^");
+
+    m.attr("INVALID_NODE") = grgl::INVALID_NODE_ID;
     m.attr("COAL_COUNT_NOT_SET") = grgl::COAL_COUNT_NOT_SET;
 
     std::stringstream versionString;

@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace grgl {
@@ -94,6 +95,52 @@ private:
     std::vector<NodeIDSizeT> m_refCounts;
 #endif
     std::vector<NodeIDList> m_sampleLists;
+};
+
+/**
+ * Get the frontier of a list of starting nodes (seeds). The frontier is the first node on each
+ * path that is reached by all seeds. Some paths may not have any nodes that are reached by all
+ * seeds, in which case no nodes from that path will be included in the result.
+ *
+ * This is a sparse implementation, as the frontier is most valuable when there is a lot
+ * of sharing.
+ */
+class FrontierVisitor : public GRGVisitor {
+public:
+    explicit FrontierVisitor(const grgl::NodeIDList& seedList)
+        : m_numSeeds(seedList.size()) {
+        for (const NodeID seed : seedList) {
+            m_reached.emplace(seed, 1);
+        }
+    }
+
+    bool visit(const grgl::GRGPtr& grg,
+               const grgl::NodeID nodeId,
+               const grgl::TraversalDirection direction,
+               const grgl::DfsPass dfsPass) override {
+        // Does not support DFS, just topo.
+        assert(dfsPass != grgl::DfsPass::DFS_PASS_THERE);
+
+        const NodeIDSizeT reached = m_reached.at(nodeId);
+        // All seeds have reached the node, add to frontier and terminate traversal
+        // along this particular path.
+        if (reached == m_numSeeds) {
+            m_frontier.emplace_back(nodeId);
+            return false;
+        }
+        const auto& successors = (direction == DIRECTION_UP) ? grg->getUpEdges(nodeId) : grg->getDownEdges(nodeId);
+        for (const auto& succId : successors) {
+            auto insertIt = m_reached.emplace(succId, 0);
+            insertIt.first->second += reached;
+        }
+        return true;
+    }
+
+    NodeIDList m_frontier;
+
+private:
+    std::unordered_map<NodeID, NodeIDSizeT> m_reached;
+    const NodeIDSizeT m_numSeeds;
 };
 
 } // namespace grgl
