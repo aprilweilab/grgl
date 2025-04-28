@@ -345,6 +345,8 @@ public:
     MutationId addMutation(const Mutation& mutation, NodeID nodeId);
 
     // Internal method, used by Python API and the main API below.
+    // The outputMatrix is added to. So if you want the pure matrix multiplication, it must
+    // be zeroed out.
     template <typename T>
     void matrixMultiplication(const T* inputMatrix,
                               size_t inputCols,
@@ -352,7 +354,8 @@ public:
                               TraversalDirection direction,
                               T* outputMatrix,
                               size_t outputSize,
-                              bool emitAllNodes = false);
+                              bool emitAllNodes = false,
+                              bool byIndividual = false);
 
     /**
      * Compute one of two possible matrix multiplications across the entire
@@ -700,28 +703,30 @@ void GRG::matrixMultiplication(const T* inputMatrix,
                                TraversalDirection direction,
                                T* outputMatrix,
                                size_t outputSize,
-                               bool emitAllNodes) {
+                               bool emitAllNodes,
+                               bool byIndividual) {
     release_assert(inputCols > 0);
     release_assert(inputRows > 0);
     const size_t outputCols = outputSize / inputRows;
     release_assert(outputSize % inputRows == 0);
+    const size_t expectSampleCols = byIndividual ? numIndividuals() : numSamples();
     if (direction == DIRECTION_DOWN) {
         if (inputCols != numMutations()) {
-            throw ApiMisuseFailure("Input vector is not size M (numMutations())");
+            throw ApiMisuseFailure("Input vector is not size M (numMutations)");
         }
-        if (!emitAllNodes && outputCols != numSamples()) {
-            throw ApiMisuseFailure("Output vector is not size N (numSamples())");
+        if (!emitAllNodes && outputCols != expectSampleCols) {
+            throw ApiMisuseFailure("Output vector is not size N (numSamples, or numIndividuals depending on flags)");
         }
     } else {
-        if (inputCols != numSamples()) {
-            throw ApiMisuseFailure("Input vector is not size N (numSamples())");
+        if (inputCols != expectSampleCols) {
+            throw ApiMisuseFailure("Input vector is not size N (numSamples, or numIndividuals depending on flags)");
         }
         if (!emitAllNodes && outputCols != numMutations()) {
-            throw ApiMisuseFailure("Output vector is not size M (numMutations())");
+            throw ApiMisuseFailure("Output vector is not size M (numMutations)");
         }
     }
     if (emitAllNodes && outputCols != numNodes()) {
-        throw ApiMisuseFailure("Output vector is not size numNodes()");
+        throw ApiMisuseFailure("Output vector is not size numNodes");
     }
 
     // The node value storage stores the different row values consecutively (so
@@ -760,7 +765,8 @@ void GRG::matrixMultiplication(const T* inputMatrix,
                 for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
                     const size_t base = sampleId * inputRows;
                     assert(rowStart + sampleId < outputSize);
-                    outputMatrix[rowStart + sampleId] = nodeValues[base + row];
+                    const size_t sampleIndex = byIndividual ? (sampleId / m_ploidy) : sampleId;
+                    outputMatrix[rowStart + sampleIndex] += nodeValues[base + row];
                 }
             }
         }
@@ -768,9 +774,10 @@ void GRG::matrixMultiplication(const T* inputMatrix,
         for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
             assert(sampleId < inputCols);
             const size_t base = sampleId * inputRows;
+            const size_t sampleIndex = byIndividual ? (sampleId / m_ploidy) : sampleId;
             for (size_t row = 0; row < inputRows; row++) {
                 const size_t rowStart = row * inputCols;
-                nodeValues[base + row] = inputMatrix[rowStart + sampleId];
+                nodeValues[base + row] = inputMatrix[rowStart + sampleIndex];
             }
         }
         if (this->nodesAreOrdered()) {
