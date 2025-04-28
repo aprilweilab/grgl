@@ -15,8 +15,9 @@ INPUT_DIR = os.path.join(THIS_DIR, "input")
 
 
 # Absurdly innefficient
-def grg2X(grg: pygrgl.GRG):
-    result = np.zeros((grg.num_samples, grg.num_mutations))
+def grg2X(grg: pygrgl.GRG, individual: bool = False):
+    num_samples = grg.num_samples if not individual else grg.num_individuals
+    result = np.zeros((num_samples, grg.num_mutations))
     muts_above = {}
     for node_id in reversed(range(grg.num_nodes)):
         muts = grg.get_mutations_for_node(node_id)
@@ -27,8 +28,9 @@ def grg2X(grg: pygrgl.GRG):
             ma.extend(muts_above[parent_id])
         muts_above[node_id] = ma
         if grg.is_sample(node_id):
+            sample_index = node_id if not individual else (node_id // grg.ploidy)
             for mut_id in muts_above[node_id]:
-                result[node_id][mut_id] = 1
+                result[sample_index][mut_id] += 1
     return result
 
 
@@ -92,6 +94,37 @@ class TestMatrixMultiplication(unittest.TestCase):
 
         self.direction_helper(grg, grg.num_samples, pygrgl.TraversalDirection.UP)
         self.direction_helper(grg, grg.num_mutations, pygrgl.TraversalDirection.DOWN)
+
+        if CLEANUP:
+            os.remove(grg_filename)
+
+    def test_diploid(self):
+        # Test that diploid operations are the same between GRG and numpy
+        grg_filename = construct_grg(
+            "test-200-samples.vcf.gz", "test.matmul_diploid.grg"
+        )
+
+        grg = pygrgl.load_immutable_grg(grg_filename)
+
+        K = 10
+
+        # Test the (KxN)(NxM) multiplication.
+        genotype_matrix = grg2X(grg, individual=True)
+        rand_matrix = np.random.rand(K, grg.num_individuals)
+        np_result = np.matmul(rand_matrix, genotype_matrix)
+        grg_result = pygrgl.matmul(
+            grg, rand_matrix, pygrgl.TraversalDirection.UP, by_individual=True
+        )
+        self.assertTrue(np.allclose(grg_result, np_result))
+
+        # Test the (KxM)(MxN) multiplication.
+        genotype_matrix = np.transpose(grg2X(grg, individual=True))
+        rand_matrix = np.random.rand(K, grg.num_mutations)
+        np_result = np.matmul(rand_matrix, genotype_matrix)
+        grg_result = pygrgl.matmul(
+            grg, rand_matrix, pygrgl.TraversalDirection.DOWN, by_individual=True
+        )
+        self.assertTrue(np.allclose(grg_result, np_result))
 
         if CLEANUP:
             os.remove(grg_filename)

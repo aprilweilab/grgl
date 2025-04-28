@@ -26,7 +26,7 @@ for more details.
   Constructing GRGs <construct>
   Converting Tree-Sequences <ts_convert>
   Graph Traversals <traversal>
-  Calculating dot produces <dot_products>
+  Calculating dot products <dot_products>
   python_api
   cpp_api
   Examples and applications <examples_and_applications>

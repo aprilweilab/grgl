@@ -78,16 +78,22 @@ inline py::array_t<T> dispatchMult(grgl::GRGPtr& grg,
                                    size_t inCols,
                                    size_t outCols,
                                    grgl::TraversalDirection direction,
-                                   bool emitAllNodes) {
+                                   bool emitAllNodes,
+                                   bool byIndividual) {
     const size_t outSize = rows * outCols;
     py::array_t<T> result({rows, outCols});
     py::buffer_info resultBuf = result.request();
     memset(resultBuf.ptr, 0, outSize * sizeof(T));
-    grg->matrixMultiplication((const T*)buffer.ptr, inCols, rows, direction, (T*)resultBuf.ptr, outSize, emitAllNodes);
+    grg->matrixMultiplication(
+        (const T*)buffer.ptr, inCols, rows, direction, (T*)resultBuf.ptr, outSize, emitAllNodes, byIndividual);
     return std::move(result);
 }
 
-py::array matMul(grgl::GRGPtr& grg, py::handle input, grgl::TraversalDirection direction, bool emitAllNodes = false) {
+py::array matMul(grgl::GRGPtr& grg,
+                 py::handle input,
+                 grgl::TraversalDirection direction,
+                 bool emitAllNodes = false,
+                 bool byIndividual = false) {
     py::array arr = py::array::ensure(input, py::array::c_style | py::array::forcecast);
     py::buffer_info buffer = arr.request();
     if (buffer.ndim != 2) {
@@ -98,17 +104,18 @@ py::array matMul(grgl::GRGPtr& grg, py::handle input, grgl::TraversalDirection d
     if (rows == 0 || cols == 0) {
         throw grgl::ApiMisuseFailure("matmul() requires non-zero dimensions.");
     }
-    const size_t outCols = (emitAllNodes                                              ? grg->numNodes()
-                            : (direction == grgl::TraversalDirection::DIRECTION_DOWN) ? grg->numSamples()
-                                                                                      : grg->numMutations());
+    const size_t numSamples = byIndividual ? grg->numIndividuals() : grg->numSamples();
+    const size_t outCols =
+        (emitAllNodes ? grg->numNodes()
+                      : ((direction == grgl::TraversalDirection::DIRECTION_DOWN) ? numSamples : grg->numMutations()));
     if (py::isinstance<py::array_t<double>>(input)) {
-        return dispatchMult<double>(grg, buffer, rows, cols, outCols, direction, emitAllNodes);
+        return dispatchMult<double>(grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
     } else if (py::isinstance<py::array_t<float>>(input)) {
-        return dispatchMult<float>(grg, buffer, rows, cols, outCols, direction, emitAllNodes);
+        return dispatchMult<float>(grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
     } else if (py::isinstance<py::array_t<std::int64_t>>(input)) {
-        return dispatchMult<int64_t>(grg, buffer, rows, cols, outCols, direction, emitAllNodes);
+        return dispatchMult<int64_t>(grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
     } else if (py::isinstance<py::array_t<std::int32_t>>(input)) {
-        return dispatchMult<int32_t>(grg, buffer, rows, cols, outCols, direction, emitAllNodes);
+        return dispatchMult<int32_t>(grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
     }
     std::stringstream ssErr;
     ssErr << "Unsupported numpy dtype: " << arr.dtype();
@@ -212,6 +219,14 @@ PYBIND11_MODULE(_grgl, m) {
             )^")
         .def_property_readonly("num_samples", &grgl::GRG::numSamples, R"^(
                 The number of sample nodes in the GRG.
+            )^")
+        .def_property_readonly("num_individuals", &grgl::GRG::numIndividuals, R"^(
+                The number of individuals in the GRG. The corresponding samples can be found by
+                multiplying the individual index :math:`I` by the ploidy:
+                :math:`(ploidy * I) + 0, (ploidy \times I) + 1, ..., (ploidy \times I) + (ploidy - 1)`
+            )^")
+        .def_property_readonly("ploidy", &grgl::GRG::getPloidy, R"^(
+                The ploidy of each individual.
             )^")
         .def_property_readonly("bp_range", &grgl::GRG::getBPRange, R"^(
                 The range in base-pair positions that this GRG covers, from its list of mutations.
@@ -625,6 +640,8 @@ PYBIND11_MODULE(_grgl, m) {
     )^");
 
     m.def("dot_product", &dotProduct, py::arg("grg"), py::arg("input"), py::arg("direction"), R"^(
+        DEPRECATED, use :py:meth:`matmul` instead.
+
         Special case of :py:meth:`matmul`, where input is a vector (1-dimensional numpy array) instead
         of a matrix. Computes the vector-matrix product between the input vector and the genotype matrix
         :math:`X` (or :math:`X^T`). See :py:meth:`matmul` for more details.
@@ -646,6 +663,7 @@ PYBIND11_MODULE(_grgl, m) {
           py::arg("input"),
           py::arg("direction"),
           py::arg("emit_all_nodes") = false,
+          py::arg("by_individual") = false,
           R"^(
         Compute one of two possible matrix multiplications across the entire
         graph. The input matrix :math:`V` can be either :math:`K \times N` (:math:`N`
@@ -681,6 +699,11 @@ PYBIND11_MODULE(_grgl, m) {
         :param emit_all_nodes: False by default. Set to True if you want each output row in the matrix to
             have a value for every node, not just every sample/mutation (depending on direction).
         :type emit_all_nodes: bool
+        :param byIndividual: The dimension that is for samples (either the input or output, depending on the
+            direction parameter) uses individuals instead of haploid samples. Instead of outputting vectors
+            of :math:`N` (:py:attr:`num_samples`) columns, it is :math:`N / ploidy` (:py:attr:`num_individuals`)
+            columns.
+        :type byIndividual: bool
         :return: The numpy 2-dimensional array of output values.
         :rtype: numpy.array
     )^");
