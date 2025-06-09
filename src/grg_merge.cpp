@@ -18,12 +18,14 @@
 #include "grg_helpers.h"
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
+#include "grgl/mutation.h"
 #include "grgl/serialize.h"
 #include "grgl/visitor.h"
 #include "node_unique_hash.h"
 #include "util.h"
 
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <unordered_map>
 
@@ -168,6 +170,13 @@ void MutableGRG::merge(const std::list<std::string>& otherGrgFiles, bool combine
         for (const auto mutId : otherGrg->getUnmappedMutations()) {
             const auto& mutation = otherGrg->getMutationById(mutId);
             this->addMutation(mutation, INVALID_NODE_ID);
+        }
+        const auto& otherRange = otherGrg->getSpecifiedBPRange();
+        if (otherRange.first < this->m_specifiedRange.first) {
+            this->m_specifiedRange.first = otherRange.first;
+        }
+        if (otherRange.second > this->m_specifiedRange.second) {
+            this->m_specifiedRange.second = otherRange.second;
         }
     }
 }

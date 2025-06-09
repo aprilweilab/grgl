@@ -166,7 +166,7 @@ public:
     std::pair<BpPosition, BpPosition> getBPRange() {
         if (mutationsAreOrdered() && !m_mutations.empty()) {
             const size_t lastMutId = m_mutations.size() - 1;
-            return {m_mutations[0].getPosition(), m_mutations[lastMutId].getPosition()};
+            return {m_mutations[0].getPosition(), m_mutations[lastMutId].getPosition()+1};
         }
         BpPosition firstPos = std::numeric_limits<BpPosition>::max();
         BpPosition lastPos = 0;
@@ -586,13 +586,18 @@ public:
     void disconnect(NodeID srcId, NodeID tgtId);
 
     /**
-     * Merge another GRG into this one. Only succeeds if both GRGs have the same number of
+     * Merge one or more GRGs into this one. Only succeeds if all GRGs have the same number of
      * samples.
      *
      * This assumes that the GRGs were constructed from the same sampleset -- e.g., they
      * could be constructed from two subsets of the same sampleset (as long as both were
      * constructed with the same sample node numbering) or from a subset of mutations against
      * the same sampleset.
+     *
+     * The specified range of the resulting GRG will be (min(range of any input), max(range of any input)),
+     * even if the provided GRGs do not span a contiguous region. It is up to the caller of this
+     * method to ensure that either (1) the span is contiguous or (2) they adjust the specified range
+     * appropriately afterwards.
      *
      * @param otherGrgFiles The list of GRG filenames to load and merge.
      */

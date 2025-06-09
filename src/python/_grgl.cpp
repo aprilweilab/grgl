@@ -230,11 +230,17 @@ PYBIND11_MODULE(_grgl, m) {
             )^")
         .def_property_readonly("bp_range", &grgl::GRG::getBPRange, R"^(
                 The range in base-pair positions that this GRG covers, from its list of mutations.
+
+                A pair (lower, upper) of the range covered by this GRG, where lower is inclusive
+                and upper is exclusive.
             )^")
         .def_property_readonly("specified_bp_range", &grgl::GRG::getSpecifiedBPRange, R"^(
                 The range in base-pair positions that this GRG covers, as specified during the
                 GRG construction. This range may exceed the bp_range if the GRG was constructed
                 from a range of the genome that did not immediately start/end with a mutation.
+
+                A pair (lower, upper) of the range covered by this GRG, where lower is inclusive
+                and upper is exclusive.
             )^")
         .def_property_readonly("nodes_are_ordered", &grgl::GRG::nodesAreOrdered, R"^(
                 Returns true if the NodeIDs are already in topological order from
@@ -469,8 +475,24 @@ PYBIND11_MODULE(_grgl, m) {
             :param target: The NodeID for the target node (edge ends here).
             :type target: int
         )^")
-        .def("merge", &grgl::MutableGRG::merge, R"^(
-            One or more GRG files into the current GRG.
+        .def("merge", &grgl::MutableGRG::merge, py::arg("other_grg_files"), py::arg("combine_nodes"), R"^(
+            Merge one or more GRGs into this one. Only succeeds if all GRGs have the same number of
+
+            This assumes that the GRGs were constructed from the same sampleset -- e.g., they
+            could be constructed from two subsets of the same sampleset (as long as both were
+            constructed with the same sample node numbering) or from a subset of mutations against
+            the same sampleset.
+
+            The specified range of the resulting GRG will be (min(range of any input), max(range of any input)),
+            even if the provided GRGs do not span a contiguous region. It is up to the caller of this
+            method to ensure that either (1) the span is contiguous or (2) they adjust the specified range
+            appropriately afterwards.
+
+            :param other_grg_files: A list of filenames for the GRG to merge into the current one.
+            :type other_grg_files: List[str]
+            :param combine_nodes: True by default. Combine nodes from different GRGs if the node has
+                the same samples beneath it.
+            :type combine_nodes: bool
         )^");
 
     m.def("load_mutable_grg", &grgl::loadMutableGRG, py::arg("filename"), R"^(
