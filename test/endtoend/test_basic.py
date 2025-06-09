@@ -92,6 +92,14 @@ class TestGrgConstruction(unittest.TestCase):
         split_dir = f"{grg_filename}.split"
         assert not os.path.exists(split_dir), f"{split_dir} already exists; remove it"
 
+        check_grg = pygrgl.load_immutable_grg(grg_filename)
+        maxpos = 0
+        for mut_id in range(check_grg.num_mutations):
+            maxpos = max(maxpos, check_grg.get_mutation_by_id(mut_id).position)
+        assert maxpos == 9999126
+        assert check_grg.specified_bp_range == (55829, 9999127)
+        assert check_grg.specified_bp_range == check_grg.bp_range
+
         # Split the GRG
         subprocess.check_output(
             ["grg", "split", "-j", str(4), grg_filename, str(100000)]
