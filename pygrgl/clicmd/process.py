@@ -39,7 +39,9 @@ def add_options(subparser):
         help="The operation to perform on the GRG file",
     )
     subparser.add_argument("grg_file", help="The input GRG file")
-    subparser.add_argument("-p", "--phenotype", help="The phenotype file (for GWAS only)")
+    subparser.add_argument(
+        "-p", "--phenotype", help="The phenotype file (for GWAS only)"
+    )
 
 
 def process_command(arguments):
