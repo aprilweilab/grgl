@@ -313,6 +313,7 @@ int main(int argc, char** argv) {
                     return 2;
                 }
                 if (!mapFile.empty()) {
+                    std::cerr << "TODO: Implement range file support with cM (recombination map)" << std::endl;
                     throw std::runtime_error("TODO: Implement range file support with cM (recombination map)");
                 }
                 for (size_t i = 0; i < rangeStrings.size(); i++) {
