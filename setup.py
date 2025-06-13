@@ -1,6 +1,7 @@
 from pprint import pprint
 from setuptools import setup, Extension, find_packages
 from setuptools.command.build_ext import build_ext
+import copy
 import os
 import shutil
 import subprocess
@@ -82,16 +83,23 @@ class CMakeBuild(build_ext):
             if not os.path.exists(self.build_temp):
                 os.makedirs(self.build_temp)
 
+            # Workaround for erroneous CMake compatibility failure, due to the zstd package that the BGEN
+            # library uses. See https://stackoverflow.com/a/79622211
+            env = copy.deepcopy(os.environ)
+            env["CMAKE_POLICY_VERSION_MINIMUM"] = "3.5"
+
             # Config and build the extension
             subprocess.check_call(
                 ["cmake", ext.cmake_lists_dir] + cmake_args,
                 cwd=self.build_temp,
                 stdout=sys.stdout,
+                env=env,
             )
             subprocess.check_call(
                 ["cmake", "--build", ".", "--config", build_type, "--", "-j"],
                 cwd=self.build_temp,
                 stdout=sys.stdout,
+                env=env,
             )
 
             for executable in ext.extra_executables:

@@ -71,7 +71,6 @@ def do_split(args):
     if args.outdir is not None:
         cmd.extend(["-o", args.outdir])
     try:
-        print(cmd)
         time_call(cmd)
     except subprocess.CalledProcessError as e:
         print(f"Splitting failed with return code {e.returncode}")
