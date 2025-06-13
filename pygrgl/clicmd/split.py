@@ -19,10 +19,19 @@ import subprocess
 
 def add_options(subparser):
     subparser.add_argument("input_file", help="The input GRG file")
-    subparser.add_argument(
-        "size_per_grg",
+    input_group = subparser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument(
+        "--size-per-grg",
+        "-s",
         type=float,
         help="The amount of BP or cM per GRG. If --rec-map is specified then this is cM, otherwise BP",
+    )
+    input_group.add_argument(
+        "--range-file",
+        "-f",
+        help='The text file containing two columns, labeled "start" and "end", where each column is '
+        'space separated. Each row after the header contains a "lower upper" pair specifying a range to '
+        "create a GRG for. If --rec-map is specified then the positions are cM, otherwise BP",
     )
     subparser.add_argument(
         "--jobs",
@@ -51,7 +60,11 @@ grgl_exe = which("grgl")
 def do_split(args):
     if grgl_exe is None:
         raise RuntimeError("Could not find 'grgl' executable; please add to your PATH")
-    split_arg = f"{args.size_per_grg}"
+    if args.size_per_grg is not None:
+        split_arg = f"{args.size_per_grg}"
+    else:
+        assert args.range_file is not None
+        split_arg = f"{args.range_file}"
     if args.rec_map is not None:
         split_arg = f"{args.rec_map}:{split_arg}"
     cmd = [grgl_exe, args.input_file, "--split", split_arg, "-j", str(args.jobs)]

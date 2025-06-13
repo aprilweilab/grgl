@@ -16,7 +16,9 @@
  */
 #include <args.hxx>
 #include <chrono>
+#include <exception>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <tskit.h>
@@ -122,9 +124,13 @@ int main(int argc, char** argv) {
     args::ValueFlag<std::string> windowedSplit(
         parser,
         "windowedSplit",
-        "Split graph into this many GRGs with the given number of BP or cM per GRG. Argument is either BP or cM "
-        "(integer/double), prefixed by a hapmap-style recombination map filename (e.g. \"filename:integer\")"
-        " when the value is cM. Creates a directory <infile>.split/ and puts all the resulting GRGs there.",
+        "Split input graph into multiple output graphs. Use --outfile to specify a directory to be created "
+        "that will hold the output GRG files. There are two ways to specify splitting the input graph: "
+        "(1) a single number means split into GRGs where each covers the given number of BP or cM. "
+        "(2) a filename containing a list of ranges, one per line, where each range is \"lower upper\" in "
+        " either BP or cM (depends on whether a recombination map was specified)"
+        "If the option is prefixed by a hapmap-style recombination map filename (e.g. \"filename:value\")"
+        " then all positions will be interpreted as cM instead of base pair.",
         {"split"});
     args::ValueFlag<size_t> jobsArg(
         parser,
@@ -291,20 +297,63 @@ int main(int argc, char** argv) {
             std::cerr << "Invalid split argument: \"" << *windowedSplit << "\"" << std::endl;
             return 2;
         }
-        double perWindowAmt = 0;
-        if (!parseExactDouble(tokens[tokens.size() - 1], perWindowAmt)) {
-            std::cerr << "Invalid split argument: \"" << *windowedSplit << "\"" << std::endl;
-            return 2;
-        }
 
         const size_t jobs = jobsArg ? *jobsArg : 1;
-        const size_t overlap = 1; // TODO: add support for overlapping windows.
         grgl::WindowList windows;
-        if (mapFile.empty()) {
-            windows = grgl::windowByBP(theGRG->getBPRange(), (size_t)perWindowAmt, 1);
+        double perWindowAmt = 0;
+        const std::string& argValue = tokens[tokens.size() - 1];
+        if (!parseExactDouble(argValue, perWindowAmt)) {
+            if (pathExists(argValue)) {
+                std::vector<std::pair<std::string, std::string>> rangeStrings;
+                try {
+                    rangeStrings =
+                        loadMapFromTSV<std::vector<std::pair<std::string, std::string>>>(argValue, "start", "end", ' ');
+                } catch (const std::exception& e) {
+                    std::cerr << "Failed to properly read file " << argValue << ": " << e.what() << std::endl;
+                    return 2;
+                }
+                if (!mapFile.empty()) {
+                    throw std::runtime_error("TODO: Implement range file support with cM (recombination map)");
+                }
+                for (size_t i = 0; i < rangeStrings.size(); i++) {
+                    const auto& pair = rangeStrings[i];
+                    bool success = true;
+                    if (mapFile.empty()) {
+                        uint64_t lower = 0;
+                        uint64_t upper = 0;
+                        success &= (bool)parseExactUint64(pair.first, lower);
+                        success &= (bool)parseExactUint64(pair.second, upper);
+                        windows.push_back({lower, upper});
+                    } else {
+                        double lower = 0.0;
+                        double upper = 0.0;
+                        success &= (bool)parseExactDouble(pair.first, lower);
+                        success &= (bool)parseExactDouble(pair.second, upper);
+                        // TODO: map these to base-pair positions via the recombination map.
+                    }
+                    if (!success) {
+                        std::cerr << "Invalid number at line " << i + 2 << " of file " << argValue << std::endl;
+                        return 2;
+                    }
+                }
+                if (rangeStrings.empty()) {
+                    std::cerr << "No range data in file " << argValue << std::endl;
+                    return 2;
+                }
+            } else {
+                std::cerr << "Bad split value: \"" << argValue << "\": invalid number and/or filename" << std::endl;
+                return 2;
+            }
         } else {
-            windows = grgl::windowByCM(theGRG->getBPRange(), mapFile, perWindowAmt, 1);
+            const size_t overlap = 1; // TODO: add support for overlapping windows.
+            release_assert(perWindowAmt > 0);
+            if (mapFile.empty()) {
+                windows = grgl::windowByBP(theGRG->getBPRange(), (size_t)perWindowAmt, 1);
+            } else {
+                windows = grgl::windowByCM(theGRG->getBPRange(), mapFile, perWindowAmt, 1);
+            }
         }
+        release_assert(!windows.empty());
 
         // Worker pool for splitting the GRG.
         class SplitJobs : public grgl::PooledJobs<grgl::Window> {
