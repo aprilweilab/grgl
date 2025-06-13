@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # with this program.  If not, see <https://www.gnu.org/licenses/>.
 from .common import which, time_call
+import subprocess
 
 
 def add_options(subparser):
@@ -36,6 +37,12 @@ def add_options(subparser):
         default=None,
         help="Use the given HapMap-style recombination map and interpret the size_per_grg as cM.",
     )
+    subparser.add_argument(
+        "--outdir",
+        "-o",
+        default=None,
+        help="Create this directory and place the split GRGs into it.",
+    )
 
 
 grgl_exe = which("grgl")
@@ -48,4 +55,10 @@ def do_split(args):
     if args.rec_map is not None:
         split_arg = f"{args.rec_map}:{split_arg}"
     cmd = [grgl_exe, args.input_file, "--split", split_arg, "-j", str(args.jobs)]
-    time_call(cmd)
+    if args.outdir is not None:
+        cmd.extend(["-o", args.outdir])
+    try:
+        print(cmd)
+        time_call(cmd)
+    except subprocess.CalledProcessError as e:
+        print(f"Splitting failed with return code {e.returncode}")

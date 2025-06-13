@@ -266,21 +266,16 @@ int main(int argc, char** argv) {
         dumpStats(theGRG);
     }
 
-    if (outfile) {
-        START_TIMING_OPERATION();
-        auto counts = saveGRG(theGRG, *outfile, !noSimplify);
-        std::cout << "Wrote simplified GRG with:" << std::endl;
-        std::cout << "  Nodes: " << counts.first << std::endl;
-        std::cout << "  Edges: " << counts.second << std::endl;
-
-        EMIT_TIMING_MESSAGE("Wrote GRG to " << *outfile << " in ");
-    }
-
     if (windowedSplit) {
         std::stringstream splitOutPrefix;
-        splitOutPrefix << *infile << ".split";
+        if (outfile) {
+            splitOutPrefix << *outfile;
+        } else {
+            splitOutPrefix << *infile << ".split";
+        }
         if (pathExists(splitOutPrefix.str())) {
-            std::cerr << "Split output directory " << splitOutPrefix.str() << " already exists; remove and try again"
+            std::cerr << "Split output directory " << splitOutPrefix.str()
+                      << " already exists; remove and try again (or specify a different directory to create)"
                       << std::endl;
             return 2;
         }
@@ -340,6 +335,15 @@ int main(int argc, char** argv) {
         }
         workers.doAllWork(jobs);
         EMIT_TIMING_MESSAGE("Split GRG into " << windows.size() << " parts in ");
+    } else if (outfile) {
+        START_TIMING_OPERATION();
+        auto counts = saveGRG(theGRG, *outfile, !noSimplify);
+        std::cout << "Wrote simplified GRG with:" << std::endl;
+        std::cout << "  Nodes: " << counts.first << std::endl;
+        std::cout << "  Edges: " << counts.second << std::endl;
+
+        EMIT_TIMING_MESSAGE("Wrote GRG to " << *outfile << " in ");
     }
+
     return 0;
 }

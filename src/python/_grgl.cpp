@@ -721,11 +721,11 @@ PYBIND11_MODULE(_grgl, m) {
         :param emit_all_nodes: False by default. Set to True if you want each output row in the matrix to
             have a value for every node, not just every sample/mutation (depending on direction).
         :type emit_all_nodes: bool
-        :param byIndividual: The dimension that is for samples (either the input or output, depending on the
+        :param by_individual: The dimension that is for samples (either the input or output, depending on the
             direction parameter) uses individuals instead of haploid samples. Instead of outputting vectors
             of :math:`N` (:py:attr:`num_samples`) columns, it is :math:`N / ploidy` (:py:attr:`num_individuals`)
             columns.
-        :type byIndividual: bool
+        :type by_individual: bool
         :return: The numpy 2-dimensional array of output values.
         :rtype: numpy.array
     )^");
