@@ -166,7 +166,7 @@ public:
     std::pair<BpPosition, BpPosition> getBPRange() {
         if (mutationsAreOrdered() && !m_mutations.empty()) {
             const size_t lastMutId = m_mutations.size() - 1;
-            return {m_mutations[0].getPosition(), m_mutations[lastMutId].getPosition()+1};
+            return {m_mutations[0].getPosition(), m_mutations[lastMutId].getPosition() + 1};
         }
         BpPosition firstPos = std::numeric_limits<BpPosition>::max();
         BpPosition lastPos = 0;

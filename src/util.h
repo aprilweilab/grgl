@@ -174,7 +174,10 @@ inline void helper_addToStringMap(std::vector<std::pair<std::string, std::string
  * Helper to convert data from a tab-separate file into a string->string map.
  */
 template <typename MapType = std::map<std::string, std::string>>
-inline MapType loadMapFromTSV(const std::string& filename, const std::string& lhsField, const std::string& rhsField) {
+inline MapType loadMapFromTSV(const std::string& filename,
+                              const std::string& lhsField,
+                              const std::string& rhsField,
+                              const char separator = '\t') {
     release_assert(lhsField != rhsField);
     std::ifstream infile(filename);
     if (!infile) {
@@ -189,7 +192,7 @@ inline MapType loadMapFromTSV(const std::string& filename, const std::string& lh
     size_t rhsIndex = std::numeric_limits<size_t>::max();
     MapType result;
     while (std::getline(infile, line)) {
-        auto tokens = split(line, '\t');
+        auto tokens = split(line, separator);
         if (lineNum == 0) {
             numCols = tokens.size();
             for (size_t i = 0; i < tokens.size(); i++) {

@@ -102,7 +102,7 @@ class TestGrgConstruction(unittest.TestCase):
 
         # Split the GRG
         subprocess.check_output(
-            ["grg", "split", "-j", str(4), grg_filename, str(100000)]
+            ["grg", "split", "-j", str(4), grg_filename, "-s", str(100000)]
         )
         saw_freqs = {}
         for grg_part in glob.glob(f"{split_dir}/*.grg"):
