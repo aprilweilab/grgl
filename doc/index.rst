@@ -23,6 +23,7 @@ for more details.
   :maxdepth: 2
 
   Installation <installation>
+  Concepts <concepts>
   Constructing GRGs <construct>
   Converting Tree-Sequences <ts_convert>
   Graph Traversals <traversal>
