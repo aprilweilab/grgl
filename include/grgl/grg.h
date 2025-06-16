@@ -24,7 +24,6 @@
 #include <memory>
 #include <vector>
 
-#include "file_vector.h"
 #include "grgl/common.h"
 #include "grgl/csr_storage.h"
 #include "grgl/file_vector.h"
