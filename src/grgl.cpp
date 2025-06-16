@@ -137,6 +137,8 @@ int main(int argc, char** argv) {
         "jobs",
         "Use this many threads for the given task. Currently only applies to the --split command",
         {'j', "jobs"});
+    args::Flag noIndividualIds(
+        parser, "no-indiv-ids", "Do not store individual string identifiers in the GRG", {"no-indiv-ids"});
     try {
         parser.ParseCLI(argc, argv);
     } catch (args::Help&) {
@@ -228,12 +230,23 @@ int main(int argc, char** argv) {
             return 2;
         }
     } else if (supportedInputFormat(*infile)) {
+        uint64_t buildFlags = grgl::GBF_VERBOSE_OUTPUT;
+        if (binaryMutations) {
+            buildFlags |= grgl::GBF_USE_BINARY_MUTS;
+        }
+        if (missingDataHandling == MDH_ADD_TO_GRG) {
+            buildFlags |= grgl::GBF_EMIT_MISSING_DATA;
+        }
+        if (MAFFlip) {
+            buildFlags |= grgl::GBF_FLIP_REF_MAJOR;
+        }
+        if (noIndividualIds) {
+            buildFlags |= grgl::GBF_NO_INDIVIDUAL_IDS;
+        }
         theGRG = grgl::createEmptyGRGFromSamples(*infile,
                                                  restrictRange,
                                                  bitsPerMutation,
-                                                 binaryMutations,
-                                                 missingDataHandling == MDH_ADD_TO_GRG,
-                                                 MAFFlip,
+                                                 buildFlags,
                                                  lfFilter ? *lfFilter : 0.0,
                                                  indivIdToPop,
                                                  triplet ? *triplet : 0);

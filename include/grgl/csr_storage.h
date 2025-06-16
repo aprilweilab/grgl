@@ -46,6 +46,8 @@ public:
     inline size_t searchData(const uint8_t* in, size_t length, T value) const;
 };
 
+template <> inline size_t VByteDispatcher<uint8_t, false, false>::maxElemSize() const { return sizeof(uint8_t); }
+
 template <> inline size_t VByteDispatcher<uint32_t, false, false>::maxElemSize() const { return sizeof(uint32_t); }
 
 template <> inline size_t VByteDispatcher<uint32_t, true, true>::maxElemSize() const { return sizeof(uint32_t) + 1; }
@@ -57,6 +59,11 @@ template <> inline size_t VByteDispatcher<uint64_t, false, false>::maxElemSize()
 template <> inline size_t VByteDispatcher<uint64_t, true, true>::maxElemSize() const { return sizeof(uint64_t) + 2; }
 
 template <> inline size_t VByteDispatcher<uint64_t, true, false>::maxElemSize() const { return sizeof(uint64_t) + 2; }
+
+template <> inline size_t VByteDispatcher<uint8_t, false, false>::compressSingle(uint8_t in, uint8_t* out) const {
+    memcpy(out, &in, sizeof(in));
+    return sizeof(in);
+}
 
 template <> inline size_t VByteDispatcher<uint32_t, false, false>::compressSingle(uint32_t in, uint8_t* out) const {
     memcpy(out, &in, sizeof(in));
@@ -82,6 +89,12 @@ template <> inline size_t VByteDispatcher<uint64_t, true, true>::compressSingle(
 
 template <> inline size_t VByteDispatcher<uint64_t, true, false>::compressSingle(uint64_t in, uint8_t* out) const {
     return vbyte_compress_unsorted64(&in, out, 1);
+}
+
+template <>
+inline size_t VByteDispatcher<uint8_t, false, false>::decompressSingle(const uint8_t* in, uint8_t* out) const {
+    *out = *in;
+    return sizeof(uint8_t);
 }
 
 template <>
@@ -114,6 +127,14 @@ inline size_t VByteDispatcher<uint64_t, true, true>::decompressSingle(const uint
 template <>
 inline size_t VByteDispatcher<uint64_t, true, false>::decompressSingle(const uint8_t* in, uint64_t* out) const {
     return vbyte_uncompress_unsorted64(in, out, 1);
+}
+
+template <>
+inline size_t
+VByteDispatcher<uint8_t, false, false>::compressData(const uint8_t* in, uint8_t* out, size_t length) const {
+    const size_t byteCount = length * sizeof(uint8_t);
+    memcpy(out, in, byteCount);
+    return byteCount;
 }
 
 template <>
@@ -158,6 +179,14 @@ VByteDispatcher<uint64_t, true, false>::compressData(const uint64_t* in, uint8_t
 
 template <>
 inline size_t
+VByteDispatcher<uint8_t, false, false>::decompressData(const uint8_t* in, uint8_t* out, size_t length) const {
+    const size_t byteCount = length * sizeof(uint8_t);
+    memcpy(out, in, byteCount);
+    return byteCount;
+}
+
+template <>
+inline size_t
 VByteDispatcher<uint32_t, false, false>::decompressData(const uint8_t* in, uint32_t* out, size_t length) const {
     const size_t byteCount = length * sizeof(uint32_t);
     memcpy(out, in, byteCount);
@@ -197,6 +226,12 @@ VByteDispatcher<uint64_t, true, false>::decompressData(const uint8_t* in, uint64
 }
 
 template <>
+inline uint8_t VByteDispatcher<uint8_t, false, false>::selectData(const uint8_t* in, size_t size, size_t index) const {
+    release_assert(index < size);
+    return in[index];
+}
+
+template <>
 inline uint32_t
 VByteDispatcher<uint32_t, false, false>::selectData(const uint8_t* in, size_t size, size_t index) const {
     release_assert(index < size);
@@ -228,6 +263,17 @@ inline uint64_t VByteDispatcher<uint64_t, true, true>::selectData(const uint8_t*
 template <>
 inline uint64_t VByteDispatcher<uint64_t, true, false>::selectData(const uint8_t* in, size_t size, size_t index) const {
     return vbyte_select_unsorted64(in, size, index);
+}
+
+template <>
+inline size_t
+VByteDispatcher<uint8_t, false, false>::searchData(const uint8_t* in, size_t length, uint8_t value) const {
+    for (size_t i = 0; i < length; i++) {
+        if (in[i] == value) {
+            return i;
+        }
+    }
+    return std::numeric_limits<size_t>::max();
 }
 
 template <>
@@ -305,6 +351,12 @@ VByteDispatcher<uint64_t, true, false>::searchData(const uint8_t* in, size_t len
  */
 template <template <class> class EdgeVect, typename IType, bool Encoded, bool Sorted> class CSRStorageImm {
 public:
+    explicit CSRStorageImm()
+        : m_numNodes(0),
+          m_appendIndex(0),
+          m_numValues(0),
+          m_reverse(false) {}
+
     explicit CSRStorageImm(NodeIDSizeT numNodes, bool reverse = false)
         : m_numNodes(numNodes),
           m_appendIndex(0),
@@ -355,7 +407,7 @@ public:
     size_t getData(NodeID node, std::vector<IType>& outList) {
         const size_t csrIndex = m_reverse ? ((m_numNodes - node) - 1) : node;
         if (csrIndex >= m_nodeIndexes.size()) {
-            throw ApiMisuseFailure("Requested node not initialized in CSR data");
+            throw ApiMisuseFailure("Index out of bounds (CSR data)");
         }
         IType count = 0;
         const size_t bucket = m_nodeIndexes[csrIndex];
@@ -385,7 +437,7 @@ public:
     IType getDatum(NodeID node, size_t index) {
         const size_t csrIndex = m_reverse ? ((m_numNodes - node) - 1) : node;
         if (csrIndex >= m_nodeIndexes.size()) {
-            throw ApiMisuseFailure("Requested node not initialized in CSR data");
+            throw ApiMisuseFailure("Index out of bounds (CSR data)");
         }
         IType count = 0;
         const size_t bucket = m_nodeIndexes[csrIndex];
@@ -405,16 +457,16 @@ public:
      * Set data for the given node, using the list of IType given.
      *
      * @param[in] node The node being modified.
-     * @param[in] dataList The list of IType to set.
+     * @param[in] fullData The list of IType to set.
      */
-    size_t setData(NodeID node, const std::vector<IType>& fullData, const std::pair<size_t, size_t> range) {
+    size_t setData(NodeID node, const IType* fullData, const std::pair<size_t, size_t> range) {
         const size_t inputSize = range.second - range.first;
-        if (fullData.empty() || inputSize == 0) {
+        if (inputSize == 0) {
             return 0;
         }
         const size_t csrIndex = m_reverse ? ((m_numNodes - node) - 1) : node;
         if (csrIndex < m_appendIndex || m_appendIndex == m_numNodes) {
-            throw ApiMisuseFailure("CSR data is immutable");
+            throw ApiMisuseFailure("Data is already set, and immutable");
         }
         const size_t curSize = m_nodeBuckets.size();
         while (m_appendIndex < csrIndex + 1) {
@@ -429,15 +481,38 @@ public:
         uint8_t* output = (uint8_t*)m_nodeBuckets.dataRef(bucket, storageByteEst);
         const IType ctBytes = m_dispatch.compressSingle(inputSize, output);
         const size_t written =
-            m_dispatch.compressData((const IType*)(fullData.data() + range.first), output + ctBytes, inputSize);
+            m_dispatch.compressData((const IType*)(fullData + range.first), output + ctBytes, inputSize);
         m_nodeBuckets.resize(curSize + written + ctBytes);
         m_numValues += inputSize;
         return written + ctBytes;
     }
 
+    /**
+     * Set data for the given node, using the list of IType given.
+     *
+     * @param[in] node The node being modified.
+     * @param[in] dataList The list of IType to set.
+     */
     size_t setData(NodeID node, const std::vector<IType>& dataList) {
-        return setData(node, dataList, {0, dataList.size()});
+        return setData(node, dataList.data(), {0, dataList.size()});
     }
+
+    /**
+     * Set data for the next node in order, using the list of IType given.
+     *
+     * @param[in] dataList The vector of IType to set.
+     */
+    size_t appendData(const std::vector<IType>& dataList) {
+        return setData(m_appendIndex, dataList, {0, dataList.size()});
+    }
+
+    /**
+     * Set data for the next node in order, using the list of IType given.
+     *
+     * @param[in] dataList The array of IType to set.
+     * @param[in] length The length of the input array, in number of elements (not, e.g., bytes).
+     */
+    size_t appendData(const IType* dataList, size_t length) { return setData(m_appendIndex, dataList, {0, length}); }
 
     size_t search(NodeID node, IType value) {
         const size_t csrIndex = m_reverse ? ((m_numNodes - node) - 1) : node;
@@ -460,24 +535,28 @@ public:
     /**
      * Finalize the last spot in the index so the calculations work properly. You can shrink the number
      * nodes in the CSR at this point if desired.
+     * Can be safely called multiple times, it will only finalize the structure the first time.
      */
     void finalizeNodes(const NodeIDSizeT numNodes = 0) {
         if (numNodes != 0) {
             release_assert(numNodes <= m_numNodes);
             m_numNodes = numNodes;
         }
-        release_assert(m_appendIndex <= m_numNodes);
-        m_nodeIndexes.resize(m_numNodes + 1);
-        while (m_appendIndex < m_numNodes + 1) {
-            m_nodeIndexes.ref(m_appendIndex++) = m_nodeBuckets.size();
+        if (m_appendIndex <= m_numNodes) {
+            m_nodeIndexes.resize(m_numNodes + 1);
+            while (m_appendIndex < m_numNodes + 1) {
+                m_nodeIndexes.ref(m_appendIndex++) = m_nodeBuckets.size();
+            }
+        } else {
+            release_assert(m_appendIndex == m_numNodes + 1);
         }
     }
 
-    size_t flushBuckets(std::ostream& out) { return m_nodeBuckets.flush(out); }
+    size_t flushBuckets(std::ostream& out, bool clearData = true) { return m_nodeBuckets.flush(out, !clearData); }
 
     size_t inmemoryBucketSize() const { return m_nodeBuckets.size(); }
 
-    size_t flushIndexes(std::ostream& out) { return m_nodeIndexes.flush(out); }
+    size_t flushIndexes(std::ostream& out, bool clearData = true) { return m_nodeIndexes.flush(out, !clearData); }
 
 protected:
     VByteDispatcher<IType, Encoded, Sorted> m_dispatch;

@@ -67,6 +67,12 @@ public:
     std::pair<BpPosition, BpPosition> bpRange;
 };
 
+// A string table is just a bunch of unencoded, unsorted characters. The CSR index lets us
+// get the i'th string efficiently. For very short strings (a few characters) this is not worth
+// the storage, because each index takes 4 bytes. For any string that is variable length and
+// expected to be more than 4 characters, this is a great representation.
+using CSRStringTable = CSRStorageImm<EagerFileVector, uint8_t, false, false>;
+
 /**
  * Abstract GRG base class.
  */
@@ -451,6 +457,46 @@ public:
         m_nodeData.setNumCoals(numSamples(), nodeId, coals);
     }
 
+    /**
+     * Add the next individual's identifier. Must be called in order, for individuals
+     * 0...(N-1).
+     *
+     * @param identifier The identifier to add.
+     */
+    void addIndividualId(const std::string& identifier) {
+        if (m_individualIds.numNodes() == 0) {
+            m_individualIds = CSRStringTable(this->numIndividuals());
+        }
+        m_individualIds.appendData(reinterpret_cast<const uint8_t*>(identifier.c_str()), identifier.size());
+    }
+
+    /**
+     * Clear all individual identifiers.
+     */
+    void clearIndividualIds() { m_individualIds = CSRStringTable(); }
+
+    /**
+     * Are there any string identifiers for the individuals in this GRG?
+     *
+     * @return true if individual identifiers are available.
+     */
+    bool hasIndividualIds() const { return m_individualIds.numNodes() > 0; }
+
+    /**
+     * Get the string identifier for the k'th individual. Returns empty string if there is no identifier
+     * for the given individual.
+     *
+     * @return String identifier for the given individual.
+     */
+    std::string getIndividualId(NodeIDSizeT individualIndex) {
+        if (!hasIndividualIds()) {
+            throw ApiMisuseFailure("No individual IDs on this GRG; check hasIndividualIds()");
+        }
+        std::vector<uint8_t> characters;
+        m_individualIds.getData(individualIndex, characters);
+        return {reinterpret_cast<const char*>(characters.data()), characters.size()};
+    }
+
 protected:
     void visitTopoNodeOrderedDense(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
     void visitTopoNodeOrderedSparse(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
@@ -479,6 +525,9 @@ protected:
     // Node data.
     NodeDataContainer m_nodeData;
 
+    // Sample (individual) identifiers
+    CSRStringTable m_individualIds;
+
     const size_t m_numSamples;
     const uint16_t m_ploidy;
 
@@ -486,6 +535,8 @@ protected:
     bool m_mutsAreOrdered{false};
 
     friend void readGrgCommon(const GRGFileHeader& header, const GRGPtr& grg, IFSPointer& inStream);
+    friend std::pair<NodeIDSizeT, size_t>
+    simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutputFilter& filter, bool allowSimplify);
 
     // Google-test unit tests that need private/protected access.
     FRIEND_TEST(GRG, TestTopoVisit);
