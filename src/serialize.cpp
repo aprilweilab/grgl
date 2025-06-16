@@ -44,7 +44,40 @@
         }                                                                                                              \
     } while (0)
 
+// HOW TO UPDATE GRG FILE FORMAT
+//
+// There are two types of data that can be added to the GRG file: REQUIRED or OPTIONAL. The
+// REQUIRED data is always there if the GRG file has a version equal-to-or-later-than when
+// the type of data was added to the format specification. The OPTIONAL data is only there
+// sometimes, and uses another piece of information in the file to determine whether it is
+// there or not.
+//
+// When adding data of either type to the file format, the GRG_FILE_MINOR_VERSION should be
+// incremented. This indicates a backwards/forwards-compatible change. The GRG_FILE_MAJOR_VERSION
+// should only be incremented when the change is breaking, for example when the layout of an
+// existing data structure (e.g., the edge lists) changes. This should be rare.
+//
+// REQUIRED data can be handled during deserialization by checking versionIsAtLeast(), and if
+// the version of the file is at least as high as when the format was modified then the data
+// must be there.
+//
+// OPTIONAL data is usually handled by adding a new GRG_FLAG_* bitmask value, and making sure
+// that GRGFileHeader::flags contains that bit set when the data is present, and does not
+// otherwise. The flags are always guaranteed to be set to 0 for older versions of the file
+// format that have not yet added the new flag. Flags can only be "reclaimed" (i.e., change
+// their meaning) when the MAJOR file format version changes.
+
 namespace grgl {
+
+static inline bool
+versionIsAtLeast(const GRGFileHeader& header, const uint16_t versionMajor, const uint16_t versionMinor) {
+    return (header.versionMajor > versionMajor) ||
+           (header.versionMajor == versionMajor && header.versionMinor >= versionMinor);
+}
+
+static inline bool hasFlag(const GRGFileHeader& header, const uint64_t flagValue) {
+    return static_cast<bool>(header.flags & flagValue);
+}
 
 template <typename T> static inline void writeScalar(const T& intValue, std::ostream& outStream) {
     outStream.write(reinterpret_cast<const char*>(&intValue), sizeof(intValue));
@@ -419,6 +452,16 @@ simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutput
     visitor.m_newNodeData.writeCoalCounts(outStream, header.sampleCount, header.nodeCount);
     assert_deserialization(outStream.good(), "Writing GRG failed");
 
+    // Individual IDs are optional. If we have them, they are all stored together in an unsorted,
+    // unencoded, CSR table.
+    if (grg->hasIndividualIds()) {
+        grg->m_individualIds.finalizeNodes();
+        writeScalar<uint64_t>(grg->m_individualIds.numValueBytes(), outStream);
+        grg->m_individualIds.flushBuckets(outStream, /*clearData=*/false);
+        grg->m_individualIds.flushIndexes(outStream, /*clearData=*/false);
+        header.flags |= GRG_FLAG_HAS_INDIV_IDS;
+    }
+
     // Rewrite the header, since some fields can change.
     outStream.seekp(0);
     outStream.write(reinterpret_cast<const char*>(&header), sizeof(header));
@@ -484,6 +527,17 @@ void readGrgCommon(const GRGFileHeader& header, const GRGPtr& grg, IFSPointer& i
 
     grg->m_nodeData.readCoalCounts(inStream, header.sampleCount, header.nodeCount);
 
+    // Individual IDs are optional. If we have them, they are all stored together in an unsorted,
+    // unencoded, CSR table.
+    if (hasFlag(header, GRG_FLAG_HAS_INDIV_IDS)) {
+        const size_t indivIdBytes = readScalar<uint64_t>(*inStream);
+        EagerFileVector<uint8_t> stringValues(inStream, inStream->tellg(), indivIdBytes);
+        EagerFileVector<uint32_t> stringPointers(inStream, inStream->tellg(), grg->numIndividuals() + 1);
+        CSRStringTable individualIds(std::move(stringPointers), std::move(stringValues), indivIdBytes);
+        assert_deserialization(individualIds.numNodes() == grg->numIndividuals(), "Malformed GRG file: individual IDs");
+        grg->m_individualIds = std::move(individualIds);
+    }
+
     assert_deserialization(inStream->good(), "Malformed GRG file");
     grg->m_mutsAreOrdered = true;
 }
@@ -495,11 +549,8 @@ MutableGRGPtr readMutableGrg(IFSPointer& inStream) {
     inStream->read(reinterpret_cast<char*>(&header), sizeof(header));
     assert_deserialization(GRG_FILE_MAGIC == header.magic, "Invalid file header");
     assert_deserialization(GRG_FILE_MAJOR_VERSION == header.versionMajor, "Incompatible file major version");
+    release_assert(versionIsAtLeast(header, GRG_FILE_MAJOR_VERSION, 0)); // Just testing functionality.
     assert_deserialization(header.nodeCount <= MAX_GRG_NODES, "Malformed GRG file");
-    // For backwards compatibility to versions prior to 4.1
-    if (header.ploidy == 0 && header.versionMajor == 4 && header.versionMinor == 0) {
-        header.ploidy = 2;
-    }
     assert_deserialization(header.ploidy != 0, "Malformed GRG file: ploidy was 0");
 
     // Construct GRG and allocate all the nodes.
@@ -545,10 +596,7 @@ GRGPtr readImmutableGrg(IFSPointer& inStream, bool loadUpEdges) {
     inStream->read(reinterpret_cast<char*>(&header), sizeof(header));
     assert_deserialization(GRG_FILE_MAGIC == header.magic, "Invalid file header");
     assert_deserialization(GRG_FILE_MAJOR_VERSION == header.versionMajor, "Incompatible file major version");
-    // For backwards compatibility to versions prior to 4.1
-    if (header.ploidy == 0 && header.versionMajor == 4 && header.versionMinor == 0) {
-        header.ploidy = 2;
-    }
+    release_assert(versionIsAtLeast(header, GRG_FILE_MAJOR_VERSION, 0)); // Just testing functionality.
     assert_deserialization(header.ploidy != 0, "Malformed GRG file: ploidy was 0");
 
     // Construct GRG and allocate all the nodes.
@@ -597,7 +645,7 @@ GRGPtr readImmutableGrg(IFSPointer& inStream, bool loadUpEdges) {
             const size_t index = upIndexes[nodeId];
             assert(upEdges.size() - index == upDegree[nodeId]);
             std::sort(&upEdges[index], &upEdges[upEdges.size()]);
-            upEdgeCSR.setData(nodeId, upEdges, {index, upEdges.size()});
+            upEdgeCSR.setData(nodeId, upEdges.data(), {index, upEdges.size()});
             upEdges.resize(index);
         }
         upEdges.shrink_to_fit();

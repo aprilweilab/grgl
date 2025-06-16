@@ -108,6 +108,11 @@ def add_options(subparser):
         action="store_true",
         help='Do not merge the resulting GRGs (so if you specified "-p C" there will be C GRGs).',
     )
+    subparser.add_argument(
+        "--no-indiv-ids",
+        action="store_true",
+        help="Do not storage individual string identifiers in the GRG.",
+    )
 
 
 grgl_exe = which("grgl")
@@ -144,6 +149,8 @@ def build_shape(range_triple, args, input_file):
             command.extend(["--population-ids", args.population_ids])
         if args.bs_triplet:
             command.extend(["--bs-triplet", args.bs_triplet])
+        if args.no_indiv_ids:
+            command.append("--no-indiv-ids")
         command.extend(["--lf-filter", str(args.shape_lf_filter)])
         command.extend(
             [

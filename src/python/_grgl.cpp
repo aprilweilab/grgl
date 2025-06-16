@@ -433,6 +433,31 @@ PYBIND11_MODULE(_grgl, m) {
                 :type node_id: int
                 :param num_coals: The number of individuals that coalesced, or pygrgl.COAL_COUNT_NOT_SET.
                 :type num_coals: int
+            )^")
+        .def_property_readonly("has_individual_ids", &grgl::GRG::hasIndividualIds, R"^(
+            True if this GRG has string identifiers for each individual. See get_individual_id().
+            )^")
+        .def("clear_individual_ids", &grgl::GRG::clearIndividualIds, R"^(
+            Remove all individual IDs from the current GRG.
+            )^")
+        .def("add_individual_id", &grgl::GRG::addIndividualId, py::arg("identifier"), R"^(
+            Add the next string identifier for an individual in the dataset. If the individual IDs
+            are already set, this will throw an exception. This must be called in order, from the
+            0th to the (N-1)st individual.
+
+            :param identifier: The string identifier for the next individual.
+            :type identifier: str
+            )^")
+        .def("get_individual_id", &grgl::GRG::getIndividualId, py::arg("individual_index"), R"^(
+            Get the string identifiers for each of the N individuals in the dataset, if available.
+            These are optional, so the empty list will be returned if the GRG does not have them.
+            See has_individual_ids.
+
+            :param individual_index: The individual to retrieve. The individuals are numbered from
+                0...(num_individuals-1), and correspond to the sample NodeIDs divided by their ploidy.
+            :type individual_index: int
+            :return: String identifier for the given individual.
+            :rtype: str
             )^");
     grgClass.doc() = "A Genotype Representation Graph (GRG) representing a particular dataset. "
                      "This is the immutable portion of the API, so every graph has these operations. "

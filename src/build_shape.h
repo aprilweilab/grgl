@@ -29,6 +29,15 @@ namespace grgl {
 class MutableGRG;
 using MutableGRGPtr = std::shared_ptr<MutableGRG>;
 
+enum {
+    GBF_USE_BINARY_MUTS = 0x1U,
+    GBF_EMIT_MISSING_DATA = 0x2U,
+    GBF_FLIP_REF_MAJOR = 0x4U,
+    GBF_NO_INDIVIDUAL_IDS = 0x8U,
+    GBF_VERBOSE_OUTPUT = 0x10U,
+};
+using GrgBuildFlags = uint64_t;
+
 /**
  * Given a VCF file, and a genome range, construct a GRG for that range - but do not map the
  * mutations. The resulting graph just has empty nodes and sample nodes, and is connected.
@@ -36,9 +45,7 @@ using MutableGRGPtr = std::shared_ptr<MutableGRG>;
 MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
                                         FloatRange& genomeRange,
                                         size_t bitsPerMutation,
-                                        bool useBinaryMuts,
-                                        bool emitMissingData,
-                                        bool flipRefMajor,
+                                        GrgBuildFlags buildFlags,
                                         double dropBelowThreshold,
                                         const std::map<std::string, std::string>& indivIdToPop,
                                         size_t tripletLevels = 0);

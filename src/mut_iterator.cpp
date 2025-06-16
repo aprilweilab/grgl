@@ -267,7 +267,7 @@ size_t IGDMutationIterator::countMutations() const {
     return mutations;
 }
 
-std::vector<std::string> IGDMutationIterator::getIndividualIds() { return m_igd->getIndividualIds(); }
+std::vector<std::string> IGDMutationIterator::getIndividualIds() { return std::move(m_igd->getIndividualIds()); }
 
 void IGDMutationIterator::buffer_next(size_t& totalSamples) {
     totalSamples = m_igd->numSamples();

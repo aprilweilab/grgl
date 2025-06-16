@@ -23,6 +23,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
+#include "grgl/common.h"
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
 #include "grgl/mut_iterator.h"
@@ -251,65 +252,94 @@ uint16_t genotypeHashIndex(MutationIterator& mutIterator,
 MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
                                         FloatRange& genomeRange,
                                         size_t bitsPerMutation,
-                                        const bool useBinaryMuts,
-                                        const bool emitMissingData,
-                                        const bool flipRefMajor,
+                                        GrgBuildFlags buildFlags,
                                         const double dropBelowThreshold,
                                         const std::map<std::string, std::string>& indivIdToPop,
                                         const size_t tripletLevels) {
     MutableGRGPtr result;
     NodeToHapVect hashIndex;
-    std::cout << "Building genotype hash index..." << std::endl;
+
+#define GRGBS_LOG_OUTPUT(msg)                                                                                          \
+    do {                                                                                                               \
+        if (static_cast<bool>(buildFlags & GBF_VERBOSE_OUTPUT)) {                                                      \
+            std::cerr << msg;                                                                                          \
+        }                                                                                                              \
+    } while (0)
+
+    GRGBS_LOG_OUTPUT("Building genotype hash index..." << std::endl);
+    const bool useBinaryMuts = static_cast<bool>(buildFlags & GBF_USE_BINARY_MUTS);
+    const bool emitMissingData = static_cast<bool>(buildFlags & GBF_EMIT_MISSING_DATA);
+    const bool flipRefMajor = static_cast<bool>(buildFlags & GBF_FLIP_REF_MAJOR);
     std::shared_ptr<grgl::MutationIterator> mutationIterator =
         makeMutationIterator(sampleFile, genomeRange, useBinaryMuts, emitMissingData, flipRefMajor);
     auto operationStartTime = std::chrono::high_resolution_clock::now();
     uint16_t ploidy = genotypeHashIndex(*mutationIterator, hashIndex, bitsPerMutation, dropBelowThreshold);
-    std::cout << "** Hashing input took "
-              << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() -
-                                                                       operationStartTime)
-                     .count()
-              << " ms\n";
+    GRGBS_LOG_OUTPUT("** Hashing input took " << std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                     std::chrono::high_resolution_clock::now() - operationStartTime)
+                                                     .count()
+                                              << " ms" << std::endl);
 
-    std::cout << "Done" << std::endl;
+    GRGBS_LOG_OUTPUT("Done" << std::endl);
     result = std::make_shared<MutableGRG>(hashIndex.size(), ploidy);
+
+    std::vector<std::string> indivIds;
     if (!indivIdToPop.empty()) {
         size_t ploidy = 0;
         size_t numIndividuals = 0;
         bool isPhased = false;
         mutationIterator->getMetadata(ploidy, numIndividuals, isPhased);
-        std::vector<std::string> indivIds = mutationIterator->getIndividualIds();
-        release_assert(indivIds.size() == numIndividuals);
-        std::map<std::string, size_t> popDescriptionMap;
-        for (NodeID individual = 0; individual < indivIds.size(); individual++) {
-            const auto& stringId = indivIds[individual];
-            const auto& findIt = indivIdToPop.find(stringId);
-            if (findIt == indivIdToPop.end()) {
-                std::stringstream ssErr;
-                ssErr << "Could not find population mapping for individual " << stringId;
-                throw std::runtime_error(ssErr.str());
+        indivIds = mutationIterator->getIndividualIds();
+        if (!indivIds.empty()) {
+            release_assert(indivIds.size() == numIndividuals);
+            std::map<std::string, size_t> popDescriptionMap;
+            for (NodeID individual = 0; individual < indivIds.size(); individual++) {
+                const auto& stringId = indivIds[individual];
+                const auto& findIt = indivIdToPop.find(stringId);
+                if (findIt == indivIdToPop.end()) {
+                    std::stringstream ssErr;
+                    ssErr << "Could not find population mapping for individual " << stringId;
+                    throw std::runtime_error(ssErr.str());
+                }
+                const auto& popDescription = findIt->second;
+                const size_t nextPopId = popDescriptionMap.size();
+                const auto& findPopIt = popDescriptionMap.emplace(popDescription, nextPopId);
+                const auto popId = findPopIt.first->second;
+                if (findPopIt.second) {
+                    release_assert(popId == nextPopId);
+                    result->addPopulation(popDescription);
+                } else {
+                    release_assert(popId != nextPopId);
+                }
+                for (NodeID offset = 0; offset < ploidy; offset++) {
+                    const NodeID sampleId = (individual * ploidy) + offset;
+                    release_assert(sampleId < result->numSamples());
+                    result->setPopulationId(sampleId, popId);
+                }
             }
-            const auto& popDescription = findIt->second;
-            const size_t nextPopId = popDescriptionMap.size();
-            const auto& findPopIt = popDescriptionMap.emplace(popDescription, nextPopId);
-            const auto popId = findPopIt.first->second;
-            if (findPopIt.second) {
-                release_assert(popId == nextPopId);
-                result->addPopulation(popDescription);
-            } else {
-                release_assert(popId != nextPopId);
-            }
-            for (NodeID offset = 0; offset < ploidy; offset++) {
-                const NodeID sampleId = (individual * ploidy) + offset;
-                release_assert(sampleId < result->numSamples());
-                result->setPopulationId(sampleId, popId);
-            }
+        } else {
+            throw ApiMisuseFailure("No individual IDs present in input; required for population mapping");
         }
     }
-    std::cout << "Adding GRG shape from genotype hashes..." << std::endl;
+    GRGBS_LOG_OUTPUT("Adding GRG shape from genotype hashes..." << std::endl);
     addGrgShapeFromHashing(result, hashIndex, result->getSampleNodes(), tripletLevels);
     const auto actualRange = mutationIterator->getBpRange();
     result->setSpecifiedBPRange({(BpPosition)actualRange.start(), (BpPosition)actualRange.end()});
-    std::cout << "Done" << std::endl;
+    GRGBS_LOG_OUTPUT("Done" << std::endl);
+
+    // Add individual identifiers.
+    if (!static_cast<bool>(buildFlags & GBF_NO_INDIVIDUAL_IDS)) {
+        if (indivIds.empty()) {
+            indivIds = mutationIterator->getIndividualIds();
+        }
+        if (indivIds.empty()) {
+            GRGBS_LOG_OUTPUT("WARNING: No individual identifiers present in the input file" << std::endl);
+        }
+        for (const auto& ident : indivIds) {
+            result->addIndividualId(ident);
+        }
+    }
+
+#undef GRGBS_LOG_OUTPUT
 
     return result;
 }

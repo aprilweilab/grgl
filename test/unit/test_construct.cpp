@@ -47,7 +47,7 @@ TEST(Construct, WithPopIds) {
     // Test1: Incomplete individual -> population map
     indivIdToPop.emplace("Z1", "Population2");
     indivIdToPop.emplace("X1", "Population4");
-    EXPECT_THROW(createEmptyGRGFromSamples(filename, fullRange, 8, false, false, false, 0.0,
+    EXPECT_THROW(createEmptyGRGFromSamples(filename, fullRange, 8, 0x0U, 0.0,
                                            indivIdToPop), std::runtime_error);
 
     // Test2: Complete individual -> population map
@@ -56,7 +56,7 @@ TEST(Construct, WithPopIds) {
     indivIdToPop.emplace("B4", "Population3");
     indivIdToPop.emplace("A1", "Population1");
     indivIdToPop.emplace("X3", "Population4");
-    auto grg = createEmptyGRGFromSamples(filename, fullRange, 8, false, false, false, 0.0,
+    auto grg = createEmptyGRGFromSamples(filename, fullRange, 8, 0x0U, 0.0,
                                          indivIdToPop);
     ASSERT_EQ(grg->numSamples(), numIndividuals*2);
     auto popDescriptions = grg->getPopulations();
