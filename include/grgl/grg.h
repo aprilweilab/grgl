@@ -353,12 +353,12 @@ public:
     // Internal method, used by Python API and the main API below.
     // The outputMatrix is added to. So if you want the pure matrix multiplication, it must
     // be zeroed out.
-    template <typename T>
-    void matrixMultiplication(const T* inputMatrix,
+    template <typename IOType, typename NodeValueType, bool useBitVector>
+    void matrixMultiplication(const IOType* inputMatrix,
                               size_t inputCols,
                               size_t inputRows,
                               TraversalDirection direction,
-                              T* outputMatrix,
+                              IOType* outputMatrix,
                               size_t outputSize,
                               bool emitAllNodes = false,
                               bool byIndividual = false);
@@ -408,7 +408,7 @@ public:
         const size_t outSize =
             (numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? numSamples() : numMutations()));
         std::vector<T> result(outSize);
-        matrixMultiplication(inputMatrix.data(), numCols, numRows, direction, result.data(), outSize);
+        matrixMultiplication<T, T, false>(inputMatrix.data(), numCols, numRows, direction, result.data(), outSize);
         return std::move(result);
     }
 
@@ -752,100 +752,92 @@ using ConstCSRGRGPtr = std::shared_ptr<const CSRGRG>;
 // functions/classes that are needed by matrix multiplication.
 #include "internal_mult.h"
 
-template <typename T>
-void GRG::matrixMultiplication(const T* inputMatrix,
+template <typename IOType, typename NodeValueType, bool useBitVector>
+void GRG::matrixMultiplication(const IOType* inputMatrix,
                                size_t inputCols,
                                size_t inputRows,
                                TraversalDirection direction,
-                               T* outputMatrix,
+                               IOType* outputMatrix,
                                size_t outputSize,
                                bool emitAllNodes,
                                bool byIndividual) {
     release_assert(inputCols > 0);
     release_assert(inputRows > 0);
     const size_t outputCols = outputSize / inputRows;
-    release_assert(outputSize % inputRows == 0);
-    const size_t expectSampleCols = byIndividual ? numIndividuals() : numSamples();
-    if (direction == DIRECTION_DOWN) {
-        if (inputCols != numMutations()) {
-            throw ApiMisuseFailure("Input vector is not size M (numMutations)");
-        }
-        if (!emitAllNodes && outputCols != expectSampleCols) {
-            throw ApiMisuseFailure("Output vector is not size N (numSamples, or numIndividuals depending on flags)");
-        }
-    } else {
-        if (inputCols != expectSampleCols) {
-            throw ApiMisuseFailure("Input vector is not size N (numSamples, or numIndividuals depending on flags)");
-        }
-        if (!emitAllNodes && outputCols != numMutations()) {
-            throw ApiMisuseFailure("Output vector is not size M (numMutations)");
-        }
-    }
-    if (emitAllNodes && outputCols != numNodes()) {
-        throw ApiMisuseFailure("Output vector is not size numNodes");
-    }
+    validateMatMulInputs(this, inputCols, inputRows, direction, outputSize, emitAllNodes, byIndividual, outputCols);
+    // When we do bitvector calculations, we must have the number of input rows be a multiple of the
+    // element size the bitvector is using.
+    const size_t effectiveInputRows =
+        useBitVector ? roundUpToMultiple(inputRows, sizeof(NodeValueType) * 8) : inputRows;
 
     // The node value storage stores the different row values consecutively (so
     // similar to column-major order), in contrast to the input/output matrices
     // which are row-major.
-    std::vector<T> nodeValues(numNodes() * inputRows);
+    const size_t nodesPerElem = useBitVector ? sizeof(NodeValueType) * 8 : 1;
+    release_assert(effectiveInputRows % nodesPerElem == 0);
+    std::vector<NodeValueType> nodeValues(numNodes() * effectiveInputRows / nodesPerElem);
     if (direction == DIRECTION_DOWN) {
         for (const auto& nodeIdAndMutId : this->getNodeMutationPairs()) {
             const NodeID& nodeId = nodeIdAndMutId.first;
             const MutationId& mutId = nodeIdAndMutId.second;
             assert(mutId < inputCols);
             if (nodeId != INVALID_NODE_ID) {
-                const size_t base = nodeId * inputRows;
+                const size_t base = nodeId * effectiveInputRows;
                 for (size_t row = 0; row < inputRows; row++) {
                     const size_t rowStart = row * inputCols;
-                    nodeValues[base + row] += inputMatrix[rowStart + mutId];
+                    matmulPerformIOAddition<NodeValueType, IOType, useBitVector>(
+                        nodeValues.data(), base + row, inputMatrix, rowStart + mutId);
                 }
             }
         }
         if (this->nodesAreOrdered()) {
             for (NodeID i = numNodes(); i > 0; i--) {
                 const NodeID nodeId = i - 1;
-                const size_t base = nodeId * inputRows;
+                const size_t base = nodeId * effectiveInputRows;
                 for (NodeID childId : this->getDownEdges(nodeId)) {
-                    const size_t cbase = childId * inputRows;
-                    vectorAdd<T>(&nodeValues[cbase], &nodeValues[base], inputRows);
+                    const size_t cbase = childId * effectiveInputRows;
+                    vectorAdd<NodeValueType, useBitVector>(
+                        nodeValues.data(), nodeValues.data(), cbase, base, effectiveInputRows);
                 }
             }
         } else {
-            ValueSumVisitor<T> valueSumVisitor(nodeValues, inputRows);
+            ValueSumVisitor<NodeValueType> valueSumVisitor(nodeValues, effectiveInputRows);
             this->visitDfs(valueSumVisitor, DIRECTION_UP, getSampleNodes());
         }
         if (!emitAllNodes) {
             for (size_t row = 0; row < inputRows; row++) {
                 const size_t rowStart = row * outputCols;
                 for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
-                    const size_t base = sampleId * inputRows;
+                    const size_t base = sampleId * effectiveInputRows;
                     assert(rowStart + sampleId < outputSize);
                     const size_t sampleIndex = byIndividual ? (sampleId / m_ploidy) : sampleId;
-                    outputMatrix[rowStart + sampleIndex] += nodeValues[base + row];
+                    matmulPerformIOAddition<IOType, NodeValueType, useBitVector>(
+                        outputMatrix, rowStart + sampleIndex, nodeValues.data(), base + row);
                 }
             }
         }
     } else {
         for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
             assert(sampleId < inputCols);
-            const size_t base = sampleId * inputRows;
+            const size_t base = sampleId * effectiveInputRows;
             const size_t sampleIndex = byIndividual ? (sampleId / m_ploidy) : sampleId;
             for (size_t row = 0; row < inputRows; row++) {
                 const size_t rowStart = row * inputCols;
-                nodeValues[base + row] = inputMatrix[rowStart + sampleIndex];
+                matmulPerformIOAddition<NodeValueType, IOType, useBitVector>(
+                    nodeValues.data(), base + row, inputMatrix, rowStart + sampleIndex);
             }
         }
         if (this->nodesAreOrdered()) {
             for (NodeID nodeId = numSamples(); nodeId < numNodes(); nodeId++) {
-                const size_t base = nodeId * inputRows;
+                const size_t base = nodeId * effectiveInputRows;
                 for (NodeID childId : this->getDownEdges(nodeId)) {
-                    const size_t cbase = childId * inputRows;
-                    vectorAdd<T>(&nodeValues[base], &nodeValues[cbase], inputRows);
+                    const size_t cbase = childId * effectiveInputRows;
+                    vectorAdd<NodeValueType, useBitVector>(
+                        nodeValues.data(), nodeValues.data(), base, cbase, effectiveInputRows);
                 }
             }
         } else {
-            ValueSumVisitor<T> valueSumVisitor(nodeValues, inputRows);
+            ValueSumVisitor<NodeValueType> valueSumVisitor(nodeValues, effectiveInputRows);
             this->visitDfs(valueSumVisitor, DIRECTION_DOWN, getRootNodes());
         }
         if (!emitAllNodes) {
@@ -856,8 +848,9 @@ void GRG::matrixMultiplication(const T* inputMatrix,
                     const MutationId& mutId = nodeIdAndMutId.second;
                     assert(rowStart + mutId < outputSize);
                     if (nodeId != INVALID_NODE_ID) {
-                        const size_t base = nodeId * inputRows;
-                        outputMatrix[rowStart + mutId] += nodeValues[base + row];
+                        const size_t base = nodeId * effectiveInputRows;
+                        matmulPerformIOAddition<IOType, NodeValueType, useBitVector>(
+                            outputMatrix, rowStart + mutId, nodeValues.data(), base + row);
                     }
                 }
             }
@@ -867,8 +860,9 @@ void GRG::matrixMultiplication(const T* inputMatrix,
         for (size_t row = 0; row < inputRows; row++) {
             const size_t rowStart = row * outputCols;
             for (NodeID nodeId = 0; nodeId < numNodes(); nodeId++) {
-                const size_t base = nodeId * inputRows;
-                outputMatrix[rowStart + nodeId] += nodeValues[base + row];
+                const size_t base = nodeId * effectiveInputRows;
+                matmulPerformIOAddition<IOType, NodeValueType, useBitVector>(
+                    outputMatrix, rowStart + nodeId, nodeValues.data(), base + row);
             }
         }
     }
