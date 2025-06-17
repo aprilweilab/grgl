@@ -158,6 +158,10 @@ struct GRGFileHeader {
 #pragma pack(pop)
 static_assert(sizeof(GRGFileHeader) == 128, "GRG header size changed");
 
+template <typename T> inline T roundUpToMultiple(const T input, const T multiple) {
+    return ((input + (multiple - 1)) / multiple) * multiple;
+}
+
 } // namespace grgl
 
 #endif /* GRGL_COMMON_H */

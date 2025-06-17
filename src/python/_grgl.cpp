@@ -41,7 +41,7 @@ inline py::array_t<T> dispatchDotProd(
     py::array_t<T> result(outCols);
     py::buffer_info resultBuf = result.request();
     memset(resultBuf.ptr, 0, outCols * sizeof(T));
-    grg->matrixMultiplication((const T*)buffer.ptr, inCols, 1, direction, (T*)resultBuf.ptr, outCols);
+    grg->matrixMultiplication<T, T, false>((const T*)buffer.ptr, inCols, 1, direction, (T*)resultBuf.ptr, outCols);
     return std::move(result);
 }
 
@@ -71,21 +71,27 @@ py::array dotProduct(grgl::GRGPtr& grg, py::handle input, grgl::TraversalDirecti
     throw grgl::ApiMisuseFailure(ssErr.str().c_str());
 }
 
-template <typename T>
-inline py::array_t<T> dispatchMult(grgl::GRGPtr& grg,
-                                   py::buffer_info& buffer,
-                                   size_t rows,
-                                   size_t inCols,
-                                   size_t outCols,
-                                   grgl::TraversalDirection direction,
-                                   bool emitAllNodes,
-                                   bool byIndividual) {
+template <typename IOType, typename NodeValueType, bool useBitVector>
+inline py::array_t<IOType> dispatchMult(grgl::GRGPtr& grg,
+                                        py::buffer_info& buffer,
+                                        size_t rows,
+                                        size_t inCols,
+                                        size_t outCols,
+                                        grgl::TraversalDirection direction,
+                                        bool emitAllNodes,
+                                        bool byIndividual) {
     const size_t outSize = rows * outCols;
-    py::array_t<T> result({rows, outCols});
+    py::array_t<IOType> result({rows, outCols});
     py::buffer_info resultBuf = result.request();
-    memset(resultBuf.ptr, 0, outSize * sizeof(T));
-    grg->matrixMultiplication(
-        (const T*)buffer.ptr, inCols, rows, direction, (T*)resultBuf.ptr, outSize, emitAllNodes, byIndividual);
+    memset(resultBuf.ptr, 0, outSize * sizeof(IOType));
+    grg->matrixMultiplication<IOType, NodeValueType, useBitVector>((const IOType*)buffer.ptr,
+                                                                   inCols,
+                                                                   rows,
+                                                                   direction,
+                                                                   (IOType*)resultBuf.ptr,
+                                                                   outSize,
+                                                                   emitAllNodes,
+                                                                   byIndividual);
     return std::move(result);
 }
 
@@ -108,14 +114,40 @@ py::array matMul(grgl::GRGPtr& grg,
     const size_t outCols =
         (emitAllNodes ? grg->numNodes()
                       : ((direction == grgl::TraversalDirection::DIRECTION_DOWN) ? numSamples : grg->numMutations()));
+
     if (py::isinstance<py::array_t<double>>(input)) {
-        return dispatchMult<double>(grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+        return dispatchMult<double, double, false>(
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
     } else if (py::isinstance<py::array_t<float>>(input)) {
-        return dispatchMult<float>(grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+        return dispatchMult<float, float, false>(
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
     } else if (py::isinstance<py::array_t<std::int64_t>>(input)) {
-        return dispatchMult<int64_t>(grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+        return dispatchMult<int64_t, int64_t, false>(
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
     } else if (py::isinstance<py::array_t<std::int32_t>>(input)) {
-        return dispatchMult<int32_t>(grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+        return dispatchMult<int32_t, int32_t, false>(
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+    } else if (py::isinstance<py::array_t<std::int16_t>>(input)) {
+        return dispatchMult<int16_t, int16_t, false>(
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+    } else if (py::isinstance<py::array_t<std::int8_t>>(input)) {
+        return dispatchMult<int8_t, int8_t, false>(
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+    } else if (py::isinstance<py::array_t<std::uint64_t>>(input)) {
+        return dispatchMult<uint64_t, uint64_t, false>(
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+    } else if (py::isinstance<py::array_t<std::uint32_t>>(input)) {
+        return dispatchMult<uint32_t, uint32_t, false>(
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+    } else if (py::isinstance<py::array_t<std::uint16_t>>(input)) {
+        return dispatchMult<uint16_t, uint16_t, false>(
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+    } else if (py::isinstance<py::array_t<std::uint8_t>>(input)) {
+        return dispatchMult<uint8_t, uint8_t, false>(
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+    } else if (py::isinstance<py::array_t<bool>>(input)) {
+        return dispatchMult<bool, uint8_t, true>(
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
     }
     std::stringstream ssErr;
     ssErr << "Unsupported numpy dtype: " << arr.dtype();
