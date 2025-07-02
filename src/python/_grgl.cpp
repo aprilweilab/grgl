@@ -86,10 +86,6 @@ inline py::array_t<IOType> dispatchMult(grgl::GRGPtr& grg,
     py::buffer_info resultBuf = result.request();
     memset(resultBuf.ptr, 0, outSize * sizeof(IOType));
 
-    // If the node initialization was specified, it can either be:
-    // 1. A list of values, each of which is either a constant integer/float value or
-    //    the string "xtx" to use the coalescence counts.
-    // 2. A matrix that matches the dimensions of the input
     py::buffer_info initBuffer;
     grgl::GRG::NodeInitEnum nodeInitMode = grgl::GRG::NIE_ZERO;
     if (py::isinstance<py::none>(init)) {
@@ -838,6 +834,16 @@ PYBIND11_MODULE(_grgl, m) {
             of :math:`N` (:py:attr:`num_samples`) columns, it is :math:`N / ploidy` (:py:attr:`num_individuals`)
             columns.
         :type by_individual: bool
+        :param init: Initialization of the nodes of the graph during matrix multiplication. By default (when this
+            is set to None), nodes are initialization to 0. There are three possible types this can take on:
+            1. A string "xtx" which means to initialize the nodes with twice their coalesence counts. Using this
+            and performing an UP multiplication (with 1s as input) produces the X.T * X product needed for
+            GWAS.
+            2. A one dimensional numpy array (vector) of length K. The value at position K is assigned to all
+            nodes when performing the multiplication for row K from the input matrix.
+            3. A two dimensional numpy array (matrix) of size KxT, where T is the total number of nodes in the
+            graph (grg.num_nodes). This fully specifies every node value for the entire matrix operation.
+        :type init: Union[str, numpy.array]
         :return: The numpy 2-dimensional array of output values.
         :rtype: numpy.array
     )^");
