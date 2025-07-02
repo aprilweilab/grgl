@@ -6,6 +6,9 @@ template <typename T, typename T2, bool useBitVector>
 inline void
 matmulPerformIOAddition(T* outputMatrix, const size_t outputIdx, const T2* inputMatrix, const size_t inputIdx);
 
+template <typename T, typename T2, bool useBitVector>
+inline void matmulPerformIOAddition(T* outputMatrix, const size_t outputIdx, const T2 inputValue, const size_t count);
+
 template <typename T> class ValueSumVisitor : public GRGVisitor {
 public:
     explicit ValueSumVisitor(std::vector<T>& nodeValues, const size_t numRows = 1)
@@ -166,6 +169,14 @@ matmulPerformIOAdditionHelper(T* outputMatrix, const size_t outputIdx, const T* 
     outputMatrix[outputIdx] += inputMatrix[inputIdx];
 }
 
+template <typename T>
+inline void
+matmulPerformIOAdditionHelper(T* outputMatrix, const size_t outputIdx, const T inputValue, const size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        outputMatrix[outputIdx + i] += inputValue;
+    }
+}
+
 template <>
 inline void matmulPerformIOAddition<double, double, false>(double* outputMatrix,
                                                            const size_t outputIdx,
@@ -246,6 +257,86 @@ inline void matmulPerformIOAddition<uint8_t, uint8_t, false>(uint8_t* outputMatr
     matmulPerformIOAdditionHelper(outputMatrix, outputIdx, inputMatrix, inputIdx);
 }
 
+template <>
+inline void matmulPerformIOAddition<double, double, false>(double* outputMatrix,
+                                                           const size_t outputIdx,
+                                                           const double inputValue,
+                                                           const size_t count) {
+    matmulPerformIOAdditionHelper(outputMatrix, outputIdx, inputValue, count);
+}
+
+template <>
+inline void matmulPerformIOAddition<float, float, false>(float* outputMatrix,
+                                                         const size_t outputIdx,
+                                                         const float inputValue,
+                                                         const size_t count) {
+    matmulPerformIOAdditionHelper(outputMatrix, outputIdx, inputValue, count);
+}
+
+template <>
+inline void matmulPerformIOAddition<int64_t, int64_t, false>(int64_t* outputMatrix,
+                                                             const size_t outputIdx,
+                                                             const int64_t inputValue,
+                                                             const size_t count) {
+    matmulPerformIOAdditionHelper(outputMatrix, outputIdx, inputValue, count);
+}
+
+template <>
+inline void matmulPerformIOAddition<int32_t, int32_t, false>(int32_t* outputMatrix,
+                                                             const size_t outputIdx,
+                                                             const int32_t inputValue,
+                                                             const size_t count) {
+    matmulPerformIOAdditionHelper(outputMatrix, outputIdx, inputValue, count);
+}
+
+template <>
+inline void matmulPerformIOAddition<int16_t, int16_t, false>(int16_t* outputMatrix,
+                                                             const size_t outputIdx,
+                                                             const int16_t inputValue,
+                                                             const size_t count) {
+    matmulPerformIOAdditionHelper(outputMatrix, outputIdx, inputValue, count);
+}
+
+template <>
+inline void matmulPerformIOAddition<int8_t, int8_t, false>(int8_t* outputMatrix,
+                                                           const size_t outputIdx,
+                                                           const int8_t inputValue,
+                                                           const size_t count) {
+    matmulPerformIOAdditionHelper(outputMatrix, outputIdx, inputValue, count);
+}
+
+template <>
+inline void matmulPerformIOAddition<uint64_t, uint64_t, false>(uint64_t* outputMatrix,
+                                                               const size_t outputIdx,
+                                                               const uint64_t inputValue,
+                                                               const size_t count) {
+    matmulPerformIOAdditionHelper(outputMatrix, outputIdx, inputValue, count);
+}
+
+template <>
+inline void matmulPerformIOAddition<uint32_t, uint32_t, false>(uint32_t* outputMatrix,
+                                                               const size_t outputIdx,
+                                                               const uint32_t inputValue,
+                                                               const size_t count) {
+    matmulPerformIOAdditionHelper(outputMatrix, outputIdx, inputValue, count);
+}
+
+template <>
+inline void matmulPerformIOAddition<uint16_t, uint16_t, false>(uint16_t* outputMatrix,
+                                                               const size_t outputIdx,
+                                                               const uint16_t inputValue,
+                                                               const size_t count) {
+    matmulPerformIOAdditionHelper(outputMatrix, outputIdx, inputValue, count);
+}
+
+template <>
+inline void matmulPerformIOAddition<uint8_t, uint8_t, false>(uint8_t* outputMatrix,
+                                                             const size_t outputIdx,
+                                                             const uint8_t inputValue,
+                                                             const size_t count) {
+    matmulPerformIOAdditionHelper(outputMatrix, outputIdx, inputValue, count);
+}
+
 // If the input bit is 0, leave output unchanged. If the input bit is 1, flip the output
 // value to the other value.
 template <typename T> inline void matmulFlipSingleBit(T* outputMatrix, const size_t outputIdx) {
@@ -280,4 +371,12 @@ inline void matmulPerformIOAddition<bool, uint8_t, true>(bool* outputMatrix,
                                                          const uint8_t* inputMatrix,
                                                          const size_t inputIdx) {
     outputMatrix[outputIdx] = (outputMatrix[outputIdx] != matmulGetSingleBit(inputMatrix, inputIdx));
+}
+
+template <>
+inline void matmulPerformIOAddition<uint8_t, bool, true>(uint8_t* outputMatrix,
+                                                         const size_t outputIdx,
+                                                         const bool inputValue,
+                                                         const size_t count) {
+    release_assert(false); // Unsupported
 }
