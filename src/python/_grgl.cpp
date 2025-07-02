@@ -79,11 +79,59 @@ inline py::array_t<IOType> dispatchMult(grgl::GRGPtr& grg,
                                         size_t outCols,
                                         grgl::TraversalDirection direction,
                                         bool emitAllNodes,
-                                        bool byIndividual) {
+                                        bool byIndividual,
+                                        py::handle init) {
     const size_t outSize = rows * outCols;
     py::array_t<IOType> result({rows, outCols});
     py::buffer_info resultBuf = result.request();
     memset(resultBuf.ptr, 0, outSize * sizeof(IOType));
+
+    // If the node initialization was specified, it can either be:
+    // 1. A list of values, each of which is either a constant integer/float value or
+    //    the string "xtx" to use the coalescence counts.
+    // 2. A matrix that matches the dimensions of the input
+    py::buffer_info initBuffer;
+    grgl::GRG::NodeInitEnum nodeInitMode = grgl::GRG::NIE_ZERO;
+    if (py::isinstance<py::none>(init)) {
+        ;
+    } else if (py::isinstance<py::str>(init)) {
+        if (init.cast<std::string>() == "xtx") {
+            nodeInitMode = grgl::GRG::NIE_XTX;
+        } else {
+            std::stringstream ssErr;
+            ssErr << "Unexpected init value: " << init.cast<std::string>();
+            throw grgl::ApiMisuseFailure(ssErr.str().c_str());
+        }
+    } else {
+        py::array arr = py::array::ensure(init, py::array::c_style | py::array::forcecast);
+        if (py::isinstance<py::array_t<IOType>>(init)) {
+            initBuffer = arr.request();
+            if (initBuffer.ndim == 1) {
+                const size_t initRows = initBuffer.shape.at(0);
+                if (initRows != rows) {
+                    std::stringstream ssErr;
+                    ssErr << "If init has a single dimension, it must match the number of rows in the input matrix";
+                    throw grgl::ApiMisuseFailure(ssErr.str().c_str());
+                }
+                nodeInitMode = grgl::GRG::NIE_VECTOR;
+            }
+            if (initBuffer.ndim == 2) {
+                const size_t initRows = initBuffer.shape.at(0);
+                const size_t initCols = initBuffer.shape.at(1);
+                if (initRows != rows || initCols != grg->numNodes()) {
+                    std::stringstream ssErr;
+                    ssErr << "If init is a matrix, it must match the dimensions ROW x NODES";
+                    throw grgl::ApiMisuseFailure(ssErr.str().c_str());
+                }
+                nodeInitMode = grgl::GRG::NIE_MATRIX;
+            }
+        } else {
+            std::stringstream ssErr;
+            ssErr << "The init matrix must match the dtype of the input matrix. Got: " << arr.dtype();
+            throw grgl::ApiMisuseFailure(ssErr.str().c_str());
+        }
+    }
+
     grg->matrixMultiplication<IOType, NodeValueType, useBitVector>((const IOType*)buffer.ptr,
                                                                    inCols,
                                                                    rows,
@@ -91,7 +139,9 @@ inline py::array_t<IOType> dispatchMult(grgl::GRGPtr& grg,
                                                                    (IOType*)resultBuf.ptr,
                                                                    outSize,
                                                                    emitAllNodes,
-                                                                   byIndividual);
+                                                                   byIndividual,
+                                                                   (const IOType*)initBuffer.ptr,
+                                                                   nodeInitMode);
     return std::move(result);
 }
 
@@ -99,7 +149,8 @@ py::array matMul(grgl::GRGPtr& grg,
                  py::handle input,
                  grgl::TraversalDirection direction,
                  bool emitAllNodes = false,
-                 bool byIndividual = false) {
+                 bool byIndividual = false,
+                 py::handle init = nullptr) {
     py::array arr = py::array::ensure(input, py::array::c_style | py::array::forcecast);
     py::buffer_info buffer = arr.request();
     if (buffer.ndim != 2) {
@@ -117,37 +168,40 @@ py::array matMul(grgl::GRGPtr& grg,
 
     if (py::isinstance<py::array_t<double>>(input)) {
         return dispatchMult<double, double, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
     } else if (py::isinstance<py::array_t<float>>(input)) {
         return dispatchMult<float, float, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
     } else if (py::isinstance<py::array_t<std::int64_t>>(input)) {
         return dispatchMult<int64_t, int64_t, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
     } else if (py::isinstance<py::array_t<std::int32_t>>(input)) {
         return dispatchMult<int32_t, int32_t, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
     } else if (py::isinstance<py::array_t<std::int16_t>>(input)) {
         return dispatchMult<int16_t, int16_t, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
     } else if (py::isinstance<py::array_t<std::int8_t>>(input)) {
         return dispatchMult<int8_t, int8_t, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
     } else if (py::isinstance<py::array_t<std::uint64_t>>(input)) {
         return dispatchMult<uint64_t, uint64_t, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
     } else if (py::isinstance<py::array_t<std::uint32_t>>(input)) {
         return dispatchMult<uint32_t, uint32_t, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
     } else if (py::isinstance<py::array_t<std::uint16_t>>(input)) {
         return dispatchMult<uint16_t, uint16_t, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
     } else if (py::isinstance<py::array_t<std::uint8_t>>(input)) {
         return dispatchMult<uint8_t, uint8_t, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
     } else if (py::isinstance<py::array_t<bool>>(input)) {
+        if (!py::isinstance<py::none>(init)) {
+            throw grgl::ApiMisuseFailure("init=... is not supported with boolean dtype");
+        }
         return dispatchMult<bool, uint8_t, true>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
     }
     std::stringstream ssErr;
     ssErr << "Unsupported numpy dtype: " << arr.dtype();
@@ -743,6 +797,7 @@ PYBIND11_MODULE(_grgl, m) {
           py::arg("direction"),
           py::arg("emit_all_nodes") = false,
           py::arg("by_individual") = false,
+          py::arg("init") = nullptr,
           R"^(
         Compute one of two possible matrix multiplications across the entire
         graph. The input matrix :math:`V` can be either :math:`K \times N` (:math:`N`

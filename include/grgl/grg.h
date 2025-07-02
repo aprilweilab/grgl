@@ -350,6 +350,14 @@ public:
      */
     MutationId addMutation(const Mutation& mutation, NodeID nodeId);
 
+    // Internal enum used for determining the node value initialization behavior of matrix multiplication.
+    enum NodeInitEnum {
+        NIE_ZERO = 0,   // Zero values.
+        NIE_VECTOR = 1, // A vector of values, one for each row of the input matrix.
+        NIE_MATRIX = 2, // A matrix of values, of dimensions ROWS x NODES
+        NIE_XTX = 3,    // The number of coalescences * 2.
+    };
+
     // Internal method, used by Python API and the main API below.
     // The outputMatrix is added to. So if you want the pure matrix multiplication, it must
     // be zeroed out.
@@ -361,7 +369,9 @@ public:
                               IOType* outputMatrix,
                               size_t outputSize,
                               bool emitAllNodes = false,
-                              bool byIndividual = false);
+                              bool byIndividual = false,
+                              const IOType* initMatrix = nullptr,
+                              NodeInitEnum nodeInit = NIE_ZERO);
 
     /**
      * Compute one of two possible matrix multiplications across the entire
@@ -760,7 +770,9 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
                                IOType* outputMatrix,
                                size_t outputSize,
                                bool emitAllNodes,
-                               bool byIndividual) {
+                               bool byIndividual,
+                               const IOType* initMatrix,
+                               NodeInitEnum nodeInit) {
     release_assert(inputCols > 0);
     release_assert(inputRows > 0);
     const size_t outputCols = outputSize / inputRows;
@@ -776,6 +788,38 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
     const size_t nodesPerElem = useBitVector ? sizeof(NodeValueType) * 8 : 1;
     release_assert(effectiveInputRows % nodesPerElem == 0);
     std::vector<NodeValueType> nodeValues(numNodes() * effectiveInputRows / nodesPerElem);
+
+    switch (nodeInit) {
+    case NIE_XTX:
+        for (NodeID i = 0; i < numNodes(); i++) {
+            const size_t base = i * effectiveInputRows;
+            matmulPerformIOAddition<NodeValueType, IOType, useBitVector>(
+                nodeValues.data(), base, 2 * this->getNumIndividualCoals(i), effectiveInputRows);
+        }
+        break;
+    case NIE_VECTOR:
+        for (NodeID i = 0; i < numNodes(); i++) {
+            const size_t base = i * effectiveInputRows;
+            for (size_t row = 0; row < inputRows; row++) {
+                matmulPerformIOAddition<NodeValueType, IOType, useBitVector>(
+                    nodeValues.data(), base + row, initMatrix, row);
+            }
+        }
+        break;
+    case NIE_MATRIX:
+        for (NodeID i = 0; i < numNodes(); i++) {
+            const size_t base = i * effectiveInputRows;
+            for (size_t row = 0; row < inputRows; row++) {
+                const size_t rowStart = row * numNodes();
+                matmulPerformIOAddition<NodeValueType, IOType, useBitVector>(
+                    nodeValues.data(), base + row, initMatrix, rowStart + i);
+            }
+        }
+        break;
+    case NIE_ZERO:
+    default: break;
+    }
+
     if (direction == DIRECTION_DOWN) {
         for (const auto& nodeIdAndMutId : this->getNodeMutationPairs()) {
             const NodeID& nodeId = nodeIdAndMutId.first;
