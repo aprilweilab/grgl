@@ -34,41 +34,48 @@ namespace grgl {
 using DigestToNode = std::unordered_map<HashDigest, NodeID>;
 
 /**
- * Constructs a map from hash(reached-samples) to nodeId, for fast lookup of exactly
- * matching nodes.
+ * Visitor that visits all nodes, hashes their child nodeIDs, and stores a map
+ * from that (unique) hash to the (parent) nodeId.
  */
-class TopoSampleHashVisitor : public TopoSampleSetVisitor {
+class NodeHasherVisitor : public GRGVisitor {
 public:
-    TopoSampleHashVisitor() = default;
-
-    virtual void processNode(const GRGPtr& grg, const HashDigest& digest, NodeID nodeId) = 0;
-
-    void processNode(const GRGPtr& grg, const NodeIDList& samplesBeneath, NodeID nodeId) override {
-        const HashDigest hash = !grg->isSample(nodeId) ? hashNodeSet(samplesBeneath) : "";
-        processNode(grg, hash, nodeId);
-    }
-};
-
-/**
- * Visitor that visits all nodes, hashes their reachable sample sets, and stores a map
- * from that (unique) hash to the nodeId.
- */
-class NodeHasherVisitor : public TopoSampleHashVisitor {
-public:
-    void processNode(const GRGPtr& grg, const HashDigest& digest, const NodeID nodeId) override {
-        if (!grg->isSample(nodeId)) {
-            m_hashToNodeId.emplace(digest, nodeId);
+    bool visit(const grgl::GRGPtr& grg,
+               const grgl::NodeID nodeId,
+               const grgl::TraversalDirection direction,
+               const grgl::DfsPass dfsPass) override {
+        if (dfsPass == DfsPass::DFS_PASS_NONE) {
+            release_assert(direction == TraversalDirection::DIRECTION_UP);
+        } else if (dfsPass == DfsPass::DFS_PASS_BACK_AGAIN) {
+            release_assert(direction == TraversalDirection::DIRECTION_DOWN);
+        } else {
+            return true;
         }
+        // Sample IDs must match between merged GRGs, no reason to hash them.
+        if (!grg->isSample(nodeId)) {
+            NodeIDList children = grg->getDownEdges(nodeId);
+            if (!grg->edgesAreOrdered()) {
+                std::sort(children.begin(), children.end());
+            }
+            HashDigest digest = hashNodeSet(children);
+            const auto inserted = m_hashToNodeId.emplace(std::move(digest), nodeId);
+            // Duplicates are possible, and ok. It just means two nodes have the exact same
+            // children, and we just pick one arbitrarily to use.
+            if (!inserted.second) {
+                m_duplicates++;
+            }
+        }
+        return true;
     }
 
     DigestToNode m_hashToNodeId;
+    size_t m_duplicates{};
 };
 
 /**
  * Visitor that visits all nodes, hashes their reachable sample sets, and tries to map
  * them to another GRG that has already had its nodes hashed.
  */
-class NodeMapperVisitor : public TopoSampleHashVisitor {
+class NodeMapperVisitor : public GRGVisitor {
 public:
     NodeMapperVisitor(const GRGPtr& sourceGrg,
                       MutableGRG& targetGrg,
@@ -80,15 +87,53 @@ public:
         m_nodeIdToTargetNodeId.resize(sourceGrg->numNodes(), INVALID_NODE_ID);
     }
 
-    void processNode(const GRGPtr& grg, const HashDigest& digest, const NodeID nodeId) override {
+    // Returns true if the result is in sorted order, false otherwise.
+    bool convertToTargets(NodeIDList& nodeList) {
+        bool isSorted = true;
+        NodeID prevValue = 0;
+        for (size_t i = 0; i < nodeList.size(); i++) {
+            nodeList[i] = m_nodeIdToTargetNodeId[nodeList[i]];
+            release_assert(INVALID_NODE_ID != nodeList[i]);
+            if (nodeList[i] < prevValue) {
+                isSorted = false;
+            }
+            prevValue = nodeList[i];
+        }
+        return isSorted;
+    }
+
+    bool visit(const grgl::GRGPtr& grg,
+               const grgl::NodeID nodeId,
+               const grgl::TraversalDirection direction,
+               const grgl::DfsPass dfsPass) override {
+        if (dfsPass == DfsPass::DFS_PASS_NONE) {
+            release_assert(direction == TraversalDirection::DIRECTION_UP);
+        } else if (dfsPass == DfsPass::DFS_PASS_BACK_AGAIN) {
+            release_assert(direction == TraversalDirection::DIRECTION_DOWN);
+        } else {
+            return true;
+        }
+        // Previousl we merged based on covered samples, now we merge based on (immediate) children nodes.
+        // The difference is that we previously merged more nodes, but now we maintain more hierarchy. In
+        //
+        // There may be post-processing steps we can do later to "cleanup" duplication that involves hierarchy
+        // under one node, and no hierarchy under the other, but both cover the same sample set.
         if (grg->isSample(nodeId)) {
             for (const auto mutId : grg->getMutationsForNode(nodeId)) {
                 const auto& mutation = grg->getMutationById(mutId);
                 m_targetGrg.addMutation(mutation, nodeId);
             }
+            m_nodeIdToTargetNodeId[nodeId] = nodeId;
             m_mappedExactly++;
-            return;
+            return true;
         }
+        NodeIDList children = grg->getDownEdges(nodeId);
+        const bool alreadySorted = convertToTargets(children);
+        if (!alreadySorted) {
+            std::sort(children.begin(), children.end());
+        }
+        const HashDigest digest = hashNodeSet(children);
+
         // See if this node maps exactly to a node in the target GRG
         const auto mappedNodeIt = m_targetHashToNodeId.find(digest);
         if (m_combineNodes && mappedNodeIt != m_targetHashToNodeId.end()) {
@@ -106,22 +151,15 @@ public:
             const NodeID targetNodeId = m_targetGrg.makeNode();
             release_assert(nodeId < m_nodeIdToTargetNodeId.size());
             m_nodeIdToTargetNodeId[nodeId] = targetNodeId;
-            m_targetHashToNodeId[digest] = targetNodeId;
+            const auto inserted = m_targetHashToNodeId.emplace(digest, targetNodeId);
+            release_assert(inserted.second); // Every hash must be unique.
             // Copy node data.
             m_targetGrg.setNumIndividualCoals(targetNodeId, grg->getNumIndividualCoals(nodeId));
 
             // And reconnect all the child nodes appropriately. We only do child because
             // we are doing a bottom-up topological graph search.
-            for (const auto& childId : grg->getDownEdges(nodeId)) {
-                if (grg->isSample(childId)) {
-                    m_targetGrg.connect(targetNodeId, childId);
-                } else {
-                    // The topological order assures that we _must_ have a mapping already.
-                    const auto targetChildId = m_nodeIdToTargetNodeId[childId];
-                    release_assert(INVALID_NODE_ID != targetChildId);
-
-                    m_targetGrg.connect(targetNodeId, targetChildId);
-                }
+            for (const auto& childId : children) {
+                m_targetGrg.connect(targetNodeId, childId);
             }
 
             // Copy all the mutations for this node to the target one.
@@ -130,6 +168,7 @@ public:
                 m_targetGrg.addMutation(mutation, targetNodeId);
             }
         }
+        return true;
     }
 
     size_t m_mappedExactly{};
@@ -146,7 +185,6 @@ void MutableGRG::merge(const std::list<std::string>& otherGrgFiles, bool combine
     NodeHasherVisitor hashVisitor;
     if (combineNodes) {
         this->visitDfs(hashVisitor, TraversalDirection::DIRECTION_DOWN, this->getRootNodes());
-        hashVisitor.clearSampleSets();
     }
     DigestToNode& hashToNodeId = hashVisitor.m_hashToNodeId;
 
@@ -171,6 +209,7 @@ void MutableGRG::merge(const std::list<std::string>& otherGrgFiles, bool combine
             const auto& mutation = otherGrg->getMutationById(mutId);
             this->addMutation(mutation, INVALID_NODE_ID);
         }
+        // The range has to be contiguous, even if there is a "gap" between the two merged GRGs.
         const auto& otherRange = otherGrg->getSpecifiedBPRange();
         if (otherRange.first < this->m_specifiedRange.first) {
             this->m_specifiedRange.first = otherRange.first;
