@@ -54,7 +54,7 @@ NodeIDList HaplotypeIndex::getMostSimilarNodes(const NodeID nodeId, const bool c
     size_t nearestDistance = 0;
     auto bkTreeNodes = m_bkTree.lookup(nodeId, nearestDistance, m_comparisons, collectAll);
     for (auto& node : bkTreeNodes) {
-        node->moveElements(result);
+        m_bkTree.deleteNode(node, result);
     }
     for (auto it = result.begin(); it != result.end();) {
         if (*it == nodeId) {
@@ -62,6 +62,14 @@ NodeIDList HaplotypeIndex::getMostSimilarNodes(const NodeID nodeId, const bool c
         } else {
             ++it;
         }
+    }
+
+    if (m_rebuildProportion < 1.0 && m_bkTree.deletedProportion() >= m_rebuildProportion) {
+        LeanBKTree<NodeID> newBkTree(m_bkTree.m_distFunc);
+        for (const NodeID nodeId : m_bkTree.removeAllElements()) {
+            newBkTree.insert(nodeId, m_comparisons);
+        }
+        m_bkTree = std::move(newBkTree);
     }
     return result;
 }

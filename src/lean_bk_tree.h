@@ -17,6 +17,7 @@
 #ifndef GRGL_LEAN_BK_TREE_H
 #define GRGL_LEAN_BK_TREE_H
 
+#include "util.h"
 #include <cstdlib>
 #include <functional>
 #include <limits>
@@ -35,13 +36,15 @@ public:
         : m_elements({element}),
           m_isDeleted(false) {}
 
-    void addElement(ElementType element) {
+    // Return True if the node was previously deleted.
+    bool addElement(ElementType element) {
         if (m_isDeleted) {
             m_elements = {std::move(element)};
             m_isDeleted = false;
-        } else {
-            m_elements.push_back(std::move(element));
+            return true;
         }
+        m_elements.push_back(std::move(element));
+        return false;
     }
 
     template <typename Container> void moveElements(Container& result) {
@@ -74,6 +77,8 @@ public:
     NodePointer insert(const ElementType& element, size_t& comparisons) {
         if (!m_rootNode) {
             m_rootNode = std::make_shared<LeanBKTreeNode<ElementType>>(element);
+            release_assert(m_totalNodes == 0);
+            m_totalNodes = 1;
             return m_rootNode;
         }
         NodePointer currentNode = m_rootNode;
@@ -81,7 +86,10 @@ public:
             comparisons++;
             const size_t dist = m_distFunc(currentNode->m_elements[0], element);
             if (dist == 0) {
-                currentNode->addElement(element);
+                const bool wasDeleted = currentNode->addElement(element);
+                if (wasDeleted) {
+                    m_deletedNodes--;
+                }
                 return currentNode;
             }
             NodePointer nextNodePtr;
@@ -93,6 +101,7 @@ public:
             if (!nextNodePtr) {
                 auto newNode = std::make_shared<LeanBKTreeNode<ElementType>>(element);
                 currentNode->m_children.emplace_back(dist, newNode);
+                m_totalNodes++;
                 return newNode;
             }
             currentNode = nextNodePtr;
@@ -119,6 +128,7 @@ public:
             if (!ignoreThisNode && node->m_elements.size() == 1 && node->m_elements[0] == queryElement) {
                 ignoreThisNode = true;
                 node->m_isDeleted = true;
+                m_deletedNodes++;
             }
             if (!ignoreThisNode) {
                 if (dist < distBest) {
@@ -140,9 +150,48 @@ public:
         return results;
     }
 
+    template <typename Container>
+    void deleteNode(NodePointer node, Container& result) {
+        release_assert(!node->m_isDeleted);
+        node->moveElements(result);
+        m_deletedNodes++;
+    }
+
+    void dumpStats() const {
+        std::cout << "Nodes: " << m_totalNodes << "\n";
+        std::cout << "Deleted: " << m_deletedNodes << "\n";
+        std::cout << "Proportion: " << (double)m_deletedNodes/(double)m_totalNodes << "\n";
+    }
+
+    double deletedProportion() const {
+        return (double)m_deletedNodes/(double)m_totalNodes;
+    }
+
+    std::vector<ElementType> removeAllElements() {
+        if (!m_rootNode) {
+            return {};
+        }
+        std::vector<ElementType> result;
+        std::list<NodePointer> workingList = {m_rootNode};
+        while (!workingList.empty()) {
+            auto node = workingList.back();
+            workingList.pop_back();
+            if (!node->m_isDeleted) {
+                node->moveElements(result);
+                m_deletedNodes++;
+            }
+            for (const auto& pair : node->m_children) {
+                workingList.push_back(pair.second);
+            }
+        }
+        return std::move(result);
+    }
+
+    std::function<size_t(const ElementType&, const ElementType&)> m_distFunc;
 private:
     NodePointer m_rootNode{};
-    std::function<size_t(const ElementType&, const ElementType&)> m_distFunc;
+    size_t m_totalNodes{};
+    size_t m_deletedNodes{};
 };
 
 } // namespace grgl
