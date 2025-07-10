@@ -43,7 +43,9 @@ static NodeIDList addGrgShapeFromHashing(const MutableGRGPtr& grg,
     auto compareNodeIds = [&](const NodeID& node1, const NodeID& node2) {
         return bitwiseHamming(nodeHashes.at(node1), nodeHashes.at(node2));
     };
-    HaplotypeIndex hashIndex(compareNodeIds);
+    // Rebuild the nearest neighbor index when it reached 25% deleted.
+    constexpr double rebuildProportion = 0.25;
+    HaplotypeIndex hashIndex(compareNodeIds, rebuildProportion);
 
     NodeIDSet covered;
     NodeIDList levelNodes;

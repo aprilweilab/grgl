@@ -41,8 +41,10 @@ using NodeToHapVect = std::vector<HaplotypeVector>;
  */
 class HaplotypeIndex {
 public:
-    explicit HaplotypeIndex(std::function<size_t(const NodeID&, const NodeID&)> distFunc)
-        : m_bkTree(std::move(distFunc)) {}
+    explicit HaplotypeIndex(std::function<size_t(const NodeID&, const NodeID&)> distFunc,
+                            const double rebuildProportion = 2.0)
+        : m_bkTree(std::move(distFunc))
+        , m_rebuildProportion(rebuildProportion) {}
 
     virtual ~HaplotypeIndex() = default;
 
@@ -70,10 +72,12 @@ public:
     void emitStats() const {
         std::cout << " -- Index Stats --" << std::endl;
         std::cout << "  -> Comparisons: " << m_comparisons << std::endl;
+        m_bkTree.dumpStats();
     }
 
 private:
     LeanBKTree<NodeID> m_bkTree;
+    const double m_rebuildProportion;
     // Keep track of how many comparisons we do.
     size_t m_comparisons{};
 };
