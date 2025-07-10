@@ -249,7 +249,11 @@ IGDMutationIterator::IGDMutationIterator(
         const auto range = m_igd->getGenomeRange();
         m_genomeRange = m_genomeRange.denormalized(range.first, range.second);
     }
-    reset_specific();
+    if (m_genomeRange.isUnspecified()) {
+        m_startVariant = 0;
+    } else {
+        m_startVariant = m_igd->lowerBoundPosition((size_t)std::ceil(m_genomeRange.start()));
+    }
 }
 
 void IGDMutationIterator::getMetadata(size_t& ploidy, size_t& numIndividuals, bool& isPhased) {
@@ -260,8 +264,7 @@ void IGDMutationIterator::getMetadata(size_t& ploidy, size_t& numIndividuals, bo
 
 size_t IGDMutationIterator::countMutations() const {
     size_t mutations = 0;
-    const size_t start = m_genomeRange.isUnspecified() ? 0 : m_igd->lowerBoundPosition((size_t)m_genomeRange.start());
-    for (size_t i = start; i < m_igd->numVariants(); i++) {
+    for (size_t i = m_startVariant; i < m_igd->numVariants(); i++) {
         if (m_genomeRange.contains((double)m_igd->getPosition(i))) {
             mutations++;
         } else {
@@ -274,6 +277,7 @@ size_t IGDMutationIterator::countMutations() const {
 std::vector<std::string> IGDMutationIterator::getIndividualIds() { return std::move(m_igd->getIndividualIds()); }
 
 void IGDMutationIterator::buffer_next(size_t& totalSamples) {
+    release_assert(m_currentVariant >= m_startVariant);
     totalSamples = m_igd->numSamples();
 
     // If we have an alt allele with > 50% occurrence, make it the new reference allele.
@@ -307,13 +311,7 @@ void IGDMutationIterator::buffer_next(size_t& totalSamples) {
     }
 }
 
-void IGDMutationIterator::reset_specific() {
-    if (m_genomeRange.isUnspecified()) {
-        m_currentVariant = 0;
-    } else {
-        m_currentVariant = m_igd->lowerBoundPosition((size_t)m_genomeRange.start());
-    }
-}
+void IGDMutationIterator::reset_specific() { m_currentVariant = m_startVariant; }
 
 #if BGEN_ENABLED
 

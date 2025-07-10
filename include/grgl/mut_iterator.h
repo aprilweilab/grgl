@@ -146,6 +146,7 @@ protected:
 
 private:
     std::unique_ptr<picovcf::IGDData> m_igd;
+    size_t m_startVariant;
     size_t m_currentVariant;
 };
 
