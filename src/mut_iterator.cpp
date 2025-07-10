@@ -249,6 +249,7 @@ IGDMutationIterator::IGDMutationIterator(
         const auto range = m_igd->getGenomeRange();
         m_genomeRange = m_genomeRange.denormalized(range.first, range.second);
     }
+    reset_specific();
 }
 
 void IGDMutationIterator::getMetadata(size_t& ploidy, size_t& numIndividuals, bool& isPhased) {
@@ -259,9 +260,12 @@ void IGDMutationIterator::getMetadata(size_t& ploidy, size_t& numIndividuals, bo
 
 size_t IGDMutationIterator::countMutations() const {
     size_t mutations = 0;
-    for (size_t i = 0; i < m_igd->numVariants(); i++) {
+    const size_t start = m_genomeRange.isUnspecified() ? 0 : m_igd->lowerBoundPosition((size_t)m_genomeRange.start());
+    for (size_t i = start; i < m_igd->numVariants(); i++) {
         if (m_genomeRange.contains((double)m_igd->getPosition(i))) {
             mutations++;
+        } else {
+            break;
         }
     }
     return mutations;
@@ -298,11 +302,18 @@ void IGDMutationIterator::buffer_next(size_t& totalSamples) {
             }
         } else {
             m_currentVariant++;
+            break;
         }
     }
 }
 
-void IGDMutationIterator::reset_specific() { m_currentVariant = 0; }
+void IGDMutationIterator::reset_specific() {
+    if (m_genomeRange.isUnspecified()) {
+        m_currentVariant = 0;
+    } else {
+        m_currentVariant = m_igd->lowerBoundPosition((size_t)m_genomeRange.start());
+    }
+}
 
 #if BGEN_ENABLED
 
