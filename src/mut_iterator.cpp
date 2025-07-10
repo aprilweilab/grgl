@@ -254,6 +254,7 @@ IGDMutationIterator::IGDMutationIterator(
     } else {
         m_startVariant = m_igd->lowerBoundPosition((size_t)std::ceil(m_genomeRange.start()));
     }
+    m_currentVariant = m_startVariant;
 }
 
 void IGDMutationIterator::getMetadata(size_t& ploidy, size_t& numIndividuals, bool& isPhased) {
