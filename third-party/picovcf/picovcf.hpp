@@ -11,6 +11,7 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <memory>
 #include <ostream>
 #include <set>
@@ -188,6 +189,62 @@ inline std::string picovcf_getValue(const std::string& line, const size_t start)
     return {};
 }
 
+/**
+ * Parse a structured metadata value, like INFO=<key=value,key="value">
+ *
+ * @param[in] metaValue The string to parse, which is the value from a getMetaInfo() map.
+ * @return A map from key to value for the parsed string.
+ * @throw MalformedFile is thrown on parsing errors.
+ */
+inline std::map<std::string, std::string> picovcf_parse_structured_meta(const std::string& metaValue) {
+    PICOVCF_ASSERT_OR_MALFORMED(metaValue.size() >= 2, "Maformed structured metadata: " << metaValue);
+    PICOVCF_ASSERT_OR_MALFORMED(metaValue[0] == '<', "Maformed structured metadata: " << metaValue);
+    PICOVCF_ASSERT_OR_MALFORMED(metaValue[metaValue.size() - 1] == '>', "Maformed structured metadata: " << metaValue);
+
+    std::map<std::string, std::string> result;
+
+    // We stop parsing the current value when we see the following character.
+    const size_t end = metaValue.size() - 1;
+    bool inQuotes = false;
+    std::string key;
+    size_t tokStart = 1;
+    size_t stripEnds = 0; // How many characters to strip off the ends.
+    for (size_t i = 1; i < end; i++) {
+        switch (metaValue[i]) {
+        case '"':
+            if (inQuotes) {
+                stripEnds = 1;
+                inQuotes = false;
+            } else {
+                inQuotes = true;
+            }
+            break;
+        case '=':
+            if (!inQuotes) {
+                key = metaValue.substr(tokStart + stripEnds, i - tokStart - stripEnds);
+                tokStart = i + 1;
+            }
+            break;
+        case ',':
+            if (!inQuotes) {
+                PICOVCF_ASSERT_OR_MALFORMED(!key.empty(), "Malformed metadata key/value pair. Key is empty.");
+                std::string value = metaValue.substr(tokStart + stripEnds, i - tokStart - 2 * stripEnds);
+                tokStart = i + 1;
+                result.emplace(std::move(key), std::move(value));
+                key.clear();
+                stripEnds = 0;
+            }
+            break;
+        }
+    }
+    PICOVCF_ASSERT_OR_MALFORMED(!inQuotes, "Unterminated quotation mark in metadata.");
+    if (!key.empty()) {
+        std::string value = metaValue.substr(tokStart + stripEnds, end - tokStart - 2 * stripEnds);
+        result.emplace(std::move(key), std::move(value));
+    }
+    return std::move(result);
+}
+
 using FileOffset = std::pair<size_t, size_t>;
 
 /**
@@ -252,6 +309,11 @@ public:
                 assert(m_position < m_buffer.size());
                 found = true;
             }
+        }
+        // Trim carriage returns. Windows ends lines with "\r\n" and Unix is just "\n",
+        // so VCF files generated on Windows can have a "\r" at the end of our line.
+        while (lineBytes > 0 && buffer[lineBytes - 1] == '\r') {
+            lineBytes--;
         }
         buffer.resize(lineBytes);
         return lineBytes;
@@ -475,7 +537,7 @@ public:
         if (m_currentPosition == std::string::npos) {
             PICOVCF_THROW_ERROR(ApiMisuse, "Iterator is at end of individuals");
         }
-        size_t stopAt = m_currentLine.find_first_of(":\t", m_currentPosition);
+        size_t stopAt = m_currentLine.find_first_of(":\t\r", m_currentPosition);
         size_t length = 0;
         if (stopAt == std::string::npos) {
             length = m_currentLine.size() - m_currentPosition;
@@ -554,7 +616,7 @@ private:
             return MISSING_VALUE;
         }
         char* endPtr = nullptr;
-        VariantT result = static_cast<uint32_t>(std::strtoull(str.c_str(), &endPtr, 10));
+        const VariantT result = static_cast<VariantT>(std::strtoull(str.c_str(), &endPtr, 10));
         if (endPtr != (str.c_str() + str.size())) {
             PICOVCF_THROW_ERROR(MalformedFile, "Invalid allele value: " << str);
         }
@@ -586,34 +648,6 @@ struct VCFVariantInfo {
 };
 
 /**
- * A subset of the VCF that has been rotated to go from sample (haplotype index)
- * to variant/mutation, excluding samples that map to the reference allele.
- *
- * VCF is ordered by variant, making it easy to go from variant/mutation to a
- * list of individuals/samples affected. This datastructure captures the inverse
- * relationship: individuals/samples mapped to the variant/mutation.
- *
- * This data structure probably doesn't make much sense for diploid unphased
- * datasets, since it is rotating per-sample (however, the resulting data could
- * still be useful, if you iterate the samples in pairs and collect all
- * mutations from both samples per pair).
- */
-struct VCFRotatedWindow {
-    /** The variants associated with this window */
-    std::vector<VCFVariantInfo> parsedVariants;
-    /** The 0-based index of the first individual in the window */
-    size_t firstIndividual;
-    /** The map from individual (index 0 is firstIndividual) to sets
-     * of indexes into the parseVariants vector */
-    std::vector<std::set<MutationPair>> sampleToMutation;
-    /** The file position _after_ the last variant that was parsed - can be used
-     * as an "iterator" */
-    FileOffset posAfterLastVariant;
-    /** Is the data diploid */
-    bool isDiploid;
-};
-
-/**
  * A class that lazily interprets the data for a single variant.
  *
  * This does not "parse" the whole row associated with the variant, it locates
@@ -635,20 +669,17 @@ public:
      * chromosome, position, id, ref allele, and alt allele fields. Set to false
      * to get the additional fields.
      */
-    inline VCFVariantInfo parseToVariantInfo(bool basicInfoOnly = true) {
-        VCFVariantInfo result = {this->getChrom(),
-                                 this->getPosition(),
-                                 this->getID(),
-                                 this->getRefAllele(),
-                                 this->getAltAlleles(),
-                                 std::numeric_limits<double>::quiet_NaN()};
+    inline VCFVariantInfo parseToVariantInfo(bool basicInfoOnly = true) const {
+        static const double qNaN = std::numeric_limits<double>::quiet_NaN();
+        VCFVariantInfo result = {
+            this->getChrom(), this->getPosition(), this->getID(), this->getRefAllele(), this->getAltAlleles(), qNaN};
         if (!basicInfoOnly) {
             result.quality = this->getQuality();
             result.filter = this->getFilter();
             result.information = this->getInfo();
             result.format = this->getFormat();
         }
-        return result;
+        return std::move(result);
     }
 
     /**
@@ -666,7 +697,7 @@ public:
         assert(posSize > 0);
         std::string posStr = m_currentLine.substr(m_nonGTPositions[POS_CHROM_END] + 1, posSize - 1);
         char* endPtr = nullptr;
-        auto result = static_cast<size_t>(strtoull(posStr.c_str(), &endPtr, 10));
+        const auto result = static_cast<size_t>(strtoull(posStr.c_str(), &endPtr, 10));
         if (endPtr != (posStr.c_str() + posStr.size())) {
             PICOVCF_THROW_ERROR(MalformedFile, "Invalid position (cannot parse): " << posStr);
         }
@@ -710,7 +741,11 @@ public:
      * @returns The numeric value for the quality.
      */
     double getQuality() const {
+        static const double qNaN = std::numeric_limits<double>::quiet_NaN();
         std::string qualString = stringForPosition(POS_QUAL_END);
+        if (qualString == ".") {
+            return qNaN;
+        }
         char* endPtr = nullptr;
         double result = strtod(qualString.c_str(), &endPtr);
         if (endPtr != (qualString.c_str() + qualString.size())) {
@@ -923,16 +958,36 @@ public:
     std::vector<std::string>& getIndividualLabels() { return m_individualLabels; }
 
     /**
-     * Get a metadata value from the VCF header rows.
+     * Get all metadata values for a given key, from the VCF header rows.
      * @param[in] key The metadata key name.
      * @return the string associated with the given key, or empty string.
      */
-    std::string getMetaInfo(const char* const key) const {
-        const auto metaIt = m_metaInformation.find(key);
-        if (metaIt != m_metaInformation.end()) {
-            return metaIt->second;
+    std::vector<std::string> getAllMetaInfo(const char* const key) const {
+        std::vector<std::string> result;
+        const auto metaIt = m_metaInformation.equal_range(key);
+        for (auto it = metaIt.first; it != metaIt.second; it++) {
+            result.emplace_back(it->second);
         }
-        return {};
+        return std::move(result);
+    }
+
+    /**
+     * Get a single metadata value for a given key, from the VCF header rows.
+     * Fails if there is more than one value for the key.
+     *
+     * @param[in] key The metadata key name.
+     * @return the string associated with the given key, or empty string.
+     * @throw MalformedFile exception thrown if the key does
+     */
+    std::string getMetaInfo(const char* const key) const {
+        auto metaList = getAllMetaInfo(key);
+        if (metaList.empty()) {
+            PICOVCF_THROW_ERROR(ApiMisuse, "No metadata for key " << key);
+        }
+        if (metaList.size() > 1) {
+            PICOVCF_THROW_ERROR(ApiMisuse, "More than one metadata value for key " << key);
+        }
+        return std::move(metaList[0]);
     }
 
     /**
@@ -980,89 +1035,6 @@ public:
      */
     VCFVariantView& currentVariant() { return m_currentVariant; }
 
-    /**
-     * Get a VCFRotatedWindow for the given rectange defined by individualRange
-     * and genomeRange.
-     *
-     * The most efficient way to use this function is from left-to-right
-     * (individuals) first, and then top-to-bottom (variants). E.g. if you have a
-     * VCF laid out like this: xyzw XYZW Then ask for the windows in this order:
-     * x,y,z,w,X,Y,Z,W. This allows use of posAfterLastVariant for efficiency.
-     *
-     * Assumptions:
-     * 1. The VCF rows are ordered by genome position (ascending).
-     * 2. The genotype data is uniform in ploidy and phased-ness.
-     *
-     * @param[in] individualRange The range [start, end) of individual indexes to
-     * include. For example, [0, 10) will only include individuals 0-9.
-     * @param[in] genomeRange The range [start, end) of genome positions to
-     * include. For example, [100, 1000) will include any variants that have
-     * position 100-999.
-     */
-    void getRotatedWindow(RangePair individualRange,
-                          RangePair genomeRange,
-                          VCFRotatedWindow& result,
-                          FileOffset posAfterLastVariant = {0, 0}) {
-        const size_t totalIndividuals = this->numIndividuals();
-        if (individualRange.second <= individualRange.first || individualRange.first >= totalIndividuals) {
-            PICOVCF_THROW_ERROR(ApiMisuse, "Invalid individualRange argument");
-        }
-        if (genomeRange.second <= genomeRange.first) {
-            PICOVCF_THROW_ERROR(ApiMisuse, "Invalid genomeRange argument");
-        }
-        if (posAfterLastVariant != FileOffset(0, 0)) {
-            this->setFilePosition(posAfterLastVariant);
-        } else {
-            this->seekBeforeVariants();
-        }
-        auto prevFilePosition = this->getFilePosition();
-        const size_t numIndividuals =
-            std::min<size_t>(totalIndividuals, individualRange.second) - individualRange.first;
-        result.firstIndividual = individualRange.first;
-        result.sampleToMutation.clear();
-        result.parsedVariants.clear();
-        result.isDiploid = false;
-        while (this->hasNextVariant()) {
-            prevFilePosition = this->getFilePosition();
-            this->nextVariant();
-            VCFVariantView& variant = this->currentVariant();
-            const size_t currentVariantIndex = result.parsedVariants.size();
-            const double position = variant.getPosition();
-            if (position >= genomeRange.first && position < genomeRange.second) {
-                IndividualIteratorGT iterator = variant.getIndividualIterator();
-                // Scan for the start position.
-                for (size_t i = 0; i < individualRange.first && iterator.hasNext(); i++, iterator.next())
-                    ;
-
-                for (size_t i = 0; i < (individualRange.second - individualRange.first) && iterator.hasNext();
-                     i++, iterator.next()) {
-                    VariantT allele1 = 0, allele2 = 0;
-                    iterator.getAlleles(allele1, allele2, /*moveNext=*/false);
-                    if (result.sampleToMutation.empty()) {
-                        result.isDiploid = (allele2 != NOT_DIPLOID);
-                        result.sampleToMutation.resize(numIndividuals * (result.isDiploid ? 2 : 1));
-                    }
-                    const size_t multiplier = (result.isDiploid ? 2 : 1);
-                    if (isMutation(allele1)) {
-                        result.sampleToMutation.at(multiplier * i).emplace(currentVariantIndex, allele1);
-                    }
-                    // TODO should probably also check for consistent phasing.
-                    if ((allele2 != NOT_DIPLOID) != result.isDiploid) {
-                        PICOVCF_THROW_ERROR(ApiMisuse, "getRotatedWindow requires consistent ploidy");
-                    }
-                    if (isMutation(allele2)) {
-                        result.sampleToMutation.at((multiplier * i) + 1).emplace(currentVariantIndex, allele2);
-                    }
-                }
-                const VCFVariantInfo variantParsed = variant.parseToVariantInfo();
-                result.parsedVariants.push_back(std::move(variantParsed));
-            } else if (position >= genomeRange.second || !result.parsedVariants.empty()) {
-                break;
-            }
-        }
-        result.posAfterLastVariant = prevFilePosition;
-    }
-
 private:
     void parseHeader() {
         FileOffset prevPosition = {0, 0};
@@ -1077,7 +1049,7 @@ private:
                     if (key.empty() || value.empty()) {
                         PICOVCF_THROW_ERROR(MalformedFile, "Invalid key/value pair at " << m_infile->tell().first);
                     }
-                    m_metaInformation.emplace(key, value);
+                    m_metaInformation.emplace(std::move(key), std::move(value));
                 } else {
                     std::vector<std::string> headerColumns;
                     picovcf_split(lineBuffer, '\t', headerColumns);
@@ -1139,7 +1111,7 @@ private:
     // Starting position (offset) in the file for the variants information
     FileOffset m_posVariants;
     // Metadata dictionary
-    std::unordered_map<std::string, std::string> m_metaInformation;
+    std::multimap<std::string, std::string> m_metaInformation;
     // Labels for individuals
     std::vector<std::string> m_individualLabels;
 
@@ -1169,6 +1141,11 @@ static inline std::string readString(const uint64_t version, std::istream& inStr
     inStream.read(const_cast<char*>(strValue.c_str()), strLength);
     return std::move(strValue);
 }
+
+enum PloidyHandling {
+    PH_STRICT = 0,        /*!< Strict ploidy handling: retain ploidy, only allow a single ploidy for all data. */
+    PH_FORCE_DIPLOID = 1, /*!< Force all variants to diploid, making both alleles identical for haploid input. */
+};
 
 /** Vector of sample indexes (IDs) */
 using IGDSampleList = std::vector<SampleT>;
@@ -1546,7 +1523,7 @@ public:
             const SampleT numSamples = this->numSamples();
             const SampleT readAmount = picovcf_div_ceiling<SampleT, 8>(numSamples);
             PICOVCF_RELEASE_ASSERT(readAmount > 0);
-            std::unique_ptr<uint8_t> buffer(new uint8_t[readAmount]);
+            std::unique_ptr<uint8_t[]> buffer(new uint8_t[readAmount]);
             if (buffer) {
                 m_infile.read(reinterpret_cast<char*>(buffer.get()), readAmount);
                 PICOVCF_GOOD_OR_API_MISUSE(m_infile);
@@ -1596,6 +1573,33 @@ public:
         return std::move(result);
     }
 
+    /**
+     * Return the first variant index with position that is greater than or equal to the given position.
+     * Will return numVariants() if the given position is greater than all positions in the IGD.
+     *
+     * @param[in] position The base-pair position to search for.
+     * @return The first variant index with position greater-than-or-equal-to the given position.
+     */
+    size_t lowerBoundPosition(const size_t position) {
+        ssize_t low = 0;
+        ssize_t high = numVariants() - 1;
+        ssize_t mid = high;
+        while (low <= high) {
+            mid = low + ((high - low) / 2);
+            PICOVCF_RELEASE_ASSERT(mid <= high);
+            const uint64_t mid_pos = getPosition(mid);
+            if (mid_pos < position) {
+                low = mid + 1;
+            } else if (mid_pos > position) {
+                high = mid - 1;
+            } else {
+                return mid;
+            }
+        }
+        PICOVCF_RELEASE_ASSERT(low >= 0);
+        return static_cast<size_t>(low);
+    }
+
 private:
     size_t getVariantIndexOffset(VariantT variantIndex) {
         return m_header.filePosIndex + (variantIndex * sizeof(IndexEntry));
@@ -1611,7 +1615,7 @@ private:
         m_source = readString(m_header.version, m_infile);
         m_description = readString(m_header.version, m_infile);
         m_beforeFirstVariant = m_infile.tellg();
-        PICOVCF_ASSERT_OR_MALFORMED(m_header.filePosVariants > m_beforeFirstVariant,
+        PICOVCF_ASSERT_OR_MALFORMED(m_header.filePosVariants >= m_beforeFirstVariant,
                                     "Invalid variant info position " << m_header.filePosVariants);
         PICOVCF_ASSERT_OR_MALFORMED(m_header.ploidy <= MAX_PLOIDY,
                                     "Invalid ploidy " << m_header.ploidy << " is greater than maximum of "
@@ -1911,6 +1915,13 @@ private:
  * default).
  * @param[in] forceUnphased [Optional] When true, force the result to be unphased
  * even if the input is phased (or mixed phased-ness).
+ * @param[in] variantCallback [Optional] When non-null, invoke this callback on
+ * every variant (row) that is emitted to the IGD file. The arguments to the callback
+ * are (const VCFFile&, const VCFVariantView& variant, void* context), where the variant
+ * view and VCF file can be used to get metadata, and context is a user-provided pointer
+ * (see callbackContext).
+ * @param[in] callbackContext [Optional] Pointer to an object that will be passed to
+ * variantCallback.
  */
 inline void vcfToIGD(const std::string& vcfFilename,
                      const std::string& outFilename,
@@ -1918,7 +1929,11 @@ inline void vcfToIGD(const std::string& vcfFilename,
                      bool verbose = false,
                      bool emitIndividualIds = false,
                      bool emitVariantIds = false,
-                     bool forceUnphased = false) {
+                     bool forceUnphased = false,
+                     const PloidyHandling handlePloidy = PH_STRICT,
+                     bool dropUnphased = false,
+                     void (*variantCallback)(const VCFFile&, const VCFVariantView&, void*) = nullptr,
+                     void* callbackContext = nullptr) {
     VCFFile vcf(vcfFilename);
     vcf.seekBeforeVariants();
     PICOVCF_ASSERT_OR_MALFORMED(vcf.hasNextVariant(), "VCF file has no variants");
@@ -1930,8 +1945,10 @@ inline void vcfToIGD(const std::string& vcfFilename,
     PICOVCF_ASSERT_OR_MALFORMED(firstIndividual.hasNext(), "VCF file has no genotype data");
     VariantT allele1 = 0;
     VariantT allele2 = 0;
-    const bool isPhased = forceUnphased || firstIndividual.getAlleles(allele1, allele2, /*moveNext=*/false);
-    const uint64_t ploidy = (allele2 == NOT_DIPLOID) ? 1 : 2;
+    const bool isPhased =
+        !forceUnphased && (dropUnphased || firstIndividual.getAlleles(allele1, allele2, /*moveNext=*/false));
+    const uint64_t ploidy = (handlePloidy == PH_STRICT ? ((allele2 == NOT_DIPLOID) ? 1 : 2) : 2);
+    PICOVCF_RELEASE_ASSERT(handlePloidy != PH_FORCE_DIPLOID || ploidy == 2);
 
     std::vector<std::string> variantIds;
     std::ofstream outFile(outFilename, std::ios::binary);
@@ -1940,19 +1957,35 @@ inline void vcfToIGD(const std::string& vcfFilename,
     vcf.seekBeforeVariants();
     while (vcf.hasNextVariant()) {
         vcf.nextVariant();
-        VCFVariantView& variant = vcf.currentVariant();
+        const VCFVariantView& variant = vcf.currentVariant();
         IndividualIteratorGT individualIt = variant.getIndividualIterator();
         auto altAlleles = variant.getAltAlleles();
         IGDSampleList missingData;
         const size_t numSampleLists = isPhased ? altAlleles.size() : (altAlleles.size() * ploidy);
         std::vector<IGDSampleList> variantGtData(numSampleLists);
         SampleT sampleIndex = 0;
+        const auto position = variant.getPosition();
+        bool skipVariant = false;
         while (individualIt.hasNext()) {
             const bool isPhasedI = individualIt.getAlleles(allele1, allele2);
-            PICOVCF_ASSERT_OR_MALFORMED(forceUnphased || isPhasedI == isPhased,
-                                        "Cannot convert VCF with mixed phasedness, unless forceUnphased is set");
+            PICOVCF_ASSERT_OR_MALFORMED(forceUnphased || dropUnphased || isPhasedI == isPhased,
+                                        "Cannot convert VCF with mixed phasedness, unless forceUnphased or "
+                                        "dropUnphased is set, at variant position "
+                                            << position);
+            if (dropUnphased && !isPhasedI) {
+                skipVariant = true;
+                break;
+            }
             const uint64_t ploidyI = (allele2 == NOT_DIPLOID) ? 1 : 2;
-            PICOVCF_ASSERT_OR_MALFORMED(ploidyI == ploidy, "Cannot convert VCF with mixed ploidy");
+            if (handlePloidy == PH_STRICT) {
+                PICOVCF_ASSERT_OR_MALFORMED(
+                    ploidyI == ploidy,
+                    "Will not convert VCF with mixed ploidy with PH_STRICT, see PloidyHandling options");
+            } else if (handlePloidy == PH_FORCE_DIPLOID) {
+                if (ploidyI != 2) {
+                    allele2 = allele1;
+                }
+            }
             if (isPhased) {
                 if (allele1 == MISSING_VALUE) {
                     missingData.push_back(sampleIndex);
@@ -1989,15 +2022,22 @@ inline void vcfToIGD(const std::string& vcfFilename,
                 sampleIndex++; // sampleIndex refers to _individuals_ for unphased data.
             }
         }
+        if (skipVariant) {
+            continue;
+        }
         std::string currentVariantId;
         if (emitVariantIds) {
             currentVariantId = variant.getID();
         }
         for (size_t altIndex = 0; altIndex < altAlleles.size(); altIndex++) {
-            const auto position = variant.getPosition();
             const auto& ref = variant.getRefAllele();
             const auto& alt = altAlleles[altIndex];
             const uint8_t numCopies = isPhased ? 0 : 1;
+            // If provided, we call the callback for each "expanded" variant per the IGD format. This means
+            // that multi-allelic sites, missing data rows, etc., will get multiple calls.
+            if (variantCallback != nullptr) {
+                variantCallback(vcf, variant, callbackContext);
+            }
             writer.writeVariantSamples(outFile, position, ref, alt, variantGtData[altIndex], false, numCopies);
             if (!isPhased && ploidy > 1) {
                 const size_t copies2Index = altIndex + altAlleles.size();
@@ -2020,6 +2060,9 @@ inline void vcfToIGD(const std::string& vcfFilename,
             }
         }
         if (!missingData.empty()) {
+            if (variantCallback != nullptr) {
+                variantCallback(vcf, variant, callbackContext);
+            }
             writer.writeVariantSamples(outFile, variant.getPosition(), variant.getRefAllele(), "", missingData, true);
             if (emitVariantIds) {
                 variantIds.emplace_back(currentVariantId);
