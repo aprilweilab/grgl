@@ -43,8 +43,8 @@ class HaplotypeIndex {
 public:
     explicit HaplotypeIndex(std::function<size_t(const NodeID&, const NodeID&)> distFunc,
                             const double rebuildProportion = 2.0)
-        : m_bkTree(std::move(distFunc))
-        , m_rebuildProportion(rebuildProportion) {}
+        : m_bkTree(std::move(distFunc)),
+          m_rebuildProportion(rebuildProportion) {}
 
     virtual ~HaplotypeIndex() = default;
 

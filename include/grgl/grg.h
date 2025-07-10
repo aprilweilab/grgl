@@ -159,6 +159,11 @@ public:
     virtual bool hasUpEdges() const = 0;
 
     /**
+     * True if the edges in this graph are always in ascending NodeID order.
+     */
+    virtual bool edgesAreOrdered() const = 0;
+
+    /**
      * True iff the mutations are ordered according to position and the alternate allele (in that order).
      */
     bool mutationsAreOrdered() const { return m_mutsAreOrdered; }
@@ -598,6 +603,8 @@ public:
 
     bool hasUpEdges() const override { return true; }
 
+    bool edgesAreOrdered() const override { return false; }
+
     /**
      * Create a new node in the GRG.
      *
@@ -718,6 +725,8 @@ public:
     size_t numDownEdges(NodeID nodeId) override { return m_downEdges.numValuesAt(nodeId); }
 
     bool hasUpEdges() const override { return m_upEdges.numNodes() > 0; }
+
+    bool edgesAreOrdered() const override { return true; }
 
     size_t numUpEdges(NodeID nodeId) override {
         if (!hasUpEdges()) {

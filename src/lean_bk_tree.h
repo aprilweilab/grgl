@@ -150,8 +150,7 @@ public:
         return results;
     }
 
-    template <typename Container>
-    void deleteNode(NodePointer node, Container& result) {
+    template <typename Container> void deleteNode(NodePointer node, Container& result) {
         release_assert(!node->m_isDeleted);
         node->moveElements(result);
         m_deletedNodes++;
@@ -160,12 +159,10 @@ public:
     void dumpStats() const {
         std::cout << "Nodes: " << m_totalNodes << "\n";
         std::cout << "Deleted: " << m_deletedNodes << "\n";
-        std::cout << "Proportion: " << (double)m_deletedNodes/(double)m_totalNodes << "\n";
+        std::cout << "Proportion: " << (double)m_deletedNodes / (double)m_totalNodes << "\n";
     }
 
-    double deletedProportion() const {
-        return (double)m_deletedNodes/(double)m_totalNodes;
-    }
+    double deletedProportion() const { return (double)m_deletedNodes / (double)m_totalNodes; }
 
     std::vector<ElementType> removeAllElements() {
         if (!m_rootNode) {
@@ -188,6 +185,7 @@ public:
     }
 
     std::function<size_t(const ElementType&, const ElementType&)> m_distFunc;
+
 private:
     NodePointer m_rootNode{};
     size_t m_totalNodes{};
