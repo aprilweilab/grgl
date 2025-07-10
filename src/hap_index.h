@@ -51,7 +51,7 @@ public:
     HaplotypeIndex(HaplotypeIndex&) = delete;
     HaplotypeIndex(HaplotypeIndex&&) = default;
     HaplotypeIndex& operator=(HaplotypeIndex&) = delete;
-    HaplotypeIndex& operator=(HaplotypeIndex&&) = default;
+    HaplotypeIndex& operator=(HaplotypeIndex&&) = delete;
 
     /**
      * Add a new (hash, node) pair to the index.
