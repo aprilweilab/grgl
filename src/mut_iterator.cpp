@@ -44,6 +44,13 @@ void MutationIterator::reset() {
     reset_specific();
 }
 
+bool MutationIterator::inRange(size_t variantIndex, size_t position) const {
+    if (useVariantRange()) {
+        return m_genomeRange.contains((double)variantIndex);
+    }
+    return m_genomeRange.contains((double)position);
+}
+
 bool MutationIterator::next(MutationAndSamples& mutAndSamples, size_t& totalSamples) {
     totalSamples = m_totalSamples;
     if (!m_alreadyLoaded.empty()) {
@@ -58,7 +65,7 @@ bool MutationIterator::next(MutationAndSamples& mutAndSamples, size_t& totalSamp
     buffer_next(m_totalSamples);
     const size_t mafThreshold = std::max<size_t>(m_totalSamples / 2, 1);
     Mutation newRefAllele;
-    if (m_flipRefMajor) {
+    if (flipRefMajor()) {
         for (const auto& loadedMut : m_alreadyLoaded) {
             if (loadedMut.samples.size() > mafThreshold) {
                 newRefAllele = loadedMut.mutation;
@@ -67,7 +74,7 @@ bool MutationIterator::next(MutationAndSamples& mutAndSamples, size_t& totalSamp
     }
     // We found a mutation that should be switched to become the reference allele.
     if (!newRefAllele.isEmpty()) {
-        assert(m_flipRefMajor);
+        assert(flipRefMajor());
         m_flippedAlleles++;
         std::vector<bool> oldAltAlleles(m_totalSamples);
         for (auto& mutAndSamples : m_alreadyLoaded) {
@@ -93,7 +100,7 @@ bool MutationIterator::next(MutationAndSamples& mutAndSamples, size_t& totalSamp
             }
         }
     }
-    if (m_binaryMutations && !m_alreadyLoaded.empty()) {
+    if (binaryMutations() && !m_alreadyLoaded.empty()) {
         auto& actualResult = m_alreadyLoaded.front();
         for (auto& mutAndSamples : m_alreadyLoaded) {
             if (actualResult.mutation == mutAndSamples.mutation) {
@@ -118,14 +125,17 @@ bool MutationIterator::next(MutationAndSamples& mutAndSamples, size_t& totalSamp
     return foundMutations;
 }
 
-VCFMutationIterator::VCFMutationIterator(
-    const char* filename, FloatRange genomeRange, bool binaryMutations, bool emitMissingData, bool flipRefMajor)
-    : MutationIterator(genomeRange, binaryMutations, emitMissingData, flipRefMajor),
+VCFMutationIterator::VCFMutationIterator(const char* filename, FloatRange genomeRange, MutationIteratorFlags flags)
+    : MutationIterator(genomeRange, flags),
       m_vcf(new picovcf::VCFFile(filename)) {
     // If we got a normalized range, we have to denormalize it before use.
     if (m_genomeRange.isNormalized()) {
-        const auto vcfGenomeRange = m_vcf->getGenomeRange();
-        m_genomeRange = m_genomeRange.denormalized(vcfGenomeRange.first, vcfGenomeRange.second);
+        if (useVariantRange()) {
+            m_genomeRange = m_genomeRange.denormalized(0, m_vcf->numVariants());
+        } else {
+            const auto vcfGenomeRange = m_vcf->getGenomeRange();
+            m_genomeRange = m_genomeRange.denormalized(vcfGenomeRange.first, vcfGenomeRange.second);
+        }
     }
     // Scan to the first variant.
     m_vcf->seekBeforeVariants();
@@ -160,15 +170,17 @@ void VCFMutationIterator::getMetadata(size_t& ploidy, size_t& numIndividuals, bo
 }
 
 size_t VCFMutationIterator::countMutations() const {
+    size_t variantIndex = 0;
     size_t mutations = 0;
     const auto originalPosition = m_vcf->getFilePosition();
     m_vcf->seekBeforeVariants();
     while (m_vcf->hasNextVariant()) {
         m_vcf->nextVariant();
         const picovcf::VCFVariantView& variant = m_vcf->currentVariant();
-        if (m_genomeRange.contains((double)variant.getPosition())) {
+        if (inRange(variantIndex, variant.getPosition())) {
             mutations += variant.getAltAlleles().size();
         }
+        variantIndex++;
     }
     m_vcf->setFilePosition(originalPosition);
     return mutations;
@@ -181,7 +193,8 @@ void VCFMutationIterator::buffer_next(size_t& totalSamples) {
     while (!foundMutations && m_vcf->hasNextVariant() && m_alreadyLoaded.empty()) {
         m_vcf->nextVariant();
         const picovcf::VCFVariantView& variant = m_vcf->currentVariant();
-        if (!m_genomeRange.contains((double)variant.getPosition())) {
+        if (!inRange(m_currentVariant, variant.getPosition())) {
+            m_currentVariant++;
             continue;
         }
         const std::string& refAllele = variant.getRefAllele();
@@ -199,7 +212,7 @@ void VCFMutationIterator::buffer_next(size_t& totalSamples) {
             if (sample1Allele != 0) {
                 if (sample1Allele != picovcf::MISSING_VALUE) {
                     altAlleleToSamples.at(sample1Allele - 1).push_back(sampleId);
-                } else if (m_emitMissingData) {
+                } else if (emitMissingData()) {
                     missingSamples.push_back(sampleId);
                 }
             }
@@ -208,7 +221,7 @@ void VCFMutationIterator::buffer_next(size_t& totalSamples) {
                 if (sample2Allele != 0) {
                     if (sample2Allele != picovcf::MISSING_VALUE) {
                         altAlleleToSamples.at(sample2Allele - 1).push_back(sampleId);
-                    } else if (m_emitMissingData) {
+                    } else if (emitMissingData()) {
                         missingSamples.push_back(sampleId);
                     }
                 }
@@ -219,40 +232,50 @@ void VCFMutationIterator::buffer_next(size_t& totalSamples) {
 
         // Convert the above information into (Mutation, NodeIDSet) pairs.
         for (size_t altAllele = 0; altAllele < altAlleleToSamples.size(); altAllele++) {
-            if (m_binaryMutations && !m_alreadyLoaded.empty()) {
+            if (binaryMutations() && !m_alreadyLoaded.empty()) {
                 for (NodeID sampleId : altAlleleToSamples[altAllele]) {
                     m_alreadyLoaded.back().samples.push_back(sampleId);
                 }
             } else {
                 m_alreadyLoaded.push_back({Mutation(variant.getPosition(),
-                                                    m_binaryMutations ? Mutation::ALLELE_1 : altAlleles.at(altAllele),
+                                                    binaryMutations() ? Mutation::ALLELE_1 : altAlleles.at(altAllele),
                                                     refAllele),
                                            std::move(altAlleleToSamples[altAllele])});
             }
         }
-        if (m_emitMissingData && !missingSamples.empty()) {
+        if (emitMissingData() && !missingSamples.empty()) {
             m_alreadyLoaded.push_back(
                 {Mutation(variant.getPosition(), Mutation::ALLELE_MISSING, refAllele), std::move(missingSamples)});
         }
+        m_currentVariant++;
     }
 }
 
-void VCFMutationIterator::reset_specific() { m_vcf->seekBeforeVariants(); }
+void VCFMutationIterator::reset_specific() {
+    m_vcf->seekBeforeVariants();
+    m_currentVariant = 0;
+}
 
-IGDMutationIterator::IGDMutationIterator(
-    const char* filename, FloatRange genomeRange, bool binaryMutations, bool emitMissingData, bool flipRefMajor)
-    : MutationIterator(genomeRange, binaryMutations, emitMissingData, flipRefMajor),
-      m_igd(new picovcf::IGDData(filename)),
-      m_currentVariant(0) {
+IGDMutationIterator::IGDMutationIterator(const char* filename, FloatRange genomeRange, MutationIteratorFlags flags)
+    : MutationIterator(genomeRange, flags),
+      m_igd(new picovcf::IGDData(filename)) {
     // If we got a normalized range, we have to denormalize it before use.
     if (m_genomeRange.isNormalized()) {
-        const auto range = m_igd->getGenomeRange();
-        m_genomeRange = m_genomeRange.denormalized(range.first, range.second);
+        if (useVariantRange()) {
+            m_genomeRange = m_genomeRange.denormalized(0, m_igd->numVariants());
+        } else {
+            const auto range = m_igd->getGenomeRange();
+            m_genomeRange = m_genomeRange.denormalized(range.first, range.second);
+        }
     }
     if (m_genomeRange.isUnspecified()) {
         m_startVariant = 0;
     } else {
-        m_startVariant = m_igd->lowerBoundPosition((size_t)std::ceil(m_genomeRange.start()));
+        if (useVariantRange()) {
+            m_startVariant = (size_t)m_genomeRange.start();
+        } else {
+            m_startVariant = m_igd->lowerBoundPosition((size_t)std::ceil(m_genomeRange.start()));
+        }
     }
     m_currentVariant = m_startVariant;
 }
@@ -266,7 +289,7 @@ void IGDMutationIterator::getMetadata(size_t& ploidy, size_t& numIndividuals, bo
 size_t IGDMutationIterator::countMutations() const {
     size_t mutations = 0;
     for (size_t i = m_startVariant; i < m_igd->numVariants(); i++) {
-        if (m_genomeRange.contains((double)m_igd->getPosition(i))) {
+        if (inRange(i, m_igd->getPosition(i))) {
             mutations++;
         } else {
             break;
@@ -285,10 +308,10 @@ void IGDMutationIterator::buffer_next(size_t& totalSamples) {
     while (m_currentVariant < m_igd->numVariants() && m_alreadyLoaded.empty()) {
         bool isMissingDataRow = false;
         const size_t position = m_igd->getPosition(m_currentVariant, isMissingDataRow);
-        if (m_genomeRange.contains((double)position)) {
+        if (inRange(m_currentVariant, position)) {
             while (m_currentVariant < m_igd->numVariants() &&
                    position == m_igd->getPosition(m_currentVariant, isMissingDataRow)) {
-                if (!isMissingDataRow || m_emitMissingData) {
+                if (!isMissingDataRow || emitMissingData()) {
                     const std::string& refAllele = m_igd->getRefAllele(m_currentVariant);
                     auto allele = m_igd->getAltAllele(m_currentVariant);
                     NodeIDList samples;
@@ -323,9 +346,8 @@ void IGDMutationIterator::reset_specific() { m_currentVariant = m_startVariant; 
         throw BadInputFileFailure(errMsgBG.str().c_str());                                                             \
     } while (0)
 
-BGENMutationIterator::BGENMutationIterator(
-    const char* filename, FloatRange genomeRange, bool binaryMutations, bool emitMissingData, bool flipRefMajor)
-    : MutationIterator(genomeRange, binaryMutations, emitMissingData, flipRefMajor),
+BGENMutationIterator::BGENMutationIterator(const char* filename, FloatRange genomeRange, MutationIteratorFlags flags)
+    : MutationIterator(genomeRange, flags),
       m_file(bgen_file_open(filename)),
       m_partition(nullptr) {
     std::stringstream metaNameStream;
@@ -352,11 +374,11 @@ BGENMutationIterator::BGENMutationIterator(
     bgen_metafile_close(metafile);
     metafile = nullptr;
 
-    // If we got a normalized range, we have to denormalize it before use.
-    if (m_genomeRange.isNormalized()) {
-        size_t minPosition = std::numeric_limits<size_t>::max();
-        size_t maxPosition = 0;
-        for (size_t i = 0; i < bgen_partition_nvariants(m_partition); i++) {
+    const size_t numVariants = bgen_partition_nvariants(m_partition);
+    if (useVariantRange()) {
+        m_genomeRange = m_genomeRange.denormalized(0, numVariants);
+    } else {
+        for (size_t i = 0; i < numVariants; i++) {
             const bgen_variant* const variant = bgen_partition_get_variant(m_partition, i);
             if (variant->position < minPosition) {
                 minPosition = variant->position;
@@ -404,7 +426,7 @@ size_t BGENMutationIterator::countMutations() const {
     size_t mutations = 0;
     for (size_t i = 0; i < bgen_partition_nvariants(m_partition); i++) {
         const bgen_variant* const variant = bgen_partition_get_variant(m_partition, i);
-        if (!m_genomeRange.contains((double)variant->position)) {
+        if (!inRange(i, variant->position)) {
             continue;
         }
         mutations += (variant->nalleles - 1);
@@ -432,8 +454,8 @@ void BGENMutationIterator::buffer_next(size_t& totalSamples) {
     bool foundMutations = false;
     while (m_currentVariant < bgen_partition_nvariants(m_partition) && m_alreadyLoaded.empty()) {
         const bgen_variant* const variant = bgen_partition_get_variant(m_partition, m_currentVariant);
-        m_currentVariant++;
-        if (!m_genomeRange.contains((double)variant->position)) {
+        if (!inRange(m_currentVariant, variant->position)) {
+            m_currentVariant++;
             continue;
         }
 
@@ -484,7 +506,7 @@ void BGENMutationIterator::buffer_next(size_t& totalSamples) {
                 // The BGEN spec leaves out the k'th allele, but the library we use recovers it, so
                 // this should be true.
                 release_assert(sumProb == 1.0);
-            } else if (m_emitMissingData) {
+            } else if (emitMissingData()) {
                 missingSamples.push_back(sampleId);
             }
 
@@ -506,44 +528,39 @@ void BGENMutationIterator::buffer_next(size_t& totalSamples) {
                 release_assert(alleleToSamples[i].empty());
                 continue;
             }
-            if (m_binaryMutations && !m_alreadyLoaded.empty()) {
+            if (binaryMutations() && !m_alreadyLoaded.empty()) {
                 for (NodeID sampleId : alleleToSamples[i]) {
                     m_alreadyLoaded.back().samples.push_back(sampleId);
                 }
             } else {
                 m_alreadyLoaded.push_back(
                     {Mutation(variant->position,
-                              m_binaryMutations ? Mutation::ALLELE_1 : bgen_string_data(variant->allele_ids[i]),
+                              binaryMutations() ? Mutation::ALLELE_1 : bgen_string_data(variant->allele_ids[i]),
                               refAllele),
                      std::move(alleleToSamples[i])});
             }
         }
-        if (m_emitMissingData && !missingSamples.empty()) {
+        if (emitMissingData() && !missingSamples.empty()) {
             m_alreadyLoaded.push_back(
                 {Mutation(variant->position, Mutation::ALLELE_MISSING, refAllele), std::move(missingSamples)});
         }
+        m_currentVariant++;
     }
 }
 
 void BGENMutationIterator::reset_specific() { m_currentVariant = 0; }
 #endif
 
-std::shared_ptr<grgl::MutationIterator> makeMutationIterator(const std::string& filename,
-                                                             FloatRange genomeRange,
-                                                             bool binaryMutations,
-                                                             bool emitMissingData,
-                                                             bool flipRefMajor) {
+std::shared_ptr<grgl::MutationIterator>
+makeMutationIterator(const std::string& filename, FloatRange genomeRange, MutationIteratorFlags flags) {
     std::shared_ptr<grgl::MutationIterator> mutationIterator;
     if (ends_with(filename, ".vcf") || ends_with(filename, ".vcf.gz")) {
-        mutationIterator.reset(new grgl::VCFMutationIterator(
-            filename.c_str(), genomeRange, binaryMutations, emitMissingData, flipRefMajor));
+        mutationIterator.reset(new grgl::VCFMutationIterator(filename.c_str(), genomeRange, flags));
     } else if (ends_with(filename, ".igd")) {
-        mutationIterator.reset(new grgl::IGDMutationIterator(
-            filename.c_str(), genomeRange, binaryMutations, emitMissingData, flipRefMajor));
+        mutationIterator.reset(new grgl::IGDMutationIterator(filename.c_str(), genomeRange, flags));
 #if BGEN_ENABLED
     } else if (ends_with(filename, ".bgen")) {
-        mutationIterator.reset(new grgl::BGENMutationIterator(
-            filename.c_str(), genomeRange, binaryMutations, emitMissingData, flipRefMajor));
+        mutationIterator.reset(new grgl::BGENMutationIterator(filename.c_str(), genomeRange, flags));
 #endif
     } else {
         abort();

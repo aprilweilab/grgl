@@ -140,6 +140,12 @@ def build_shape(range_triple, args, input_file):
     span = upper - lower
     pspans = span / args.trees
 
+    # For IGD or BGEN, split the file by variant counts, because indexing is very easy and
+    # the resulting GRG should be better and faster to create.
+    suffix = ""
+    if input_file.endswith(".igd") or input_file.endswith(".bgen"):
+        suffix = "v"
+
     for tnum in range(args.trees):
         base = lower + (tnum * pspans)
         command = [grgl_exe, input_file]
@@ -157,7 +163,7 @@ def build_shape(range_triple, args, input_file):
                 "-l",
                 "-s",
                 "-r",
-                f"{base}:{base+pspans}",
+                f"{base}:{base+pspans}{suffix}",
                 "-o",
                 out_filename_tree(input_file, part, tnum),
             ]

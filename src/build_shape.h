@@ -21,6 +21,7 @@
 
 #include "grgl/common.h"
 #include "grgl/grgnode.h"
+#include "grgl/mut_iterator.h"
 #include "grgl/mutation.h"
 #include "util.h"
 
@@ -30,11 +31,9 @@ class MutableGRG;
 using MutableGRGPtr = std::shared_ptr<MutableGRG>;
 
 enum {
-    GBF_USE_BINARY_MUTS = 0x1U,
-    GBF_EMIT_MISSING_DATA = 0x2U,
-    GBF_FLIP_REF_MAJOR = 0x4U,
-    GBF_NO_INDIVIDUAL_IDS = 0x8U,
-    GBF_VERBOSE_OUTPUT = 0x10U,
+    GBF_EMPTY = 0x0U,
+    GBF_NO_INDIVIDUAL_IDS = 0x1U,
+    GBF_VERBOSE_OUTPUT = 0x2U,
 };
 using GrgBuildFlags = uint64_t;
 
@@ -46,6 +45,7 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
                                         FloatRange& genomeRange,
                                         size_t bitsPerMutation,
                                         GrgBuildFlags buildFlags,
+                                        MutationIteratorFlags itFlags,
                                         double dropBelowThreshold,
                                         const std::map<std::string, std::string>& indivIdToPop,
                                         size_t tripletLevels = 0);

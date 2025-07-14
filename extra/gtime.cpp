@@ -22,9 +22,7 @@ static void mutationIteratorScan(const std::string& inFilename,
     std::shared_ptr<grgl::MutationIterator> iterator = grgl::makeMutationIterator(
         inFilename,
         /*genomeRange=*/{},
-        /*binaryMutations=*/false,
-        /*emitMissingData=*/false,
-        /*flipRefMajor=*/false);
+        grgl::MIT_FLAG_EMPTY);
     grgl::MutationAndSamples mutAndSamples;
     size_t variantCount = 0;
     size_t _unused = 0;

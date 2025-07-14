@@ -28,6 +28,7 @@
 #include "grg_helpers.h"
 #include "grgl/grg.h"
 #include "grgl/map_mutations.h"
+#include "grgl/mut_iterator.h"
 #include "grgl/serialize.h"
 #include "grgl/ts2grg.h"
 #include "grgl/windowing.h"
@@ -174,11 +175,21 @@ int main(int argc, char** argv) {
                     : MDH_IGNORE;
     if (missingDataHandling == MDH_INVALID) {
         std::cerr << "Invalid missing-data handling: " << *missingData << std::endl;
-        exit(1);
+        return 1;
     }
 
+    grgl::MutationIteratorFlags itFlags = grgl::MIT_FLAG_EMPTY;
     grgl::FloatRange restrictRange;
     if (genomeRange) {
+        const std::string basePairSuffix = "b";
+        const std::string variantsSuffix = "v";
+        if (ends_with(*genomeRange, basePairSuffix) || ends_with(*genomeRange, variantsSuffix)) {
+            if (ends_with(*genomeRange, variantsSuffix)) {
+                itFlags |= grgl::MIT_FLAG_USE_VARIANT_RANGE;
+            }
+            genomeRange->resize(genomeRange->size() - 1);
+        }
+
         auto tokens = split(*genomeRange, ':');
         release_assert(tokens.size() == 2);
         double gStart = 0.0;
@@ -231,15 +242,6 @@ int main(int argc, char** argv) {
         }
     } else if (supportedInputFormat(*infile)) {
         uint64_t buildFlags = grgl::GBF_VERBOSE_OUTPUT;
-        if (binaryMutations) {
-            buildFlags |= grgl::GBF_USE_BINARY_MUTS;
-        }
-        if (missingDataHandling == MDH_ADD_TO_GRG) {
-            buildFlags |= grgl::GBF_EMIT_MISSING_DATA;
-        }
-        if (MAFFlip) {
-            buildFlags |= grgl::GBF_FLIP_REF_MAJOR;
-        }
         if (noIndividualIds) {
             buildFlags |= grgl::GBF_NO_INDIVIDUAL_IDS;
         }
@@ -247,6 +249,7 @@ int main(int argc, char** argv) {
                                                  restrictRange,
                                                  bitsPerMutation,
                                                  buildFlags,
+                                                 itFlags,
                                                  lfFilter ? *lfFilter : 0.0,
                                                  indivIdToPop,
                                                  triplet ? *triplet : 0);
@@ -264,8 +267,17 @@ int main(int argc, char** argv) {
             abort();
         }
         START_TIMING_OPERATION();
-        std::shared_ptr<grgl::MutationIterator> unmappedMutations = makeMutationIterator(
-            *mapMutations, restrictRange, binaryMutations, missingDataHandling == MDH_ADD_TO_GRG, MAFFlip);
+        if (binaryMutations) {
+            itFlags |= grgl::MIT_FLAG_BINARY_MUTATIONS;
+        }
+        if (missingDataHandling == MDH_ADD_TO_GRG) {
+            itFlags |= grgl::MIT_FLAG_EMIT_MISSING_DATA;
+        }
+        if (MAFFlip) {
+            itFlags |= grgl::MIT_FLAG_FLIP_REF_MAJOR;
+        }
+        std::shared_ptr<grgl::MutationIterator> unmappedMutations =
+            makeMutationIterator(*mapMutations, restrictRange, itFlags);
         if (!unmappedMutations) {
             std::cerr << "Could not load mutations file " << *mapMutations << std::endl;
             return 1;
