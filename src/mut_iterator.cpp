@@ -263,7 +263,6 @@ IGDMutationIterator::IGDMutationIterator(const char* filename, FloatRange genome
     if (genomeRange.isNormalized()) {
         if (useVariantRange()) {
             m_genomeRange = genomeRange.denormalized(0, m_igd->numVariants());
-            std::cout << "Range: " << m_genomeRange.start() << " - " << m_genomeRange.end() << "\n";
         } else {
             const auto range = m_igd->getGenomeRange();
             m_genomeRange = genomeRange.denormalized(range.first, range.second);

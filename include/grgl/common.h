@@ -136,7 +136,12 @@ public:
         return IntRange((size_t)(this->m_start), (size_t)(this->m_end));
     }
 
-    IntRange toIntRange() const { return IntRange((size_t)(this->m_start), (size_t)(this->m_end)); }
+    IntRange toIntRange() const {
+        if (isUnspecified()) {
+            return {};
+        }
+        return IntRange((size_t)(this->m_start), (size_t)(this->m_end));
+    }
 
     bool contains(double position) const {
         assert(isUnspecified() || m_end > 1.0 || position <= 1.0);
