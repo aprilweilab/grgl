@@ -30,7 +30,12 @@ int main(int argc, char** argv) {
     args::HelpFlag help(parser, "help", "Display this help menu", {'h', "help"});
     args::Flag showStats(parser, "show-stats", "Show statistics about the GRG", {'s', "show-stats"});
     args::Flag noSimplify(parser, "no-simplify", "Simplify the resulting GRG", {'l', "no-simplify"});
-    args::Flag noCombine(parser, "no-combine", "Do not combine nodes with same samplesets", {'c', "no-combine"});
+    args::Flag noCombine(parser, "no-combine", "Do not combine nodes non-unique nodes", {'c', "no-combine"});
+    args::Flag useSampleSets(
+        parser,
+        "use-samples",
+        "Determine node uniqueness based on samples reachable from it, instead of immediate children.",
+        {'u', "use-samples"});
     args::Positional<std::string> outfile(parser, "outfile", "The output file (resulting .grg)");
     args::PositionalList<std::string> inputs(parser, "inputs", "The input files (must be .grg)");
     try {
@@ -66,7 +71,7 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    grg1->merge(otherFiles, !noCombine);
+    grg1->merge(otherFiles, !noCombine, useSampleSets);
 
     if (showStats) {
         dumpStats(grg1);

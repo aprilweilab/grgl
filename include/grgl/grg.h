@@ -667,9 +667,15 @@ public:
      * method to ensure that either (1) the span is contiguous or (2) they adjust the specified range
      * appropriately afterwards.
      *
-     * @param otherGrgFiles The list of GRG filenames to load and merge.
+     * @param[in] otherGrgFiles The list of GRG filenames to load and merge.
+     * @param[in] combineNodes Set to false to never combine nodes from the graphs.
+     * @param[in] useSampleSets Set to true to use the slower, more RAM intensive version that tracks
+     *      sets of samples beneath each graph node, and combines nodes that have the same sample set.
+     *      The default algorithm just uses the (mapped) children to determine if two nodes can be
+     *      combined, which combines fewer nodes overall, but also retains more hierarchy in the final
+     *      graph.
      */
-    void merge(const std::list<std::string>& otherGrgFiles, bool combineNodes = true);
+    void merge(const std::list<std::string>& otherGrgFiles, bool combineNodes = true, bool useSampleSets = false);
 
     /**
      * Retrieve a node by ID.
