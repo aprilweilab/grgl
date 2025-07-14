@@ -271,14 +271,19 @@ IGDMutationIterator::IGDMutationIterator(const char* filename, FloatRange genome
     }
     if (useVariantRange()) {
         m_startVariant = m_genomeRange.start();
-        if (!inRange(m_startVariant, 0)) {
-            std::cout << "START NOT IN RANGE: " << m_startVariant << "\n";
-            if (inRange(m_startVariant + 1, 0)) {
-                std::cout << "But the next one is...\n";
+        release_assert(inRange(m_startVariant, 0));
+        // Because of the way IGD stores variants (one row per allele), we want to always start
+        // on a new position boundary. The code in buffer_next() always ends on a position boundary.
+        if (m_startVariant > 0) {
+            const size_t previousPosition = m_igd->getPosition(m_startVariant - 1);
+            size_t position = m_igd->getPosition(m_startVariant);
+            while (previousPosition == position) {
+                position = m_igd->getPosition(++m_startVariant);
             }
         }
     } else {
         m_startVariant = m_igd->lowerBoundPosition(m_genomeRange.start());
+        release_assert(inRange(m_startVariant, m_igd->getPosition(m_startVariant)));
     }
     m_currentVariant = m_startVariant;
 }

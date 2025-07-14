@@ -132,8 +132,9 @@ protected:
 /**
  * Iterate the mutations in a VCF file.
  *
- * TODO: if we keep this around, should consider adding an index file that maps genome position to
- * file position.
+ * NOTES:
+ * 1. This does not support fast random access to VCF, thus can be extremely slow for generating a GRG.
+ * 2. This only supports VCFs that have all alleles on the same row, not one allele per row.
  */
 class VCFMutationIterator : public MutationIterator {
 public:
