@@ -159,6 +159,11 @@ public:
     virtual bool hasUpEdges() const = 0;
 
     /**
+     * True if the edges in this graph are always in ascending NodeID order.
+     */
+    virtual bool edgesAreOrdered() const = 0;
+
+    /**
      * True iff the mutations are ordered according to position and the alternate allele (in that order).
      */
     bool mutationsAreOrdered() const { return m_mutsAreOrdered; }
@@ -598,6 +603,8 @@ public:
 
     bool hasUpEdges() const override { return true; }
 
+    bool edgesAreOrdered() const override { return false; }
+
     /**
      * Create a new node in the GRG.
      *
@@ -660,9 +667,15 @@ public:
      * method to ensure that either (1) the span is contiguous or (2) they adjust the specified range
      * appropriately afterwards.
      *
-     * @param otherGrgFiles The list of GRG filenames to load and merge.
+     * @param[in] otherGrgFiles The list of GRG filenames to load and merge.
+     * @param[in] combineNodes Set to false to never combine nodes from the graphs.
+     * @param[in] useSampleSets Set to true to use the slower, more RAM intensive version that tracks
+     *      sets of samples beneath each graph node, and combines nodes that have the same sample set.
+     *      The default algorithm just uses the (mapped) children to determine if two nodes can be
+     *      combined, which combines fewer nodes overall, but also retains more hierarchy in the final
+     *      graph.
      */
-    void merge(const std::list<std::string>& otherGrgFiles, bool combineNodes = true);
+    void merge(const std::list<std::string>& otherGrgFiles, bool combineNodes = true, bool useSampleSets = false);
 
     /**
      * Retrieve a node by ID.
@@ -718,6 +731,8 @@ public:
     size_t numDownEdges(NodeID nodeId) override { return m_downEdges.numValuesAt(nodeId); }
 
     bool hasUpEdges() const override { return m_upEdges.numNodes() > 0; }
+
+    bool edgesAreOrdered() const override { return true; }
 
     size_t numUpEdges(NodeID nodeId) override {
         if (!hasUpEdges()) {

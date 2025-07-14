@@ -582,7 +582,12 @@ PYBIND11_MODULE(_grgl, m) {
             :param target: The NodeID for the target node (edge ends here).
             :type target: int
         )^")
-        .def("merge", &grgl::MutableGRG::merge, py::arg("other_grg_files"), py::arg("combine_nodes"), R"^(
+        .def("merge",
+             &grgl::MutableGRG::merge,
+             py::arg("other_grg_files"),
+             py::arg("combine_nodes") = true,
+             py::arg("use_sample_sets") = false,
+             R"^(
             Merge one or more GRGs into this one. Only succeeds if all GRGs have the same number of
 
             This assumes that the GRGs were constructed from the same sampleset -- e.g., they
@@ -600,6 +605,9 @@ PYBIND11_MODULE(_grgl, m) {
             :param combine_nodes: True by default. Combine nodes from different GRGs if the node has
                 the same samples beneath it.
             :type combine_nodes: bool
+            :param use_sample_sets: False by default. Use the more expensive merging algorithm that combines
+                nodes if they have the same samples beneath. This produces a smaller graph, but loses hierarchy.
+            :type use_sample_sets: bool
         )^");
 
     m.def("load_mutable_grg", &grgl::loadMutableGRG, py::arg("filename"), R"^(
