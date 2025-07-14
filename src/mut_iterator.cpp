@@ -46,9 +46,9 @@ void MutationIterator::reset() {
 
 bool MutationIterator::inRange(size_t variantIndex, size_t position) const {
     if (useVariantRange()) {
-        return m_genomeRange.contains((double)variantIndex);
+        return m_genomeRange.contains(variantIndex);
     }
-    return m_genomeRange.contains((double)position);
+    return m_genomeRange.contains(position);
 }
 
 bool MutationIterator::next(MutationAndSamples& mutAndSamples, size_t& totalSamples) {
@@ -129,12 +129,12 @@ VCFMutationIterator::VCFMutationIterator(const char* filename, FloatRange genome
     : MutationIterator(genomeRange, flags),
       m_vcf(new picovcf::VCFFile(filename)) {
     // If we got a normalized range, we have to denormalize it before use.
-    if (m_genomeRange.isNormalized()) {
+    if (genomeRange.isNormalized()) {
         if (useVariantRange()) {
-            m_genomeRange = m_genomeRange.denormalized(0, m_vcf->numVariants());
+            m_genomeRange = genomeRange.denormalized(0, m_vcf->numVariants());
         } else {
             const auto vcfGenomeRange = m_vcf->getGenomeRange();
-            m_genomeRange = m_genomeRange.denormalized(vcfGenomeRange.first, vcfGenomeRange.second);
+            m_genomeRange = genomeRange.denormalized(vcfGenomeRange.first, vcfGenomeRange.second);
         }
     }
     // Scan to the first variant.
@@ -260,22 +260,25 @@ IGDMutationIterator::IGDMutationIterator(const char* filename, FloatRange genome
     : MutationIterator(genomeRange, flags),
       m_igd(new picovcf::IGDData(filename)) {
     // If we got a normalized range, we have to denormalize it before use.
-    if (m_genomeRange.isNormalized()) {
+    if (genomeRange.isNormalized()) {
         if (useVariantRange()) {
-            m_genomeRange = m_genomeRange.denormalized(0, m_igd->numVariants());
+            m_genomeRange = genomeRange.denormalized(0, m_igd->numVariants());
+            std::cout << "Range: " << m_genomeRange.start() << " - " << m_genomeRange.end() << "\n";
         } else {
             const auto range = m_igd->getGenomeRange();
-            m_genomeRange = m_genomeRange.denormalized(range.first, range.second);
+            m_genomeRange = genomeRange.denormalized(range.first, range.second);
         }
     }
-    if (m_genomeRange.isUnspecified()) {
-        m_startVariant = 0;
-    } else {
-        if (useVariantRange()) {
-            m_startVariant = (size_t)m_genomeRange.start();
-        } else {
-            m_startVariant = m_igd->lowerBoundPosition((size_t)std::ceil(m_genomeRange.start()));
+    if (useVariantRange()) {
+        m_startVariant = m_genomeRange.start();
+        if (!inRange(m_startVariant, 0)) {
+            std::cout << "START NOT IN RANGE: " << m_startVariant << "\n";
+            if (inRange(m_startVariant + 1, 0)) {
+                std::cout << "But the next one is...\n";
+            }
         }
+    } else {
+        m_startVariant = m_igd->lowerBoundPosition(m_genomeRange.start());
     }
     m_currentVariant = m_startVariant;
 }
@@ -286,17 +289,7 @@ void IGDMutationIterator::getMetadata(size_t& ploidy, size_t& numIndividuals, bo
     isPhased = m_igd->isPhased();
 }
 
-size_t IGDMutationIterator::countMutations() const {
-    size_t mutations = 0;
-    for (size_t i = m_startVariant; i < m_igd->numVariants(); i++) {
-        if (inRange(i, m_igd->getPosition(i))) {
-            mutations++;
-        } else {
-            break;
-        }
-    }
-    return mutations;
-}
+size_t IGDMutationIterator::countMutations() const { return m_genomeRange.end() - m_genomeRange.start(); }
 
 std::vector<std::string> IGDMutationIterator::getIndividualIds() { return std::move(m_igd->getIndividualIds()); }
 
@@ -376,7 +369,7 @@ BGENMutationIterator::BGENMutationIterator(const char* filename, FloatRange geno
 
     const size_t numVariants = bgen_partition_nvariants(m_partition);
     if (useVariantRange()) {
-        m_genomeRange = m_genomeRange.denormalized(0, numVariants);
+        m_genomeRange = genomeRange.denormalized(0, numVariants);
     } else {
         for (size_t i = 0; i < numVariants; i++) {
             const bgen_variant* const variant = bgen_partition_get_variant(m_partition, i);
@@ -387,7 +380,7 @@ BGENMutationIterator::BGENMutationIterator(const char* filename, FloatRange geno
                 maxPosition = variant->position;
             }
         }
-        m_genomeRange = m_genomeRange.denormalized(minPosition, maxPosition);
+        m_genomeRange = genomeRange.denormalized(minPosition, maxPosition);
     }
 }
 

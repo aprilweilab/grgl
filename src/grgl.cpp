@@ -179,6 +179,16 @@ int main(int argc, char** argv) {
     }
 
     grgl::MutationIteratorFlags itFlags = grgl::MIT_FLAG_EMPTY;
+    if (binaryMutations) {
+        itFlags |= grgl::MIT_FLAG_BINARY_MUTATIONS;
+    }
+    if (missingDataHandling == MDH_ADD_TO_GRG) {
+        itFlags |= grgl::MIT_FLAG_EMIT_MISSING_DATA;
+    }
+    if (MAFFlip) {
+        itFlags |= grgl::MIT_FLAG_FLIP_REF_MAJOR;
+    }
+
     grgl::FloatRange restrictRange;
     if (genomeRange) {
         const std::string basePairSuffix = "b";
@@ -267,15 +277,6 @@ int main(int argc, char** argv) {
             abort();
         }
         START_TIMING_OPERATION();
-        if (binaryMutations) {
-            itFlags |= grgl::MIT_FLAG_BINARY_MUTATIONS;
-        }
-        if (missingDataHandling == MDH_ADD_TO_GRG) {
-            itFlags |= grgl::MIT_FLAG_EMIT_MISSING_DATA;
-        }
-        if (MAFFlip) {
-            itFlags |= grgl::MIT_FLAG_FLIP_REF_MAJOR;
-        }
         std::shared_ptr<grgl::MutationIterator> unmappedMutations =
             makeMutationIterator(*mapMutations, restrictRange, itFlags);
         if (!unmappedMutations) {

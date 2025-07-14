@@ -75,7 +75,7 @@ struct MutationAndSamples {
 class MutationIterator {
 public:
     explicit MutationIterator(FloatRange genomeRange, MutationIteratorFlags flags)
-        : m_genomeRange(genomeRange),
+        : m_genomeRange(genomeRange.toIntRange()),
           m_flags(flags) {}
     virtual ~MutationIterator() = default;
 
@@ -97,7 +97,7 @@ public:
 
     size_t numFlippedAlleles() const { return m_flippedAlleles; }
 
-    FloatRange getBpRange() const { return m_genomeRange; }
+    IntRange getBpRange() const { return m_genomeRange; }
 
     bool binaryMutations() const { return (bool)(m_flags & MIT_FLAG_BINARY_MUTATIONS); }
 
@@ -117,7 +117,7 @@ protected:
     std::list<MutationAndSamples> m_alreadyLoaded;
 
     // Range to use.
-    FloatRange m_genomeRange;
+    IntRange m_genomeRange;
 
     // Current variant (index)
     size_t m_currentVariant{};
