@@ -21,6 +21,7 @@
 #include "picovcf.hpp"
 #include "util.h"
 
+#include <algorithm>
 #include <limits>
 #include <sstream>
 #include <sys/stat.h>
@@ -30,6 +31,12 @@ extern "C" {
 #include <bgen/bgen.h>
 }
 #endif
+
+template <> struct std::hash<std::pair<std::string, std::string>> {
+    size_t operator()(const std::pair<std::string, std::string>& pair) const noexcept {
+        return grgl::hash_combine(std::hash<std::string>{}(pair.first), std::hash<std::string>{}(pair.second));
+    }
+};
 
 namespace grgl {
 
@@ -263,7 +270,6 @@ IGDMutationIterator::IGDMutationIterator(const char* filename, FloatRange genome
     if (genomeRange.isNormalized()) {
         if (useVariantRange()) {
             m_genomeRange = genomeRange.denormalized(0, m_igd->numVariants());
-            std::cout << "Range: " << m_genomeRange.start() << " - " << m_genomeRange.end() << "\n";
         } else {
             const auto range = m_igd->getGenomeRange();
             m_genomeRange = genomeRange.denormalized(range.first, range.second);
@@ -302,27 +308,53 @@ void IGDMutationIterator::buffer_next(size_t& totalSamples) {
     release_assert(m_currentVariant >= m_startVariant);
     totalSamples = m_igd->numSamples();
 
+    using AllelePair = std::pair<std::string, std::string>;
+    std::unordered_map<AllelePair, size_t> seenMap;
     // If we have an alt allele with > 50% occurrence, make it the new reference allele.
     while (m_currentVariant < m_igd->numVariants() && m_alreadyLoaded.empty()) {
+        uint8_t numCopies = 0;
         bool isMissingDataRow = false;
-        const size_t position = m_igd->getPosition(m_currentVariant, isMissingDataRow);
+        const size_t position = m_igd->getPosition(m_currentVariant, isMissingDataRow, numCopies);
         if (inRange(m_currentVariant, position)) {
             while (m_currentVariant < m_igd->numVariants() &&
-                   position == m_igd->getPosition(m_currentVariant, isMissingDataRow)) {
+                   position == m_igd->getPosition(m_currentVariant, isMissingDataRow, numCopies)) {
                 if (!isMissingDataRow || emitMissingData()) {
-                    const std::string& refAllele = m_igd->getRefAllele(m_currentVariant);
-                    auto allele = m_igd->getAltAllele(m_currentVariant);
-                    NodeIDList samples;
-                    NodeIDList samplesHomozyg;
+                    AllelePair alleles;
+                    alleles.first = m_igd->getRefAllele(m_currentVariant);
+                    alleles.second =
+                        isMissingDataRow ? Mutation::ALLELE_MISSING : m_igd->getAltAllele(m_currentVariant);
+
+                    // We collection sample sets by alleles
+                    bool needsSort = false;
+                    size_t loadedIndex = std::numeric_limits<size_t>::max();
+                    if (numCopies >= 1) {
+                        auto findIt = seenMap.find(alleles);
+                        if (findIt != seenMap.end()) {
+                            loadedIndex = findIt->second;
+                            needsSort = true;
+                        }
+                    }
+                    if (loadedIndex > m_alreadyLoaded.size()) {
+                        loadedIndex = m_alreadyLoaded.size();
+                        m_alreadyLoaded.push_back({Mutation(position, alleles.second, alleles.first), {}});
+                        seenMap.emplace(std::move(alleles), loadedIndex);
+                    }
+
                     auto sampleSet = m_igd->getSamplesWithAlt(m_currentVariant);
-                    samples.reserve(sampleSet.size());
                     for (auto sampleId : sampleSet) {
-                        samples.push_back(sampleId);
+                        if (numCopies >= 1) {
+                            const size_t firstCopy = sampleId * m_igd->getPloidy();
+                            for (size_t j = 0; j < numCopies; j++) {
+                                m_alreadyLoaded[loadedIndex].samples.push_back(firstCopy + j);
+                            }
+                        } else {
+                            m_alreadyLoaded[loadedIndex].samples.push_back(sampleId);
+                        }
                     }
-                    if (isMissingDataRow) {
-                        allele = Mutation::ALLELE_MISSING;
+                    if (needsSort) {
+                        std::sort(m_alreadyLoaded[loadedIndex].samples.begin(),
+                                  m_alreadyLoaded[loadedIndex].samples.end());
                     }
-                    m_alreadyLoaded.push_back({Mutation(position, allele, refAllele), std::move(samples)});
                 }
                 m_currentVariant++;
             }
