@@ -117,7 +117,7 @@ static void mutationIteratorToIGD(const std::string& inFilename,
 
     std::cout << "Converting " << inFilename << " to " << outFilename << std::endl;
     std::shared_ptr<grgl::MutationIterator> iterator =
-        grgl::makeMutationIterator(inFilename, restrictRange, false, true, false);
+        grgl::makeMutationIterator(inFilename, restrictRange, grgl::MIT_FLAG_EMIT_MISSING_DATA);
     size_t ploidy = 0;
     size_t numIndividuals = 0;
     bool isPhased = false;

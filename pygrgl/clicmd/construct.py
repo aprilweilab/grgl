@@ -134,11 +134,21 @@ def out_filename(input_file, part):
     return f"{base_name}.part{part}.grg"
 
 
+def get_default_range_suffix(input_file: str) -> str:
+    # For IGD or BGEN, split the file by variant counts, because indexing is very easy and
+    # the resulting GRG should be better and faster to create.
+    suffix = ""
+    if input_file.endswith(".igd") or input_file.endswith(".bgen"):
+        suffix = "v"
+    return suffix
+
+
 def build_shape(range_triple, args, input_file):
     part, lower, upper = range_triple
     assert lower < upper
     span = upper - lower
     pspans = span / args.trees
+    suffix = get_default_range_suffix(input_file)
 
     for tnum in range(args.trees):
         base = lower + (tnum * pspans)
@@ -157,7 +167,7 @@ def build_shape(range_triple, args, input_file):
                 "-l",
                 "-s",
                 "-r",
-                f"{base}:{base+pspans}",
+                f"{base}:{base+pspans}{suffix}",
                 "-o",
                 out_filename_tree(input_file, part, tnum),
             ]
@@ -192,13 +202,14 @@ def build_grg(range_triple, args, input_file):
     shape_grg = build_shape(range_triple, args, input_file)
     part, lower, upper = range_triple
     command = [grgl_exe, shape_grg]
+    suffix = get_default_range_suffix(input_file)
     if args.maf_flip:
         command.append("--maf-flip")
     command.extend(
         [
             "-s",
             "-r",
-            f"{lower}:{upper}",
+            f"{lower}:{upper}{suffix}",
             "-m",
             input_file,
             "-o",

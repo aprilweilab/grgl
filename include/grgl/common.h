@@ -61,6 +61,29 @@ public:
         : std::runtime_error(message) {}
 };
 
+// Represents an [inclusive, exlusive) range in integer positions.
+class IntRange {
+public:
+    IntRange()
+        : m_start(0),
+          m_end(std::numeric_limits<size_t>::max()) {}
+
+    explicit IntRange(size_t start, size_t end)
+        : m_start(start),
+          m_end(end) {}
+
+    size_t start() const { return m_start; }
+
+    size_t end() const { return m_end; }
+
+    bool contains(size_t position) const { return position >= m_start && position < m_end; }
+
+private:
+    size_t m_start;
+    size_t m_end;
+};
+
+// Represents an [inclusive, exlusive) range in floating point positions.
 class FloatRange {
 public:
     static constexpr double RANGE_UNSPECIFIED = std::numeric_limits<double>::quiet_NaN();
@@ -101,16 +124,19 @@ public:
         return *this;
     }
 
-    FloatRange denormalized(size_t absStart, size_t absEnd) const {
+    IntRange denormalized(size_t absStart, size_t absEnd) const {
         if (isUnspecified()) {
             return {};
         }
         if (isNormalized()) {
             const size_t span = (absEnd - absStart) + 1;
-            return {(m_start * (double)span) + (double)absStart, (m_end * (double)span) + (double)absStart};
+            return IntRange((size_t)((m_start * (double)span) + (double)absStart),
+                            (size_t)((m_end * (double)span) + (double)absStart));
         }
-        return *this;
+        return IntRange((size_t)(this->m_start), (size_t)(this->m_end));
     }
+
+    IntRange toIntRange() const { return IntRange((size_t)(this->m_start), (size_t)(this->m_end)); }
 
     bool contains(double position) const {
         assert(isUnspecified() || m_end > 1.0 || position <= 1.0);

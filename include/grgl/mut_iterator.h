@@ -35,6 +35,22 @@ struct bgen_partition;
 
 namespace grgl {
 
+using MutationIteratorFlags = uint64_t;
+enum {
+    ///< Empty flags.
+    MIT_FLAG_EMPTY = 0x0,
+    ///< Convert variants to be biallelic, collapsing alt alleles into a single one.
+    MIT_FLAG_BINARY_MUTATIONS = 0x1,
+    ///< If there is missing data, emit it as a separate Mutation.
+    MIT_FLAG_EMIT_MISSING_DATA = 0x2,
+    ///< Flip the major allele to be the reference allele, where necessary.
+    MIT_FLAG_FLIP_REF_MAJOR = 0x4,
+    ///< Skip mutations with no samples.
+    MIT_FLAG_SKIP_EMPTY = 0x8,
+    ///< Treat range as a range across _numbered variants_ instead of base pairs.
+    MIT_FLAG_USE_VARIANT_RANGE = 0x10,
+};
+
 class Mutation;
 
 struct MutationAndSamples {
@@ -58,14 +74,9 @@ struct MutationAndSamples {
  */
 class MutationIterator {
 public:
-    explicit MutationIterator(FloatRange genomeRange,
-                              bool binaryMutations,
-                              bool emitMissingData,
-                              bool flipRefMajor = false)
-        : m_genomeRange(genomeRange),
-          m_binaryMutations(binaryMutations),
-          m_emitMissingData(emitMissingData),
-          m_flipRefMajor(flipRefMajor) {}
+    explicit MutationIterator(FloatRange genomeRange, MutationIteratorFlags flags)
+        : m_genomeRange(genomeRange.toIntRange()),
+          m_flags(flags) {}
     virtual ~MutationIterator() = default;
 
     MutationIterator(const MutationIterator& rhs) = delete;
@@ -79,12 +90,24 @@ public:
 
     virtual size_t countMutations() const = 0;
 
+    bool inRange(size_t variantIndex, size_t position) const;
+
     bool next(MutationAndSamples& mutAndSamples, size_t& totalSamples);
     void reset();
 
     size_t numFlippedAlleles() const { return m_flippedAlleles; }
 
-    FloatRange getBpRange() const { return m_genomeRange; }
+    IntRange getBpRange() const { return m_genomeRange; }
+
+    bool binaryMutations() const { return (bool)(m_flags & MIT_FLAG_BINARY_MUTATIONS); }
+
+    bool emitMissingData() const { return (bool)(m_flags & MIT_FLAG_EMIT_MISSING_DATA); }
+
+    bool flipRefMajor() const { return (bool)(m_flags & MIT_FLAG_FLIP_REF_MAJOR); }
+
+    bool skipEmpty() const { return (bool)(m_flags & MIT_FLAG_SKIP_EMPTY); }
+
+    bool useVariantRange() const { return (bool)(m_flags & MIT_FLAG_USE_VARIANT_RANGE); }
 
 protected:
     virtual void buffer_next(size_t& totalSamples) = 0;
@@ -94,27 +117,28 @@ protected:
     std::list<MutationAndSamples> m_alreadyLoaded;
 
     // Range to use.
-    FloatRange m_genomeRange;
+    IntRange m_genomeRange;
+
+    // Current variant (index)
+    size_t m_currentVariant{};
 
     // How many alleles were flipped due to m_flipRefMajor?
     size_t m_flippedAlleles{};
     // Remember how many samples we saw last "row"
     size_t m_totalSamples{};
-    bool m_binaryMutations;
-    bool m_emitMissingData;
-    bool m_flipRefMajor;
+    MutationIteratorFlags m_flags;
 };
 
 /**
  * Iterate the mutations in a VCF file.
  *
- * TODO: if we keep this around, should consider adding an index file that maps genome position to
- * file position.
+ * NOTES:
+ * 1. This does not support fast random access to VCF, thus can be extremely slow for generating a GRG.
+ * 2. This only supports VCFs that have all alleles on the same row, not one allele per row.
  */
 class VCFMutationIterator : public MutationIterator {
 public:
-    explicit VCFMutationIterator(
-        const char* filename, FloatRange genomeRange, bool binaryMutations, bool emitMissingData, bool flipRefMajor);
+    explicit VCFMutationIterator(const char* filename, FloatRange genomeRange, MutationIteratorFlags flags);
 
     void getMetadata(size_t& ploidy, size_t& numIndividuals, bool& isPhased) override;
     size_t countMutations() const override;
@@ -133,8 +157,7 @@ private:
  */
 class IGDMutationIterator : public MutationIterator {
 public:
-    explicit IGDMutationIterator(
-        const char* filename, FloatRange genomeRange, bool binaryMutations, bool emitMissingData, bool flipRefMajor);
+    explicit IGDMutationIterator(const char* filename, FloatRange genomeRange, MutationIteratorFlags flags);
 
     void getMetadata(size_t& ploidy, size_t& numIndividuals, bool& isPhased) override;
     size_t countMutations() const override;
@@ -146,8 +169,7 @@ protected:
 
 private:
     std::unique_ptr<picovcf::IGDData> m_igd;
-    size_t m_startVariant;
-    size_t m_currentVariant;
+    size_t m_startVariant{};
 };
 
 #if BGEN_ENABLED
@@ -158,8 +180,7 @@ private:
  */
 class BGENMutationIterator : public MutationIterator {
 public:
-    explicit BGENMutationIterator(
-        const char* filename, FloatRange genomeRange, bool binaryMutations, bool emitMissingData, bool flipRefMajor);
+    explicit BGENMutationIterator(const char* filename, FloatRange genomeRange, MutationIteratorFlags flags);
     ~BGENMutationIterator() override;
 
     void getMetadata(size_t& ploidy, size_t& numIndividuals, bool& isPhased) override;
@@ -177,8 +198,8 @@ private:
 };
 #endif
 
-std::shared_ptr<grgl::MutationIterator> makeMutationIterator(
-    const std::string& filename, FloatRange genomeRange, bool binaryMutations, bool emitMissingData, bool flipRefMajor);
+std::shared_ptr<grgl::MutationIterator>
+makeMutationIterator(const std::string& filename, FloatRange genomeRange, MutationIteratorFlags flags);
 
 } // namespace grgl
 

@@ -255,6 +255,7 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
                                         FloatRange& genomeRange,
                                         size_t bitsPerMutation,
                                         GrgBuildFlags buildFlags,
+                                        MutationIteratorFlags itFlags,
                                         const double dropBelowThreshold,
                                         const std::map<std::string, std::string>& indivIdToPop,
                                         const size_t tripletLevels) {
@@ -269,11 +270,7 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
     } while (0)
 
     GRGBS_LOG_OUTPUT("Building genotype hash index..." << std::endl);
-    const bool useBinaryMuts = static_cast<bool>(buildFlags & GBF_USE_BINARY_MUTS);
-    const bool emitMissingData = static_cast<bool>(buildFlags & GBF_EMIT_MISSING_DATA);
-    const bool flipRefMajor = static_cast<bool>(buildFlags & GBF_FLIP_REF_MAJOR);
-    std::shared_ptr<grgl::MutationIterator> mutationIterator =
-        makeMutationIterator(sampleFile, genomeRange, useBinaryMuts, emitMissingData, flipRefMajor);
+    std::shared_ptr<grgl::MutationIterator> mutationIterator = makeMutationIterator(sampleFile, genomeRange, itFlags);
     auto operationStartTime = std::chrono::high_resolution_clock::now();
     uint16_t ploidy = genotypeHashIndex(*mutationIterator, hashIndex, bitsPerMutation, dropBelowThreshold);
     GRGBS_LOG_OUTPUT("** Hashing input took " << std::chrono::duration_cast<std::chrono::milliseconds>(

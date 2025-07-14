@@ -21,7 +21,7 @@ using namespace grgl;
 class TestMutationIterator : public MutationIterator {
 public:
     explicit TestMutationIterator(std::vector<Mutation> muts, std::vector<NodeIDList> samples)
-            : MutationIterator({0, 1000}, false, false) {
+            : MutationIterator({0, 1000}, MIT_FLAG_EMPTY) {
         for (size_t i = 0; i < muts.size(); i++) {
             this->m_alreadyLoaded.push_back({muts.at(i), samples.at(i)});
         }
