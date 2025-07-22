@@ -136,6 +136,32 @@ class TestGrgBasic(unittest.TestCase):
         if CLEANUP:
             os.remove(grg_filename)
 
+    def test_igd_unphased(self):
+        igd_filename = "test-200-samples.unphased.igd"
+        cmd = [
+            "igdtools",
+            os.path.join(INPUT_DIR, "test-200-samples.vcf.gz"),
+            "--force-unphased",
+            "-o",
+            igd_filename,
+        ]
+        subprocess.check_call(cmd)
+        grg_filename = construct_grg(igd_filename, test_input=False)
+        grg = pygrgl.load_immutable_grg(grg_filename)
+        self.assertEqual(grg.num_samples, self.grg.num_samples)
+        self.assertEqual(grg.num_individuals, self.grg.num_individuals)
+        self.assertEqual(grg.num_mutations, self.grg.num_mutations)
+        self.assertFalse(grg.is_phased)
+        self.assertTrue(self.grg.is_phased)
+
+        shape = (1, grg.num_samples)
+        from_igd = pygrgl.matmul(grg, np.ones(shape), pygrgl.TraversalDirection.UP)
+        from_vcf = pygrgl.matmul(self.grg, np.ones(shape), pygrgl.TraversalDirection.UP)
+
+        self.assertTrue(np.allclose(from_igd, from_vcf))
+        if CLEANUP:
+            os.remove(grg_filename)
+
     @classmethod
     def tearDownClass(cls):
         if CLEANUP:

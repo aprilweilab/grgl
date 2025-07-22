@@ -93,6 +93,7 @@ static inline void dumpStats(const GRGPtr& grg, const bool calculateNaiveEdges =
     std::cout << "Samples: " << grg->numSamples() << std::endl;
     std::cout << "Mutations: " << grg->getMutations().size() << std::endl;
     std::cout << "Ploidy: " << grg->getPloidy() << std::endl;
+    std::cout << "Phased: " << (grg->isPhased() ? "true" : "false") << std::endl;
     std::cout << "Populations: " << grg->getPopulations().size() << std::endl;
     std::cout << "Range of mutations: " << grg->getBPRange().first << " - " << grg->getBPRange().second << std::endl;
     std::cout << "Specified range: " << grg->getSpecifiedBPRange().first << " - " << grg->getSpecifiedBPRange().second
