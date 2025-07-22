@@ -86,18 +86,20 @@ static inline size_t getNaiveEdgeCount(const GRGPtr& grg) {
     return edgeCount;
 }
 
-static inline void dumpStats(const GRGPtr& grg) {
+static inline void dumpStats(const GRGPtr& grg, const bool calculateNaiveEdges = false) {
     std::cout << "=== GRG Statistics ===" << std::endl;
     std::cout << "Nodes: " << grg->numNodes() << std::endl;
     std::cout << "Edges: " << grg->numEdges() << std::endl;
     std::cout << "Samples: " << grg->numSamples() << std::endl;
     std::cout << "Mutations: " << grg->getMutations().size() << std::endl;
-    std::cout << "Naive Edges: " << getNaiveEdgeCount(grg) << std::endl;
     std::cout << "Ploidy: " << grg->getPloidy() << std::endl;
     std::cout << "Populations: " << grg->getPopulations().size() << std::endl;
     std::cout << "Range of mutations: " << grg->getBPRange().first << " - " << grg->getBPRange().second << std::endl;
     std::cout << "Specified range: " << grg->getSpecifiedBPRange().first << " - " << grg->getSpecifiedBPRange().second
               << std::endl;
+    if (calculateNaiveEdges) {
+        std::cout << "Naive Edges: " << getNaiveEdgeCount(grg) << std::endl;
+    }
     std::cout << "======================" << std::endl;
 }
 
