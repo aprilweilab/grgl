@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <random>
 #include <sstream>
 #include <sys/stat.h>
 
@@ -193,6 +194,8 @@ size_t VCFMutationIterator::countMutations() const {
     return mutations;
 }
 
+size_t VCFMutationIterator::totalFileVariants() const { return m_vcf->numVariants(); }
+
 std::vector<std::string> VCFMutationIterator::getIndividualIds() { return m_vcf->getIndividualLabels(); }
 
 void VCFMutationIterator::buffer_next(size_t& totalSamples) {
@@ -315,9 +318,15 @@ size_t IGDMutationIterator::countMutations() const {
     return mutations;
 }
 
+size_t IGDMutationIterator::totalFileVariants() const { return m_igd->numVariants(); }
+
 std::vector<std::string> IGDMutationIterator::getIndividualIds() { return std::move(m_igd->getIndividualIds()); }
 
 void IGDMutationIterator::buffer_next(size_t& totalSamples) {
+    static std::random_device randDevice;
+    static std::mt19937 generator(randDevice());
+    std::uniform_int_distribution<size_t> copySampler(0, m_igd->getPloidy() - 1);
+
     release_assert(m_currentVariant >= m_startVariant);
     totalSamples = m_igd->numSamples();
 
@@ -478,6 +487,8 @@ size_t BGENMutationIterator::countMutations() const {
     }
     return mutations;
 }
+
+size_t BGENMutationIterator::totalFileVariants() const { return bgen_partition_nvariants(m_partition); }
 
 std::vector<std::string> BGENMutationIterator::getIndividualIds() {
     if (bgen_file_contain_samples(m_file)) {

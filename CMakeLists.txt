@@ -110,7 +110,7 @@ set(GRGL_PUBLIC_HEADERS
   )
 
 set(GRGL_CORE_SOURCES
-    ${CMAKE_CURRENT_LIST_DIR}/src/build_shape.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/fast_build.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/hap_index.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/grg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/grg_merge.cpp
@@ -139,10 +139,17 @@ endif()
 
 # In order to use this, grab https://github.com/gperftools/gperftools/releases/download/gperftools-2.15/gperftools-2.15.tar.gz
 # and unzip it to the top-level grgl repo directory, and do "./configure && make"
+#
+# The linking doesn't always work, so you should also use LD_PRELOAD:
+# LD_PRELOAD=./gperftools-2.15/.libs/libprofiler.so CPUPROFILE=$PWD/grgl_prof ./build/grgl ...
+#
+# Then examine the result with:
+# ./gperftools-2.15/src/pprof build/grgl grgl_prof --cum --text
 if (${ENABLE_CPU_PROF})
   include_directories(${CMAKE_CURRENT_LIST_DIR}/gperftools-2.15/src/)
   add_compile_options(-g) # Turn on symbols (but not debug mode)
   set(GRGP_LIBS ${CMAKE_CURRENT_LIST_DIR}/gperftools-2.15/.libs/libprofiler.a unwind)
+  set(GRGL_EXTRA_LIBS ${CMAKE_CURRENT_LIST_DIR}/gperftools-2.15/.libs/libprofiler.a unwind)
 endif()
 
 # We don't need AMPL bindings from gsl.
@@ -174,7 +181,7 @@ add_executable(grgl_tool
                ${CMAKE_CURRENT_LIST_DIR}/src/grgl.cpp
                )
 set_target_properties(grgl_tool PROPERTIES OUTPUT_NAME "grgl")
-target_link_libraries(grgl_tool tskit grgl ${BGEN_LIBS} z vbyte)
+target_link_libraries(grgl_tool tskit grgl ${BGEN_LIBS} z vbyte ${GRGL_EXTRA_LIBS})
 
 # Tool for processing GRG files (stats, etc).
 add_executable(grgp_tool

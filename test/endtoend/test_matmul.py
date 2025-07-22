@@ -10,6 +10,7 @@ JOBS = 4
 CLEANUP = True
 
 THIS_DIR = os.path.dirname(os.path.realpath(__file__))
+from testing_utils import construct_grg
 
 INPUT_DIR = os.path.join(THIS_DIR, "input")
 
@@ -32,26 +33,6 @@ def grg2X(grg: pygrgl.GRG, individual: bool = False):
             for mut_id in muts_above[node_id]:
                 result[sample_index][mut_id] += 1
     return result
-
-
-def construct_grg(input_file: str, output_file: Optional[str] = None) -> str:
-    cmd = [
-        "grg",
-        "construct",
-        "-p",
-        "10",
-        "-t",
-        "2",
-        "-j",
-        str(JOBS),
-        os.path.join(INPUT_DIR, input_file),
-    ]
-    if output_file is not None:
-        cmd.extend(["-o", output_file])
-    else:
-        output_file = os.path.basename(input_file) + ".final.grg"
-    subprocess.check_call(cmd)
-    return output_file
 
 
 class TestMatrixMultiplication(unittest.TestCase):

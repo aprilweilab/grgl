@@ -15,8 +15,6 @@ def construct_grg(
         "construct",
         "-p",
         "10",
-        "-t",
-        "2",
         "-j",
         str(JOBS),
         os.path.join(INPUT_DIR, input_file) if test_input else input_file,

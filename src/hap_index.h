@@ -69,10 +69,10 @@ public:
      */
     NodeIDList getMostSimilarNodes(NodeID nodeId, bool collectAll);
 
-    void emitStats() const {
-        std::cout << " -- Index Stats --" << std::endl;
-        std::cout << "  -> Comparisons: " << m_comparisons << std::endl;
-        m_bkTree.dumpStats();
+    void emitStats(std::ostream& stream) const {
+        stream << " -- Index Stats --" << std::endl;
+        stream << "  -> Comparisons: " << m_comparisons << std::endl;
+        m_bkTree.dumpStats(stream);
     }
 
 private:

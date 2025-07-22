@@ -316,12 +316,12 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     return addedNodes;
 }
 
-MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations) {
+MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose) {
     auto operationStartTime = std::chrono::high_resolution_clock::now();
 #define START_TIMING_OPERATION() operationStartTime = std::chrono::high_resolution_clock::now();
 #define EMIT_TIMING_MESSAGE(msg)                                                                                       \
     do {                                                                                                               \
-        std::cout << msg                                                                                               \
+        std::cerr << msg                                                                                               \
                   << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - \
                                                                            operationStartTime)                         \
                          .count()                                                                                      \
@@ -342,7 +342,9 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
     fastCompleteDFS(grg, countVisitor);
     std::vector<NodeIDSizeT>& sampleCounts = countVisitor.m_sampleCounts;
 
-    std::cout << "Mapping " << stats.totalMutations << " mutations\n";
+    if (verbose) {
+        std::cout << "Mapping " << stats.totalMutations << " mutations\n";
+    }
     const size_t onePercent = (stats.totalMutations / ONE_HUNDRED_PERCENT) + 1;
     size_t completed = 0;
 
@@ -355,12 +357,8 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
     size_t _ignored = 0;
     MutationAndSamples unmapped = {Mutation(0.0, ""), NodeIDList()};
     while (mutations.next(unmapped, _ignored)) {
-        bool tracing = false;
         const NodeIDList& mutSamples = unmapped.samples;
         if (!mutSamples.empty()) {
-            if (tracing) {
-                std::cout << ">>> Has " << mutSamples.size() << " samples\n";
-            }
             stats.samplesProcessed += mutSamples.size();
             if (mutSamples.size() == 1) {
                 stats.mutationsWithOneSample++;
@@ -385,19 +383,21 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
         }
         completed++;
         const size_t percentCompleted = (completed / onePercent);
-        if ((completed % onePercent == 0)) {
-            std::cout << percentCompleted << "% done" << std::endl;
-        }
-        if ((completed % (EMIT_STATS_AT_PERCENT * onePercent) == 0)) {
-            std::cout << "Last mutation sampleset size: " << mutSamples.size() << std::endl;
-            std::cout << "GRG nodes: " << grg->numNodes() << std::endl;
-            std::cout << "GRG edges: " << grg->numEdges() << std::endl;
-            stats.print(std::cout);
-        }
-        if ((completed % (COMPACT_EDGES_AT_PERCENT * onePercent) == 0)) {
-            START_TIMING_OPERATION();
-            grg->compact();
-            EMIT_TIMING_MESSAGE("Compacting GRG edges took ");
+        if (verbose) {
+            if ((completed % onePercent == 0)) {
+                std::cout << percentCompleted << "% done" << std::endl;
+            }
+            if ((completed % (EMIT_STATS_AT_PERCENT * onePercent) == 0)) {
+                std::cout << "Last mutation sampleset size: " << mutSamples.size() << std::endl;
+                std::cout << "GRG nodes: " << grg->numNodes() << std::endl;
+                std::cout << "GRG edges: " << grg->numEdges() << std::endl;
+                stats.print(std::cout);
+            }
+            if ((completed % (COMPACT_EDGES_AT_PERCENT * onePercent) == 0)) {
+                START_TIMING_OPERATION();
+                grg->compact();
+                EMIT_TIMING_MESSAGE("Compacting GRG edges took ");
+            }
         }
     }
     return stats;

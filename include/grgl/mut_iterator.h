@@ -89,6 +89,7 @@ public:
     virtual std::vector<std::string> getIndividualIds() = 0;
 
     virtual size_t countMutations() const = 0;
+    virtual size_t totalFileVariants() const = 0;
 
     bool inRange(size_t variantIndex, size_t position) const;
 
@@ -142,6 +143,7 @@ public:
 
     void getMetadata(size_t& ploidy, size_t& numIndividuals, bool& isPhased) override;
     size_t countMutations() const override;
+    size_t totalFileVariants() const override;
     std::vector<std::string> getIndividualIds() override;
 
 protected:
@@ -161,6 +163,7 @@ public:
 
     void getMetadata(size_t& ploidy, size_t& numIndividuals, bool& isPhased) override;
     size_t countMutations() const override;
+    size_t totalFileVariants() const override;
     std::vector<std::string> getIndividualIds() override;
 
 protected:
@@ -185,6 +188,7 @@ public:
 
     void getMetadata(size_t& ploidy, size_t& numIndividuals, bool& isPhased) override;
     size_t countMutations() const override;
+    size_t totalFileVariants() const override;
     std::vector<std::string> getIndividualIds() override;
 
 protected:

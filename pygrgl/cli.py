@@ -17,6 +17,7 @@ from .clicmd import construct
 from .clicmd import convert
 from .clicmd import process
 from .clicmd import split
+from .clicmd import merge
 from .clicmd.common import which
 import argparse
 import subprocess
@@ -26,6 +27,7 @@ CMD_CONVERT = "convert"
 CMD_CONSTRUCT = "construct"
 CMD_PROCESS = "process"
 CMD_SPLIT = "split"
+CMD_MERGE = "merge"
 
 
 def main():
@@ -49,6 +51,10 @@ def main():
         CMD_SPLIT, help="Split a GRG into smaller pieces."
     )
     split.add_options(split_parser)
+    merge_parser = subparsers.add_parser(
+        CMD_MERGE, help="MERGE a GRG from smaller pieces."
+    )
+    merge.add_options(merge_parser)
     args = parser.parse_args()
 
     if args.version:
@@ -66,6 +72,8 @@ def main():
         process.process_command(args)
     elif args.command == CMD_SPLIT:
         split.do_split(args)
+    elif args.command == CMD_MERGE:
+        merge.merge_command(args)
     else:
         print(f"Invalid command {args.command}", file=sys.stderr)
         parser.print_help()

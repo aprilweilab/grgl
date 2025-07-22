@@ -227,6 +227,8 @@ inline MapType loadMapFromTSV(const std::string& filename,
     return std::move(result);
 }
 
+inline std::string pathJoin(const std::string& path1, const std::string& path2) { return path1 + "/" + path2; }
+
 inline bool pathExists(const std::string& pathname) {
     struct stat statBuf;
     return (stat(pathname.c_str(), &statBuf) == 0);
@@ -235,6 +237,8 @@ inline bool pathExists(const std::string& pathname) {
 inline void makeDir(const std::string& pathname) {
     release_assert(0 == mkdir(pathname.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH));
 }
+
+inline void deleteFile(const std::string& filename) { release_assert(0 == remove(filename.c_str())); }
 
 inline std::string removeExt(const std::string& pathname) {
     size_t pos = pathname.find_last_of('.');
@@ -250,6 +254,21 @@ inline std::string basename(const std::string& pathname) {
         return std::move(pathname.substr(pos + 1));
     }
     return pathname;
+}
+
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+
+inline std::string getTmpDir() {
+    // TODO: let users have an environment variable that overrides this location
+    // These are evaluated in order from left to right.
+    static const char* possiblePosix[] = {"TMPDIR", "TMP", "TEMP", "TEMPDIR"};
+    for (size_t i = 0; i < ARRAY_SIZE(possiblePosix); i++) {
+        const char* result = std::getenv(possiblePosix[i]);
+        if (result != nullptr) {
+            return result;
+        }
+    }
+    return "/tmp";
 }
 
 #endif /* GRGL_UTIL_H */

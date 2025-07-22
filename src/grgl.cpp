@@ -23,8 +23,8 @@
 #include <thread>
 #include <tskit.h>
 
-#include "build_shape.h"
 #include "calculations.h"
+#include "fast_build.h"
 #include "grg_helpers.h"
 #include "grgl/grg.h"
 #include "grgl/map_mutations.h"
@@ -81,47 +81,15 @@ int main(int argc, char** argv) {
         "Only construct GRG for the given genome range: 'x:y' means [x, y) (x inclusive, y exclusive)",
         {'r', "range"});
     args::Flag noSimplify(parser, "no-simplify", "Compare the results to the given GRG", {'l', "no-simplify"});
-    args::ValueFlag<size_t> bpm(
-        parser,
-        "bits-per-mut",
-        "How many bits per mutation (on avg) should we use when comparing samples? (default: 4)",
-        {'p', "bits-per-mut"});
     args::Flag MAFFlip(
         parser, "maf-flip", "Switch the reference allele with the major allele when they differ", {"maf-flip"});
     args::Flag showVersion(parser, "version", "Show version and exit", {"version"});
-    args::ValueFlag<size_t> triplet(parser,
-                                    "bs-triplet",
-                                    "Run the BuildShape triplet algorithm for at most this number of levels.",
-                                    {"bs-triplet"});
     args::ValueFlag<std::string> missingData(
         parser,
         "missing-data",
         "How to handle missing data: \"ignore\" (default), \"add\" (add to GRG), \"separate\""
         " (emit separate GRG for missing data)",
         {'d', "missing-data"});
-    args::ValueFlag<double> lfFilter(
-        parser,
-        "lf-filter",
-        "Filter out variants with frequency less than this threshold. If >= 1.0, it is a count."
-        " If <1.0 then it is a frequency. Default: 10",
-        {'f', "lf-filter"});
-    args::Flag tsNodeTimes(parser,
-                           "ts-node-times",
-                           "When converting tree-seq, use node times instead of mutation times",
-                           {"ts-node-times"});
-    args::Flag maintainTopo(
-        parser,
-        "maintain-topo",
-        "When converting tree-seq, maintain all topology below mutations (at the cost of a larger graph)",
-        {"maintain-topo"});
-    args::Flag tsComputeCoals(
-        parser, "ts-coals", "When converting tree-seq, compute node individual coalescences.", {"ts-coals"});
-
-    args::ValueFlag<std::string> populationIds(parser,
-                                               "population-ids",
-                                               "Format: \"filename:fieldname\". Read population ids from the given "
-                                               "tab-separate file, using the given fieldname.",
-                                               {"population-ids"});
     args::ValueFlag<std::string> windowedSplit(
         parser,
         "windowedSplit",
@@ -138,8 +106,45 @@ int main(int argc, char** argv) {
         "jobs",
         "Use this many threads for the given task. Currently only applies to the --split command",
         {'j', "jobs"});
+
+    ///// Build tree (shape) related arguments /////
+    args::ValueFlag<double> lfNoTree(
+        parser,
+        "lf-no-tree",
+        "Ignore variants with frequency less than this threshold, for tree building. If >= 1.0, it is a count."
+        " If <1.0 then it is a frequency. Default: 1.0",
+        {'f', "lf-no-tree"});
     args::Flag noIndividualIds(
         parser, "no-indiv-ids", "Do not store individual string identifiers in the GRG", {"no-indiv-ids"});
+    args::Flag countVariants(
+        parser, "count-variants", "Just count the number of variants in the input file.", {"count-variants"});
+    args::Flag noTreeMap(parser, "no-tree-map", "Don't map mutations during tree building.", {"no-tree-map"});
+    args::ValueFlag<std::string> treesArg(
+        parser,
+        "trees",
+        "How many trees to use to span the region. Either an integer between 1-K (where K is number of variants "
+        " in the region) or a string value of 'optimal' (best for compression), 'faster1' (less optimal), "
+        "'faster2' (even less optimal).",
+        {"trees"});
+
+    ///// Tree-sequence related arguments /////
+    args::Flag tsNodeTimes(parser,
+                           "ts-node-times",
+                           "When converting tree-seq, use node times instead of mutation times",
+                           {"ts-node-times"});
+    args::Flag maintainTopo(
+        parser,
+        "maintain-topo",
+        "When converting tree-seq, maintain all topology below mutations (at the cost of a larger graph)",
+        {"maintain-topo"});
+    args::Flag tsComputeCoals(
+        parser, "ts-coals", "When converting tree-seq, compute node individual coalescences.", {"ts-coals"});
+    args::ValueFlag<std::string> populationIds(parser,
+                                               "population-ids",
+                                               "Format: \"filename:fieldname\". Read population ids from the given "
+                                               "tab-separate file, using the given fieldname.",
+                                               {"population-ids"});
+
     try {
         parser.ParseCLI(argc, argv);
     } catch (args::Help&) {
@@ -166,7 +171,6 @@ int main(int argc, char** argv) {
     std::cout << std::fixed << std::setprecision(4);
 
     // Default values for parameters.
-    const size_t bitsPerMutation = bpm ? *bpm : 4;
     MissingDataHandling missingDataHandling =
         missingData ? (*missingData == "ignore"
                            ? MDH_IGNORE
@@ -225,11 +229,19 @@ int main(int argc, char** argv) {
         }
         indivIdToPop = loadMapFromTSV(parts[0], "sample", parts[1]);
     }
-    std::cout << "loaded " << indivIdToPop.size() << " id->pops\n";
+
+#define UNSUPPORTED_FOR_INPUT(parameter, parameterName)                                                                \
+    do {                                                                                                               \
+        if ((bool)(parameter)) {                                                                                       \
+            std::cerr << "Parameter " << (parameterName) << " is not supported for the given input type" << std::endl; \
+            return 1;                                                                                                  \
+        }                                                                                                              \
+    } while (0)
 
     grgl::GRGPtr theGRG;
     START_TIMING_OPERATION();
     if (ends_with(*infile, ".trees")) {
+        UNSUPPORTED_FOR_INPUT(countVariants, "--count-variants");
         tsk_treeseq_t treeSeq;
         TSKIT_OK_OR_EXIT(tsk_treeseq_load(&treeSeq, infile->c_str(), 0), "Failed to load tree-seq");
 
@@ -250,30 +262,68 @@ int main(int argc, char** argv) {
             std::cerr << "Failed to load " << *infile << std::endl;
             return 2;
         }
+        if (countVariants) {
+            std::cout << theGRG->numMutations() << std::endl;
+            return 0;
+        }
     } else if (supportedInputFormat(*infile)) {
-        uint64_t buildFlags = grgl::GBF_VERBOSE_OUTPUT;
+        if (countVariants) {
+            std::shared_ptr<grgl::MutationIterator> mutIt = makeMutationIterator(*infile, restrictRange, itFlags);
+            if (!mutIt) {
+                std::cerr << "Could not load input file " << *infile << std::endl;
+                return 1;
+            }
+
+            std::cout << mutIt->totalFileVariants() << std::endl;
+            return 0;
+        }
+
+        uint64_t buildFlags = verbose ? grgl::GBF_VERBOSE_OUTPUT : grgl::GBF_EMPTY;
         if (noIndividualIds) {
             buildFlags |= grgl::GBF_NO_INDIVIDUAL_IDS;
         }
-        theGRG = grgl::createEmptyGRGFromSamples(*infile,
-                                                 restrictRange,
-                                                 bitsPerMutation,
-                                                 buildFlags,
-                                                 itFlags,
-                                                 lfFilter ? *lfFilter : 0.0,
-                                                 indivIdToPop,
-                                                 triplet ? *triplet : 0);
-        dumpStats(theGRG);
+        if (noTreeMap) {
+            buildFlags |= grgl::GBF_NO_TREE_MAP;
+        }
+        size_t treeCount = 0;
+        if (treesArg) {
+            if (*treesArg == "optimal") {
+            } else if (*treesArg == "faster1") {
+                buildFlags |= grgl::GBF_TREES_FASTER1;
+            } else if (*treesArg == "faster2") {
+                buildFlags |= grgl::GBF_TREES_FASTER2;
+            } else {
+                uint32_t numTrees = 0;
+                if (!parseExactUint32(*treesArg, numTrees)) {
+                    throw std::runtime_error("Cannot parse --trees arguments");
+                }
+                treeCount = (size_t)numTrees;
+                if (treeCount == 0) {
+                    throw std::runtime_error("Must provide non-zero --trees arguments");
+                }
+            }
+        }
+
+        theGRG = grgl::fastGRGFromSamples(outfile ? *outfile : *infile,
+                                          *infile,
+                                          restrictRange,
+                                          buildFlags,
+                                          itFlags,
+                                          treeCount,
+                                          lfNoTree ? *lfNoTree : 0.0,
+                                          indivIdToPop);
     } else {
         std::cerr << "Unsupported/undetected filetype for " << *infile << std::endl;
         std::cerr << "Only .trees and .grg files are supported currently." << std::endl;
         return 1;
     }
-    EMIT_TIMING_MESSAGE("Construction took ");
+    if (verbose) {
+        EMIT_TIMING_MESSAGE("Construction took ");
+    }
 
     if (mapMutations) {
-        if (lfFilter) {
-            std::cerr << "TODO: lf-filter not yet supported for mutation mapping" << std::endl;
+        if (lfNoTree) {
+            std::cerr << "lf-no-tree not supported for mutation mapping" << std::endl;
             abort();
         }
         START_TIMING_OPERATION();
@@ -284,14 +334,16 @@ int main(int argc, char** argv) {
             return 1;
         }
         grgl::MutationMappingStats stats;
-        stats = grgl::mapMutations(std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG), *unmappedMutations);
-        EMIT_TIMING_MESSAGE("Mapping mutations took");
-        std::cout << std::endl;
-        std::cout << "=== Stats ===" << std::endl;
-        stats.print(std::cout);
-        std::cout << "Final node count: " << theGRG->numNodes() << std::endl;
-        std::cout << "Final edge count: " << theGRG->numEdges() << std::endl;
-        std::cout << std::endl;
+        stats = grgl::mapMutations(std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG), *unmappedMutations, verbose);
+        if (verbose) {
+            EMIT_TIMING_MESSAGE("Mapping mutations took");
+            std::cerr << std::endl;
+            std::cerr << "=== Stats ===" << std::endl;
+            stats.print(std::cerr);
+            std::cerr << "Final node count: " << theGRG->numNodes() << std::endl;
+            std::cerr << "Final edge count: " << theGRG->numEdges() << std::endl;
+            std::cerr << std::endl;
+        }
     }
 
     if (showStats) {
@@ -414,11 +466,12 @@ int main(int argc, char** argv) {
     } else if (outfile) {
         START_TIMING_OPERATION();
         auto counts = saveGRG(theGRG, *outfile, !noSimplify);
-        std::cout << "Wrote simplified GRG with:" << std::endl;
-        std::cout << "  Nodes: " << counts.first << std::endl;
-        std::cout << "  Edges: " << counts.second << std::endl;
-
-        EMIT_TIMING_MESSAGE("Wrote GRG to " << *outfile << " in ");
+        if (verbose) {
+            std::cout << "Wrote simplified GRG with:" << std::endl;
+            std::cout << "  Nodes: " << counts.first << std::endl;
+            std::cout << "  Edges: " << counts.second << std::endl;
+            EMIT_TIMING_MESSAGE("Wrote GRG to " << *outfile << " in ");
+        }
     }
 
     return 0;
