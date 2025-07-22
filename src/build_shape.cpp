@@ -187,16 +187,11 @@ static void getMutStats(MutationIterator& iterator,
     }
 }
 
-uint16_t genotypeHashIndex(MutationIterator& mutIterator,
-                           grgl::NodeToHapVect& hashIndex,
-                           const size_t bitsPerMutation,
-                           const double dropBelowThreshold) {
-    size_t ploidy = 0;
-    size_t numIndividuals = 0;
-    bool isPhased = false;
-    mutIterator.getMetadata(ploidy, numIndividuals, isPhased);
-    const size_t numSamples = ploidy * numIndividuals;
-
+void genotypeHashIndex(MutationIterator& mutIterator,
+                       grgl::NodeToHapVect& hashIndex,
+                       const size_t numSamples,
+                       const size_t bitsPerMutation,
+                       const double dropBelowThreshold) {
     size_t dropBelowCount = 0;
     if (dropBelowThreshold < 1.0) {
         dropBelowCount = (size_t)((double)numSamples * dropBelowThreshold);
@@ -248,7 +243,6 @@ uint16_t genotypeHashIndex(MutationIterator& mutIterator,
         std::cout << "Flipped " << mutIterator.numFlippedAlleles() << " reference alleles (to the major allele)"
                   << std::endl;
     }
-    return static_cast<uint16_t>(ploidy);
 }
 
 MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
@@ -269,17 +263,24 @@ MutableGRGPtr createEmptyGRGFromSamples(const std::string& sampleFile,
         }                                                                                                              \
     } while (0)
 
-    GRGBS_LOG_OUTPUT("Building genotype hash index..." << std::endl);
     std::shared_ptr<grgl::MutationIterator> mutationIterator = makeMutationIterator(sampleFile, genomeRange, itFlags);
+
+    size_t ploidy = 0;
+    size_t numIndividuals = 0;
+    bool isPhased = false;
+    mutationIterator->getMetadata(ploidy, numIndividuals, isPhased);
+    const size_t numSamples = ploidy * numIndividuals;
+
+    GRGBS_LOG_OUTPUT("Building genotype hash index..." << std::endl);
     auto operationStartTime = std::chrono::high_resolution_clock::now();
-    uint16_t ploidy = genotypeHashIndex(*mutationIterator, hashIndex, bitsPerMutation, dropBelowThreshold);
+    genotypeHashIndex(*mutationIterator, hashIndex, numSamples, bitsPerMutation, dropBelowThreshold);
     GRGBS_LOG_OUTPUT("** Hashing input took " << std::chrono::duration_cast<std::chrono::milliseconds>(
                                                      std::chrono::high_resolution_clock::now() - operationStartTime)
                                                      .count()
                                               << " ms" << std::endl);
 
     GRGBS_LOG_OUTPUT("Done" << std::endl);
-    result = std::make_shared<MutableGRG>(hashIndex.size(), ploidy);
+    result = std::make_shared<MutableGRG>(hashIndex.size(), ploidy, isPhased);
 
     std::vector<std::string> indivIds;
     if (!indivIdToPop.empty()) {

@@ -82,9 +82,10 @@ public:
         DEFAULT_NODE_CAPACITY = 1024,
     };
 
-    explicit GRG(size_t numSamples, uint16_t ploidy)
+    explicit GRG(size_t numSamples, uint16_t ploidy, const bool phased = true)
         : m_numSamples(numSamples),
-          m_ploidy(ploidy) {
+          m_ploidy(ploidy),
+          m_phased(phased) {
         release_assert(numSamples % ploidy == 0);
     }
 
@@ -117,6 +118,15 @@ public:
      * @return The ploidy, usually 1 or 2. Individual coalescence support only works when ploidy==2.
      */
     uint16_t getPloidy() const { return m_ploidy; }
+
+    /**
+     * Is the dataset phased?
+     *
+     * If not, GRG still represents the data as a mapping between mutations and haploid samples, but
+     * you cannot depend on any haplotype-based analyses representing the true haplotypes. Individual-based
+     * analyses are still completely accurate.
+     */
+    bool isPhased() const { return m_phased; }
 
     /**
      * Returns true if nodes are ordered in bottom-up topological order.
@@ -545,6 +555,7 @@ protected:
 
     const size_t m_numSamples;
     const uint16_t m_ploidy;
+    const bool m_phased;
 
     // True if the mutationId order matches the (position, allele) order.
     bool m_mutsAreOrdered{false};
@@ -572,8 +583,11 @@ public:
      * @param[in] (Optional) the initial capacity of the node vector. If you know in advance roughly
      *      how many nodes will be created this can improve performance.
      */
-    explicit MutableGRG(size_t numSamples, uint16_t ploidy, size_t initialNodeCapacity = DEFAULT_NODE_CAPACITY)
-        : GRG(numSamples, ploidy) {
+    explicit MutableGRG(size_t numSamples,
+                        uint16_t ploidy,
+                        bool phased = true,
+                        size_t initialNodeCapacity = DEFAULT_NODE_CAPACITY)
+        : GRG(numSamples, ploidy, phased) {
         if (initialNodeCapacity < numSamples) {
             initialNodeCapacity = numSamples * 2;
         }
@@ -717,8 +731,8 @@ using LazyCSREdges32 = CSRStorageImm<LazyFileVector, uint32_t, true, true>;
 
 class CSRGRG : public GRG {
 public:
-    explicit CSRGRG(size_t numSamples, size_t nodeCount, uint16_t ploidy, bool loadUpEdges = true)
-        : GRG(numSamples, ploidy),
+    explicit CSRGRG(size_t numSamples, size_t nodeCount, uint16_t ploidy, bool loadUpEdges = true, bool phased = true)
+        : GRG(numSamples, ploidy, phased),
           m_downEdges(nodeCount),
           m_upEdges(loadUpEdges ? nodeCount : 0) {}
 

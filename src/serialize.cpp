@@ -358,7 +358,7 @@ simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutput
         static_cast<uint64_t>(grg->numEdges()),
         filter.isSpecified() ? filter.bpRange.first : grg->getSpecifiedBPRange().first,
         filter.isSpecified() ? filter.bpRange.second : grg->getSpecifiedBPRange().second,
-        0, /* Flags */
+        !grg->isPhased() ? GRG_FLAG_UNPHASED : 0, /* Flags */
         0,
         0,
         0,
@@ -554,7 +554,8 @@ MutableGRGPtr readMutableGrg(IFSPointer& inStream) {
     assert_deserialization(header.ploidy != 0, "Malformed GRG file: ploidy was 0");
 
     // Construct GRG and allocate all the nodes.
-    MutableGRGPtr grg = std::make_shared<MutableGRG>(header.sampleCount, header.ploidy, header.nodeCount);
+    MutableGRGPtr grg = std::make_shared<MutableGRG>(
+        header.sampleCount, header.ploidy, !hasFlag(header, GRG_FLAG_UNPHASED), header.nodeCount);
     grg->setSpecifiedBPRange({header.rangeStart, header.rangeEnd});
     grg->makeNode(header.nodeCount - header.sampleCount);
     release_assert(grg->numNodes() == header.nodeCount);
@@ -600,7 +601,8 @@ GRGPtr readImmutableGrg(IFSPointer& inStream, bool loadUpEdges) {
     assert_deserialization(header.ploidy != 0, "Malformed GRG file: ploidy was 0");
 
     // Construct GRG and allocate all the nodes.
-    CSRGRGPtr grg = std::make_shared<CSRGRG>(header.sampleCount, header.nodeCount, header.ploidy, loadUpEdges);
+    CSRGRGPtr grg = std::make_shared<CSRGRG>(
+        header.sampleCount, header.nodeCount, header.ploidy, loadUpEdges, !hasFlag(header, GRG_FLAG_UNPHASED));
     grg->setSpecifiedBPRange({header.rangeStart, header.rangeEnd});
 
     const size_t edgeBytes = readScalar<uint64_t>(*inStream);

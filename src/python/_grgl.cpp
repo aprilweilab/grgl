@@ -310,6 +310,13 @@ PYBIND11_MODULE(_grgl, m) {
         .def_property_readonly("ploidy", &grgl::GRG::getPloidy, R"^(
                 The ploidy of each individual.
             )^")
+        .def_property_readonly("is_phased", &grgl::GRG::isPhased, R"^(
+                Is the dataset phased?
+
+                If not, GRG still represents the data as a mapping between mutations and haploid samples, but
+                you cannot depend on any haplotype-based analyses representing the true haplotypes. Individual-based
+                analyses are still completely accurate.
+            )^")
         .def_property_readonly("bp_range", &grgl::GRG::getBPRange, R"^(
                 The range in base-pair positions that this GRG covers, from its list of mutations.
 

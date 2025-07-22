@@ -165,6 +165,8 @@ inline std::size_t hash_combine(std::size_t hash1, std::size_t hash2) {
 
 // Optional: set if the GRG has individual IDs, otherwise it is unset.
 constexpr uint64_t GRG_FLAG_HAS_INDIV_IDS = 0x1;
+// Set if the GRG contains unphased data.
+constexpr uint64_t GRG_FLAG_UNPHASED = 0x2;
 
 constexpr uint64_t GRG_FILE_MAGIC = 0xE9366C64DDC8C5B0;
 constexpr uint16_t GRG_FILE_MAJOR_VERSION = 5;

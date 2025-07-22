@@ -114,7 +114,7 @@ protected:
     virtual void reset_specific() = 0;
 
     // A buffer of loaded mutations from the current position/variant.
-    std::list<MutationAndSamples> m_alreadyLoaded;
+    std::vector<MutationAndSamples> m_alreadyLoaded;
 
     // Range to use.
     IntRange m_genomeRange;
