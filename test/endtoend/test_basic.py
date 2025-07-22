@@ -1,19 +1,21 @@
-import unittest
-import subprocess
-import os
-import numpy as np
-import pygrgl
 import glob
+import numpy as np
+import os
+import pygrgl
+import subprocess
+import sys
+import unittest
 from typing import List, Dict, Tuple, Optional
 
 JOBS = 4
 CLEANUP = True
 
 THIS_DIR = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(THIS_DIR)
+from testing_utils import construct_grg
 
 EXPECT_DIR = os.path.join(THIS_DIR, "expect")
 INPUT_DIR = os.path.join(THIS_DIR, "input")
-SCRIPTS_DIR = os.path.join(THIS_DIR, "..", "..", "scripts")
 
 
 def get_freqs_unordered(lines: List[str]) -> Dict[Tuple[str, str, str], int]:
@@ -27,28 +29,6 @@ def get_freqs_unordered(lines: List[str]) -> Dict[Tuple[str, str, str], int]:
             continue
         fmap[(float(pos), ref, alt)] = int(freq)
     return fmap
-
-
-def construct_grg(
-    input_file: str, output_file: Optional[str] = None, test_input: bool = True
-) -> str:
-    cmd = [
-        "grg",
-        "construct",
-        "-p",
-        "10",
-        "-t",
-        "2",
-        "-j",
-        str(JOBS),
-        os.path.join(INPUT_DIR, input_file) if test_input else input_file,
-    ]
-    if output_file is not None:
-        cmd.extend(["-o", output_file])
-    else:
-        output_file = os.path.basename(input_file) + ".final.grg"
-    subprocess.check_call(cmd)
-    return output_file
 
 
 class TestGrgBasic(unittest.TestCase):
