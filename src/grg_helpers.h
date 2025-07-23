@@ -142,15 +142,19 @@ saveGRG(const GRGPtr& theGRG, const std::string& filename, bool allowSimplify = 
     return grgl::writeGrg(theGRG, outStream, allowSimplify);
 }
 
-static inline void saveGRGSubset(const GRGPtr& theGRG,
+static inline bool saveGRGSubset(const GRGPtr& theGRG,
                                  const std::string& filename,
                                  const TraversalDirection direction,
                                  const NodeIDList& seedList,
                                  std::pair<BpPosition, BpPosition> bpRange = {}) {
-    std::ofstream outStream(filename, std::ios::binary);
     GRGOutputFilter filter(direction, seedList);
     filter.bpRange = bpRange;
+    if (seedList.empty()) {
+        return false;
+    }
+    std::ofstream outStream(filename, std::ios::binary);
     grgl::simplifyAndSerialize(theGRG, outStream, filter, true);
+    return true;
 }
 
 /**

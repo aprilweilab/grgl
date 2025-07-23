@@ -29,12 +29,13 @@ class TestGrgModify(unittest.TestCase):
 
     def test_downsample(self):
         sub_grg_filename = "test.downsample.grg"
-        pygrgl.save_subset(
+        saved = pygrgl.save_subset(
             self.grg,
             sub_grg_filename,
             pygrgl.TraversalDirection.UP,
             list(range(0, 200, 10)),
         )
+        self.assertTrue(saved)
         sub_grg = pygrgl.load_immutable_grg(sub_grg_filename)
         self.assertEqual(sub_grg.num_mutations, self.grg.num_mutations)
         self.assertEqual(sub_grg.num_samples, 20)
@@ -51,6 +52,17 @@ class TestGrgModify(unittest.TestCase):
 
         self.assertEqual(acount_full.shape, acount_sub.shape)
         numpy.testing.assert_array_equal(acount_full, acount_sub)
+
+    def test_downsample_fail(self):
+        sub_grg_filename = "test.downsample.fail.grg"
+        saved = pygrgl.save_subset(
+            self.grg,
+            sub_grg_filename,
+            pygrgl.TraversalDirection.DOWN,
+            [],
+        )
+        self.assertFalse(saved)
+        self.assertFalse(os.path.isfile(sub_grg_filename))
 
 
 if __name__ == "__main__":
