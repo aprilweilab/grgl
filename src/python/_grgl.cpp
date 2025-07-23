@@ -260,6 +260,16 @@ sharedFrontier(const grgl::GRGPtr& grg, grgl::TraversalDirection direction, cons
     return std::move(visitor.m_frontier);
 }
 
+std::pair<size_t, size_t>
+grgShape(const grgl::GRGPtr& grg) {
+    return {grg->numIndividuals(), grg->numMutations()};
+}
+
+std::pair<size_t, size_t>
+grgHapShape(const grgl::GRGPtr& grg) {
+    return {grg->numSamples(), grg->numMutations()};
+}
+
 PYBIND11_MODULE(_grgl, m) {
     py::class_<grgl::Mutation>(m, "Mutation")
         .def(py::init<double, std::string, const std::string&, double>(),
@@ -306,6 +316,14 @@ PYBIND11_MODULE(_grgl, m) {
                 The number of individuals in the GRG. The corresponding samples can be found by
                 multiplying the individual index :math:`I` by the ploidy:
                 :math:`(ploidy * I) + 0, (ploidy \times I) + 1, ..., (ploidy \times I) + (ploidy - 1)`
+            )^")
+        .def_property_readonly("shape", &grgShape, R"^(
+                Get the tuple (num_individuals, num_mutations), which is the shape of the genotype matrix
+                represented by the GRG.
+            )^")
+        .def_property_readonly("haploid_shape", &grgHapShape, R"^(
+                Get the tuple (num_samples, num_mutations), which is the shape of the haploid genotype matrix
+                (0, 1 matrix) represented by the GRG.
             )^")
         .def_property_readonly("ploidy", &grgl::GRG::getPloidy, R"^(
                 The ploidy of each individual.

@@ -153,6 +153,7 @@ class TestGrgBasic(unittest.TestCase):
         self.assertEqual(grg.num_mutations, self.grg.num_mutations)
         self.assertFalse(grg.is_phased)
         self.assertTrue(self.grg.is_phased)
+        self.assertEqual(grg.shape, (self.grg.num_individuals, self.grg.num_mutations))
 
         shape = (1, grg.num_samples)
         from_igd = pygrgl.matmul(grg, np.ones(shape), pygrgl.TraversalDirection.UP)
