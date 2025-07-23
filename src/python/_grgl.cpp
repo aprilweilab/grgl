@@ -678,6 +678,9 @@ PYBIND11_MODULE(_grgl, m) {
         :param bp_range: A pair of integers specifying the base-pair range that this GRG covers. This is just
             meta-data, and does not change the filtering behavior.
         :type bp_range: Tuple[int, int]
+        :return: Whether the output graph was created. If the resulting GRG would be empty (no mutations, or
+            no samples) then it will not save the graph.
+        :rtype: bool
     )^");
 
     m.def("grg_from_trees",
