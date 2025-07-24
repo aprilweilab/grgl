@@ -49,6 +49,33 @@ The following properties of a tree sequence are *not* maintained when converted 
   datasets there are multiple different reference alleles at a site.
 - Some nodes are dropped when converting to GRG, unless the ``--no-simplify`` option is provided.
 
+Mapping between TS and GRG mutations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+It can be useful to know which mutations are the same between a tskit TreeSequence and a GRG. The IDs
+do not necessarily match after conversion! I.e., the tskit mutation ID is not the same as the GRG
+MutationID. Below is illustrative code for how to perform the mapping, which should be based on the
+position and allele values:
+
+::
+
+  # Map TS mutations to GRG mutations. This dictionary contains a mapping from (position, allele) to
+  # the tskit mutation ID.
+  pos_allele_to_tsid = {}
+  for i, tree in enumerate(ts.trees()):
+    for mut in tree.mutations():
+      site = ts.site(mut.site)
+      key = (site.position, mut.derived_state)
+      # Map from position,allele to tskit ID
+      pos_allele_to_tsid[key] = mut.id
+
+  # Now lookup each GRG mutation to find the corresponding tskit ID
+  for mut_id in range(grg.num_mutations):
+      mut = grg.get_mutation_by_id(mut_id)
+      tsid = pos_allele_to_tsid.get( (mut.position, mut.allele) )
+      print(f"GRG ID = {mut_id}, tskit ID = {tsid}")
+
+
 A note about Mutation times
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
