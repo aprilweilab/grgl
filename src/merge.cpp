@@ -36,6 +36,7 @@ int main(int argc, char** argv) {
         "use-samples",
         "Determine node uniqueness based on samples reachable from it, instead of immediate children.",
         {'u', "use-samples"});
+    args::Flag verbose(parser, "verbose", "Verbose output", {"verbose"});
     args::Positional<std::string> outfile(parser, "outfile", "The output file (resulting .grg)");
     args::PositionalList<std::string> inputs(parser, "inputs", "The input files (must be .grg)");
     try {
@@ -71,7 +72,7 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    grg1->merge(otherFiles, !noCombine, useSampleSets);
+    grg1->merge(otherFiles, !noCombine, useSampleSets, verbose);
 
     if (showStats) {
         dumpStats(grg1);

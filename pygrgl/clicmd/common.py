@@ -63,3 +63,9 @@ def is_igd(filename: str) -> bool:
 
 def is_bgen(filename: str) -> bool:
     return filename.endswith(".bgen")
+
+
+# Round a value up to the next multiple.
+def round_up_to(value: int, multiple: int):
+    assert multiple > 0
+    return ((value + (multiple - 1)) // multiple) * multiple

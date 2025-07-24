@@ -128,6 +128,9 @@ version = f"{major_version}.{minor_version}"
 with open(os.path.join(THISDIR, "README.md")) as f:
     long_description = f.read()
 
+with open(os.path.join(THISDIR, "requirements.txt")) as f:
+    requirements = list(map(str.strip, f))
+
 setup(
     name=PACKAGE_NAME,
     packages=find_packages(),
@@ -147,6 +150,9 @@ setup(
     entry_points={
         "console_scripts": ["grg=pygrgl.cli:main"],
     },
+    install_requires=[
+        requirements,
+    ],
     long_description=long_description,
     long_description_content_type="text/markdown",
 )

@@ -156,10 +156,10 @@ public:
         m_deletedNodes++;
     }
 
-    void dumpStats() const {
-        std::cout << "Nodes: " << m_totalNodes << "\n";
-        std::cout << "Deleted: " << m_deletedNodes << "\n";
-        std::cout << "Proportion: " << (double)m_deletedNodes / (double)m_totalNodes << "\n";
+    void dumpStats(std::ostream& stream) const {
+        stream << "Nodes: " << m_totalNodes << "\n";
+        stream << "Deleted: " << m_deletedNodes << "\n";
+        stream << "Proportion: " << (double)m_deletedNodes / (double)m_totalNodes << "\n";
     }
 
     double deletedProportion() const { return (double)m_deletedNodes / (double)m_totalNodes; }

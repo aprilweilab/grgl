@@ -27,11 +27,20 @@
 
 namespace grgl {
 
+// TODO: this is a nice interface for variable-sized bitvector operations for haplotypes,
+// but we are using fixed-size now, so it would be good to revamp (or create a separate)
+// this interface to be fixed-size and use SIMD
+
 using HapVectorT = uint32_t;
 using HaplotypeVector = std::vector<HapVectorT>;
 using MutationList = std::vector<Mutation>;
 
 void dumpHash(const HaplotypeVector& hash);
+
+inline HaplotypeVector createHapVect(const size_t numBits) {
+    constexpr size_t ELEM_SIZE = sizeof(HapVectorT) * 8;
+    return std::move(HaplotypeVector((numBits + ELEM_SIZE - 1) / ELEM_SIZE));
+}
 
 inline bool bitwiseIsZero(const HaplotypeVector& gtHash) {
     return std::all_of(gtHash.cbegin(), gtHash.cend(), [](HapVectorT value) { return value == 0; });
@@ -94,9 +103,30 @@ inline size_t bitwiseHamming(const HaplotypeVector& hash1, const HaplotypeVector
 }
 
 inline void setBit(HaplotypeVector& vect, const size_t bitIndex) {
-    const size_t element = bitIndex / sizeof(HapVectorT);
-    const HapVectorT mask = 0x1U << (bitIndex % sizeof(HapVectorT));
-    vect[element] |= mask;
+    constexpr size_t ELEM_SIZE = sizeof(HapVectorT) * 8;
+    const size_t element = bitIndex / ELEM_SIZE;
+    const HapVectorT mask = 0x1U << (bitIndex % ELEM_SIZE);
+    // vect[element] |= mask;
+    vect.at(element) |= mask;
+}
+
+// Given a bit vector, return the list of bits that were set.
+inline std::vector<size_t> getBitsAsList(const HaplotypeVector& vect) {
+    std::vector<size_t> result;
+    constexpr size_t ELEM_SIZE = sizeof(HapVectorT) * 8;
+    for (size_t i = 0; i < vect.size(); i++) {
+        HapVectorT value = vect[i];
+        size_t bit = 0;
+        while (value > 0) {
+            release_assert(bit < ELEM_SIZE);
+            if ((bool)(value & 0x1U)) {
+                result.push_back((i * ELEM_SIZE) + bit);
+            }
+            bit++;
+            value >>= 1U;
+        }
+    }
+    return std::move(result);
 }
 
 inline size_t bloomFilterCapacity(size_t numBits) { return (numBits + (sizeof(HapVectorT) - 1)) / sizeof(HapVectorT); }

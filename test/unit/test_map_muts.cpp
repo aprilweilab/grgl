@@ -38,6 +38,10 @@ public:
         return m_alreadyLoaded.size();
     }
 
+    size_t totalFileVariants() const override {
+        return 0; // Unused
+    }
+
     std::vector<std::string> getIndividualIds() override {
         return {"1", "2", "3", "4"};
     }

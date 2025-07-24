@@ -612,6 +612,7 @@ PYBIND11_MODULE(_grgl, m) {
              py::arg("other_grg_files"),
              py::arg("combine_nodes") = true,
              py::arg("use_sample_sets") = false,
+             py::arg("verbose") = false,
              R"^(
             Merge one or more GRGs into this one. Only succeeds if all GRGs have the same number of
 

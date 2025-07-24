@@ -17,10 +17,15 @@
 # Command-line tool for constructing a GRG. Calls the "grgl" executable under the hood.
 import argparse
 import os
-import sys
 import subprocess
+import sys
+import tqdm
 from multiprocessing import Pool
-from .common import which, time_call
+from typing import List, Tuple
+from .common import which, time_call, round_up_to
+
+
+HAP_SEG_LENGTH = 128
 
 
 def add_options(subparser):
@@ -38,8 +43,8 @@ def add_options(subparser):
         "--parts",
         "-p",
         type=int,
-        default=8,
-        help="The number of parts to split the sequence into; defaults to 8",
+        default=None,
+        help="The number of parts to split the sequence into; defaults to auto-calculate.",
     )
     subparser.add_argument(
         "--jobs",
@@ -52,8 +57,8 @@ def add_options(subparser):
         "--trees",
         "-t",
         type=int,
-        default=1,
-        help="Number of trees to use during shape construction. Defaults to 1.",
+        default=None,
+        help="Number of trees to use during shape construction. Defaults to auto-calculate.",
     )
     subparser.add_argument(
         "--binary-muts",
@@ -87,11 +92,6 @@ def add_options(subparser):
         "tab-separate file, using the given fieldname.",
     )
     subparser.add_argument(
-        "--bs-triplet",
-        default=0,
-        help="Run the triplet algorithm for this many iterations in BuildShape",
-    )
-    subparser.add_argument(
         "--out-file",
         "-o",
         default=None,
@@ -113,24 +113,78 @@ def add_options(subparser):
         action="store_true",
         help="Do not storage individual string identifiers in the GRG.",
     )
+    # There are 9 compression levels:
+    # 1: same as 2
+    # 2: single-pass, use FASTER2 to determine # of trees, direct-map muts with count less
+    #    than 10.
+    # 3: single-pass, use FASTER2 to determine # of trees
+    # 4: single-pass, use FASTER1 to determine # of trees
+    # 5: single-pass, use OPTIMAL to determine # of trees
+    # 6: multi-pass, use OPTIMAL to determine # of trees, direct-map muts with count less
+    #    than 10.
+    # 7: multi-pass, use OPTIMAL to determine # of trees.
+    # 8: same as 7
+    # 9: same as 7
+    level = subparser.add_mutually_exclusive_group()
+    level.add_argument(
+        "--level1",
+        "-1",
+        action="store_true",
+        help="The fastest (least compressive) level. The default.",
+    )
+    level.add_argument("--level2", "-2", action="store_true", help="2nd fastest level.")
+    level.add_argument("--level3", "-3", action="store_true", help="3rd fastest level.")
+    level.add_argument("--level4", "-4", action="store_true", help="4th fastest level.")
+    level.add_argument("--level5", "-5", action="store_true", help="5th fastest level.")
+    level.add_argument("--level6", "-6", action="store_true", help="6th fastest level.")
+    level.add_argument("--level7", "-7", action="store_true", help="7th fastest level.")
+    level.add_argument("--level8", "-8", action="store_true", help="8th fastest level.")
+    level.add_argument(
+        "--level9",
+        "-9",
+        action="store_true",
+        help="The slowest (most compressive) level.",
+    )
 
 
 grgl_exe = which("grgl")
 grg_merge_exe = which("grg-merge")
 
 
+# The advantage of a lot of parts is that it can balance the parallelism. The disadvantage,
+# for small inputs, is that it can waste a lot of time reading the input file and determining
+# that there are no variants in a particular range.
+def compute_parts(input_file: str, threads: int):
+    if not os.path.isfile(input_file):
+        raise FileNotFoundError(f"Input file not found: {input_file}")
+    cmd = [grgl_exe, "--count-variants", input_file]
+    output = subprocess.check_output(cmd).decode("utf-8").split("\n")[0]
+    try:
+        num_variants = int(output)
+    except ValueError:
+        print(
+            f"Could not count number of variants in {input_file}. Try specifying --parts directly.",
+            file=sys.stderr,
+        )
+        exit(1)
+    min_var_per_part = HAP_SEG_LENGTH
+    max_parts = num_variants // min_var_per_part
+    best_parts = max(threads, round_up_to(100, threads))
+    return min(max_parts, best_parts)
+
+
+def log_v(msg, verbose):
+    if verbose:
+        print(msg, file=sys.stderr)
+
+
 def log_time(name, time_val, verbose):
     if verbose:
-        print(f"{name}={time_val}")
+        print(f"{name}={time_val}", file=sys.stderr)
 
 
-def out_filename_tree(input_file, part, tnum):
-    base_name = os.path.basename(input_file)
-    return f"{base_name}.part{part}.tree{tnum}.grg"
-
-
-def out_filename(input_file, part):
-    base_name = os.path.basename(input_file)
+def out_filename(output_file, part):
+    base_name = os.path.basename(output_file)
     return f"{base_name}.part{part}.grg"
 
 
@@ -143,101 +197,85 @@ def get_default_range_suffix(input_file: str) -> str:
     return suffix
 
 
-def build_shape(range_triple, args, input_file):
+def build_shape(
+    range_triple, args, auto_args: List[str], input_file: str, output_file: str
+):
     part, lower, upper = range_triple
     assert lower < upper
-    span = upper - lower
-    pspans = span / args.trees
     suffix = get_default_range_suffix(input_file)
 
-    for tnum in range(args.trees):
-        base = lower + (tnum * pspans)
-        command = [grgl_exe, input_file]
-        if args.maf_flip:
-            command.append("--maf-flip")
-        if args.population_ids:
-            command.extend(["--population-ids", args.population_ids])
-        if args.bs_triplet:
-            command.extend(["--bs-triplet", args.bs_triplet])
-        if args.no_indiv_ids:
-            command.append("--no-indiv-ids")
-        command.extend(["--lf-filter", str(args.shape_lf_filter)])
-        command.extend(
-            [
-                "-l",
-                "-s",
-                "-r",
-                f"{base}:{base+pspans}{suffix}",
-                "-o",
-                out_filename_tree(input_file, part, tnum),
-            ]
-        )
-        print(command)
-        tb_time = time_call(command, stdout=sys.stdout)
-        log_time("TREE_BUILD_TIME", tb_time, args.verbose)
-    base_name = os.path.basename(input_file)
-    shape_filename = f"{base_name}.part{part}.grg"
-    command = [
-        grg_merge_exe,
-        "-l",
-        "-s",
-        shape_filename,
-    ]
+    assert args.trees is not None
+    command = [grgl_exe, input_file, "--trees", str(args.trees)] + auto_args
+    if args.maf_flip:
+        command.append("--maf-flip")
+    if args.population_ids:
+        command.extend(["--population-ids", args.population_ids])
+    if args.no_indiv_ids:
+        command.append("--no-indiv-ids")
+    if args.verbose:
+        command.extend(["--verbose", "-s"])
+    shape_filename = out_filename(output_file, part)
     command.extend(
-        map(
-            lambda tnum: out_filename_tree(input_file, part, tnum), range(0, args.trees)
-        )
+        [
+            "-r",
+            f"{lower}:{upper}{suffix}",
+            "-o",
+            shape_filename,
+        ]
     )
-    print(command)
-    tm_time = time_call(command)
-    log_time("TREE_MERGE_TIME", tm_time, args.verbose)
-    if not args.no_file_cleanup:
-        for tnum in range(args.trees):
-            os.remove(out_filename_tree(input_file, part, tnum))
+    log_v(command, args.verbose)
+    tb_time = time_call(command, stdout=sys.stdout)
+    log_time("TREE_BUILD_TIME", tb_time, args.verbose)
     sys.stdout.flush()
     return shape_filename
 
 
-def build_grg(range_triple, args, input_file):
-    shape_grg = build_shape(range_triple, args, input_file)
+def build_grg(
+    range_triple: Tuple[int, float, float],
+    args,
+    auto_args: List[str],
+    input_file: str,
+    output_file: str,
+    do_map_muts: bool,
+):
+    shape_grg = build_shape(range_triple, args, auto_args, input_file, output_file)
     part, lower, upper = range_triple
-    command = [grgl_exe, shape_grg]
-    suffix = get_default_range_suffix(input_file)
-    if args.maf_flip:
-        command.append("--maf-flip")
-    command.extend(
-        [
-            "-s",
-            "-r",
-            f"{lower}:{upper}{suffix}",
-            "-m",
-            input_file,
-            "-o",
-            out_filename(input_file, part),
-        ]
-    )
-    if args.binary_muts:
-        command.append("-b")
-    print(command)
-    map_time = time_call(command, stdout=sys.stdout)
-    log_time("MAP_MUTS_TIME", map_time, args.verbose)
+    # When we do --fast, no need to call MapMutations
+    if do_map_muts:
+        command = [grgl_exe, shape_grg]
+        suffix = get_default_range_suffix(input_file)
+        if args.maf_flip:
+            command.append("--maf-flip")
+        if args.verbose:
+            command.extend(["--verbose", "-s"])
+        command.extend(
+            [
+                "-r",
+                f"{lower}:{upper}{suffix}",
+                "-m",
+                input_file,
+                "-o",
+                out_filename(output_file, part),
+            ]
+        )
+        if args.binary_muts:
+            command.append("-b")
+        log_v(command, args.verbose)
+        map_time = time_call(command, stdout=sys.stdout)
+        log_time("MAP_MUTS_TIME", map_time, args.verbose)
     sys.stdout.flush()
 
 
-def _build_grg(args):
-    build_grg(*args)
+def star_build_grg(args):
+    return build_grg(*args)
 
 
 def from_tabular(args):
     if args.range is not None:
         if ":" not in args.range:
             raise RuntimeError('--range must be specified as "lower:upper"')
-        if args.parts != 1:
-            print(
-                f"WARNING: Cannot specify both --range and --parts. Changing --parts from {args.parts} to 1.",
-                file=sys.stderr,
-            )
-            args.parts = 1
+        if args.parts is not None:
+            raise RuntimeError(f"WARNING: Cannot specify both --range and --parts.")
 
     def verify_file(fn):
         if not os.path.isfile(fn):
@@ -247,14 +285,12 @@ def from_tabular(args):
 
     if grgl_exe is None:
         raise RuntimeError("Could not find 'grgl' executable; please add to your PATH")
-    if args.verbose:
-        print(f"Using grgl at: {grgl_exe}")
+    log_v(f"Using grgl at: {grgl_exe}", args.verbose)
     if grg_merge_exe is None:
         raise RuntimeError(
             "Could not find 'grg-merge' executable; please add to your PATH"
         )
-    if args.verbose:
-        print(f"Using grg-merge at: {grg_merge_exe}")
+    log_v(f"Using grg-merge at: {grg_merge_exe}", args.verbose)
 
     lz4_exe = which("lz4")
     if args.input_file.endswith(".lz4"):
@@ -262,15 +298,63 @@ def from_tabular(args):
         input_file = args.input_file[:-4]
         command = [lz4_exe, "-f", args.input_file, input_file]
         unlz4_elapsed = time_call(command, stdout=sys.stdout)
-        print(f"Decompress took {unlz4_elapsed} seconds")
-        print("Decompressed size:")
+        print(f"Decompress took {unlz4_elapsed} seconds", file=sys.stderr)
+        print("Decompressed size:", file=sys.stderr)
         try:
             subprocess.check_call(["du", "-hs", input_file])
         except subprocess.CalledProcessError as e:
-            print(f"Failed to get size of {input_file}!")
-            print(e)
+            print(f"Failed to get size of {input_file}!", file=sys.stderr)
+            print(e, file=sys.stderr)
+            exit(2)
     else:
         input_file = args.input_file
+
+    base_name = os.path.basename(input_file)
+    if args.out_file is not None:
+        final_filename = args.out_file
+    else:
+        final_filename = f"{base_name}.final.grg"
+
+    if args.parts is None:
+        args.parts = compute_parts(input_file, args.jobs)
+    print(f"Processing input file in {args.parts} parts.", file=sys.stderr)
+
+    do_map_mutations = False
+    # 3: single-pass, use FASTER2 to determine # of trees
+    if args.level3:
+        auto_args = ["--trees"]
+        auto_tree = "faster2"
+    # 4: single-pass, use FASTER1 to determine # of trees
+    elif args.level4:
+        auto_args = []
+        auto_tree = "faster1"
+    # 5: single-pass, use OPTIMAL to determine # of trees
+    elif args.level5:
+        auto_args = []
+        auto_tree = "optimal"
+    # 6: multi-pass, use OPTIMAL to determine # of trees, direct-map muts with count less
+    #    than 10.
+    elif args.level6:
+        auto_args = ["--lf-no-tree", str(10), "--no-tree-map", "--no-simplify"]
+        auto_tree = "optimal"
+        do_map_mutations = True
+    # 7: multi-pass, use OPTIMAL to determine # of trees.
+    elif args.level7 or args.level8 or args.level9:
+        auto_args = ["--no-tree-map", "--no-simplify"]
+        auto_tree = "optimal"
+        do_map_mutations = True
+    # level1/2 and default are the same
+    # 2: single-pass, use FASTER2 to determine # of trees, direct-map muts with count less
+    #    than 10.
+    else:
+        auto_args = ["--lf-no-tree", str(10)]
+        auto_tree = "faster2"
+
+    if args.trees is None:
+        print(f"Auto-calculating number of trees per part.", file=sys.stderr)
+        args.trees = auto_tree
+    else:
+        print(f"Using {args.trees} trees per part.", file=sys.stderr)
 
     # We used normalized ranges to avoid having to know the sequence length (or the
     # recombination rates, when using non-absolute distances between variants)
@@ -286,26 +370,44 @@ def from_tabular(args):
         r = float(args.range.split(":")[1])
         ranges = [(0, l, r)]
 
-    base_name = os.path.basename(input_file)
-
     # Compute the separate GRGs in parallel.
     if len(ranges) == 1:
-        build_grg(ranges[0], args, input_file)
+        build_grg(
+            ranges[0], args, auto_args, input_file, final_filename, do_map_mutations
+        )
     else:
+        print("Converting segments of input data to graphs", file=sys.stderr)
         with Pool(args.jobs) as pool:
-            pool.map(_build_grg, [(r, args, input_file) for r in ranges])
+            list(
+                tqdm.tqdm(
+                    pool.imap(
+                        star_build_grg,
+                        [
+                            (
+                                r,
+                                args,
+                                auto_args,
+                                input_file,
+                                final_filename,
+                                do_map_mutations,
+                            )
+                            for r in ranges
+                        ],
+                    ),
+                    total=len(ranges),
+                )
+            )
 
     if (not args.no_file_cleanup) and input_file != args.input_file:
-        print(f"Removing uncompressed input file {input_file} (done with it)")
+        log_v(
+            f"Removing uncompressed input file {input_file} (done with it)",
+            args.verbose,
+        )
         os.remove(input_file)
 
     if not args.no_merge:
         # Now merge them pairwise.
-        print("Merging...")
-        if args.out_file is not None:
-            final_filename = args.out_file
-        else:
-            final_filename = f"{base_name}.final.grg"
+        print("Merging...", file=sys.stderr)
 
         command = [
             grg_merge_exe,
@@ -313,21 +415,24 @@ def from_tabular(args):
             final_filename,
         ]
         command.extend(
-            map(lambda part: out_filename(input_file, part), range(0, args.parts))
+            map(lambda part: out_filename(final_filename, part), range(0, args.parts))
         )
-        print(command)
+        log_v(command, args.verbose)
         final_merge_time = time_call(command)
         log_time("FINAL_MERGE_TIME", final_merge_time, args.verbose)
 
         if not args.no_file_cleanup:
             for part in range(0, args.parts):
-                os.remove(out_filename(input_file, part))
+                os.remove(out_filename(final_filename, part))
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Construct a GRG from a VCF file.")
+    parser = argparse.ArgumentParser(
+        description="Construct a GRG from a VCF/IGD/BGEN file."
+    )
     add_options(parser)
     args = parser.parse_args()
+    from_tabular(args)
 
 
 if __name__ == "__main__":

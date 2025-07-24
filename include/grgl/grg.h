@@ -469,6 +469,22 @@ public:
     }
 
     /**
+     * Set the number of individuals that coalesce at this node, growing the underlying
+     * data size if needed.
+     *
+     * NOT THREADSAFE.
+     *
+     * @param[in] nodeId The node to modify.
+     * @param[in] coals The number of individuals that coalesce, between 0...numSamples()/ploidy.
+     */
+    void setNumIndividualCoalsGrow(NodeID nodeId, NodeIDSizeT coals) {
+        assert(coals == COAL_COUNT_NOT_SET || coals <= numIndividuals());
+        const NodeIDSizeT samples = numSamples();
+        m_nodeData.allocNumCoals(numNodes() - samples);
+        m_nodeData.setNumCoals(samples, nodeId, coals);
+    }
+
+    /**
      * Set the number of individuals that coalesce at this node.
      *
      * The value is updated atomically, so this can be used from threaded code (as long
@@ -689,7 +705,10 @@ public:
      *      combined, which combines fewer nodes overall, but also retains more hierarchy in the final
      *      graph.
      */
-    void merge(const std::list<std::string>& otherGrgFiles, bool combineNodes = true, bool useSampleSets = false);
+    void merge(const std::list<std::string>& otherGrgFiles,
+               bool combineNodes = true,
+               bool useSampleSets = false,
+               bool verbose = false);
 
     /**
      * Retrieve a node by ID.

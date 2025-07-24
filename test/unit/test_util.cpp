@@ -2,6 +2,7 @@
 #include <stdexcept>
 
 #include "util.h"
+#include "hap_helpers.h"
 #include "testing_utilities.h"
 
 TEST(Util, MapFromTSVGood) {
@@ -35,4 +36,34 @@ TEST(Util, MapFromTSVBad) {
     auto filename = writeTempFile(testString);
     EXPECT_THROW(loadMapFromTSV(filename, "sample", "pop"), std::runtime_error);
 	remove_file(filename);
+}
+
+TEST(HapHelpers, getBitsAsList) {
+    grgl::HaplotypeVector hapVect(10);
+    grgl::setBit(hapVect, 10);
+    grgl::setBit(hapVect, 100);
+    grgl::setBit(hapVect, 99);
+    grgl::setBit(hapVect, 33);
+    grgl::setBit(hapVect, (10 * 8 * 4) - 1);
+    auto result = grgl::getBitsAsList(hapVect);
+    std::vector<size_t> expected = {10, 33, 99, 100, 319};
+    ASSERT_EQ(result, expected);
+}
+
+
+TEST(HapHelpers, bitwiseSubtract) {
+    grgl::HaplotypeVector hap1(10);
+    for (size_t bit : {10, 100, 99, 33}) {
+        grgl::setBit(hap1, bit);
+    }
+    grgl::HaplotypeVector hap2(10);
+    for (size_t bit : {10, 77, 99, 11, 4, 81}) {
+        grgl::setBit(hap2, bit);
+    }
+
+    size_t count = grgl::bitwiseSubtract(hap2, hap1);
+    ASSERT_EQ(count, 4);
+    auto bitsSet = grgl::getBitsAsList(hap2);
+    std::vector<size_t> expected = {4, 11, 77, 81};
+    ASSERT_EQ(bitsSet, expected);
 }

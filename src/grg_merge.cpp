@@ -295,7 +295,7 @@ private:
 };
 
 template <typename Hasher, typename Mapper>
-void mergeHelper(MutableGRG& grg, const std::list<std::string>& otherGrgFiles, bool combineNodes) {
+void mergeHelper(MutableGRG& grg, const std::list<std::string>& otherGrgFiles, bool combineNodes, bool verbose) {
     // Compute hashes on the GRG that we are mapping to.
     Hasher hashVisitor;
     if (combineNodes) {
@@ -319,7 +319,9 @@ void mergeHelper(MutableGRG& grg, const std::list<std::string>& otherGrgFiles, b
         // Do the actual node mapping and copy relevant nodes/mutations/edges to the target GRG.
         NodeMapperVisitor mapperVisitor(otherGrg, grg, hashToNodeId, combineNodes);
         fastCompleteDFS(otherGrg, mapperVisitor);
-        std::cout << "Mapped exactly: " << mapperVisitor.m_mappedExactly << std::endl;
+        if (verbose) {
+            std::cout << "Mapped exactly: " << mapperVisitor.m_mappedExactly << std::endl;
+        }
         // Copy any left-over mutations that were not associated with nodes
         for (const auto mutId : otherGrg->getUnmappedMutations()) {
             const auto& mutation = otherGrg->getMutationById(mutId);
@@ -338,11 +340,14 @@ void mergeHelper(MutableGRG& grg, const std::list<std::string>& otherGrgFiles, b
     }
 }
 
-void MutableGRG::merge(const std::list<std::string>& otherGrgFiles, bool combineNodes, bool useSampleSets) {
+void MutableGRG::merge(const std::list<std::string>& otherGrgFiles,
+                       bool combineNodes,
+                       bool useSampleSets,
+                       bool verbose) {
     if (useSampleSets) {
-        mergeHelper<SampleHasherVisitor, NodeMapperVisitorSamples>(*this, otherGrgFiles, combineNodes);
+        mergeHelper<SampleHasherVisitor, NodeMapperVisitorSamples>(*this, otherGrgFiles, combineNodes, verbose);
     } else {
-        mergeHelper<NodeHasherVisitor, NodeMapperVisitor>(*this, otherGrgFiles, combineNodes);
+        mergeHelper<NodeHasherVisitor, NodeMapperVisitor>(*this, otherGrgFiles, combineNodes, verbose);
     }
 }
 
