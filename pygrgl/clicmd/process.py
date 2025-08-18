@@ -39,9 +39,6 @@ def add_options(subparser):
         help="The operation to perform on the GRG file",
     )
     subparser.add_argument("grg_file", help="The input GRG file")
-    subparser.add_argument(
-        "-p", "--phenotype", help="The phenotype file (for GWAS only)"
-    )
 
 
 def process_command(arguments):
@@ -51,10 +48,11 @@ def process_command(arguments):
     elif arguments.operation == Statistic.ALLELE_FREQ:
         command_args.append("--freq")
     elif arguments.operation == Statistic.GWAS:
-        if arguments.phenotype is None:
-            print("You must pass a file via --phenotype", file=sys.stderr)
-            exit(1)
-        command_args.extend(["--association-study", "--phenotype", arguments.phenotype])
+        print(
+            "GWAS has moved to 'grapp'. Run 'pip install grapp' and then 'grapp --help'",
+            file=sys.stderr,
+        )
+        exit(1)
     elif arguments.operation == Statistic.ZYGOSITY:
         command_args.append("--zygosity-info")
     else:

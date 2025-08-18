@@ -13,7 +13,6 @@ GRGL_COPY_BINS=1 pip install -v -e .
 ```
 
 Other environment variables that control the Python-based build are:
-* `GRGL_GSL=1`: Turns on GNU scientific library, which is used to optionally compute p-values for GWAS
 * `GRGL_DEBUG=1`: Builds the unoptimized version with debug symbols.
 * `GRGL_BGEN=1`: Turns on BGEN input support for GRG construction
 

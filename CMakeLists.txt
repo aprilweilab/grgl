@@ -9,7 +9,6 @@ option(PYTHON_SUPPORT "Build Python loadable module" OFF)
 option(ENABLE_CHECKERS "Enable external tools like clang-tidy" OFF)
 option(ENABLE_TESTS "Enable automated test execution" ON)
 option(ENABLE_BGEN "Enable BGEN support" OFF)
-option(ENABLE_GSL "Enable GSL support for stat calculations" OFF)
 option(ENABLE_CPU_PROF "Enable gperftools CPU profiler" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -152,25 +151,6 @@ if (${ENABLE_CPU_PROF})
   set(GRGL_EXTRA_LIBS ${CMAKE_CURRENT_LIST_DIR}/gperftools-2.15/.libs/libprofiler.a unwind)
 endif()
 
-# We don't need AMPL bindings from gsl.
-if (${ENABLE_GSL})
-  ExternalProject_Add(
-    gsl
-    SOURCE_DIR ${CMAKE_BINARY_DIR}/third-party/gsl
-    BINARY_DIR ${CMAKE_BINARY_DIR}/third-party/gsl
-    URL "https://mirror.ibcp.fr/pub/gnu/gsl/gsl-latest.tar.gz"
-    CMAKE_ARGS ""
-    CONFIGURE_COMMAND ${CMAKE_BINARY_DIR}/third-party/gsl/configure --prefix=<INSTALL_DIR>
-    BUILD_COMMAND ${MAKE}
-    INSTALL_COMMAND ""
-    TEST_COMMAND "")
-
-  set(GRGP_LIBS ${CMAKE_BINARY_DIR}/third-party/gsl/.libs/libgsl.a)
-  set(GRGP_DEPS gsl)
-  include_directories(${CMAKE_BINARY_DIR}/third-party/gsl/)
-  add_compile_options(-DGSL_ENABLED=1)
-endif()
-
 # Library libgrgl.a for C++ projects that want to use GRGL.
 add_library(grgl STATIC ${GRGL_CORE_SOURCES})
 target_compile_options(grgl PRIVATE
@@ -190,9 +170,6 @@ add_executable(grgp_tool
                )
 set_target_properties(grgp_tool PROPERTIES OUTPUT_NAME "grgp")
 target_link_libraries(grgp_tool grgl ${GRGP_LIBS} vbyte)
-if (${ENABLE_GSL})
-  add_dependencies(grgp_tool ${GRGP_DEPS})
-endif()
 
 
 # Tool for merging GRGs.
