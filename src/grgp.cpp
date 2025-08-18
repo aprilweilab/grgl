@@ -42,11 +42,6 @@ int main(int argc, char** argv) {
     args::Positional<std::string> infile(parser, "grg_file", "The input GRG file");
     args::Flag showStats(parser, "show-stats", "Show statistics about the GRG", {'s', "show-stats"});
     args::Flag alleleFrequency(parser, "allele-frequency", "Calculate allele frequencies", {'f', "freq"});
-    args::Flag beta(parser, "association-study", "Conduct GWAS association study", {'a', "association-study"});
-    args::ValueFlag<std::string> phenotype(
-        parser, "phenotype", "The input phenotype file for association study", {'p', "phenotype"});
-    args::Flag onlyCalcBeta(
-        parser, "only-beta", "Only calculate the beta value, not all GWAS stats", {'b', "only-beta"});
     args::Flag zygosityInfo(
         parser, "zygosity-info", "Calculate hetero/homozygosity ratios for each allele", {'z', "zygosity-info"});
     args::ValueFlag<std::string> compareGrg(
@@ -127,16 +122,6 @@ int main(int argc, char** argv) {
         START_TIMING_OPERATION();
         emitZygosityInfo(theGRG, std::cout, bpRange, onlySamples);
         EMIT_TIMING_MESSAGE("Zygosity information calculation took");
-    }
-
-    if (beta) {
-        if (!phenotype) {
-            std::cerr << "Using random phenotype since no phenotype file specified" << std::endl;
-        }
-        START_TIMING_OPERATION();
-        emitBeta(theGRG, phenotype ? *phenotype : USE_RANDOM_PHENOTYPE, std::cout, onlyCalcBeta);
-        EMIT_TIMING_MESSAGE("Association took");
-        return 0;
     }
 
     if (compareGrg) {

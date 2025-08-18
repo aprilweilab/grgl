@@ -17,11 +17,11 @@ RUN apt update && \
 COPY . /grgl_src
 
 # Install GRGL python API.
-RUN cd /grgl_src && pip3 install wheel && GRGL_GSL=1 GRGL_BGEN=1 python3 setup.py bdist_wheel
+RUN cd /grgl_src && pip3 install wheel && GRGL_BGEN=1 python3 setup.py bdist_wheel
 # Install GRGL command line tools and scripts. Installing the above python package
 # will also build this, but there are some extra tools we might want.
 RUN cd /grgl_src && mkdir cpp_build && cd cpp_build && mkdir /grgl_inst && \
-    cmake .. -DCMAKE_BUILD_TYPE=Release -DENABLE_BGEN=ON -DENABLE_GSL=ON -DCMAKE_INSTALL_PREFIX=/grgl_inst && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DENABLE_BGEN=ON -DCMAKE_INSTALL_PREFIX=/grgl_inst && \
     make -j && \
     make install
 
