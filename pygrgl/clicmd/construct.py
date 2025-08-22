@@ -380,7 +380,7 @@ def from_tabular(args):
         with Pool(args.jobs) as pool:
             list(
                 tqdm.tqdm(
-                    pool.imap(
+                    pool.imap_unordered(
                         star_build_grg,
                         [
                             (
