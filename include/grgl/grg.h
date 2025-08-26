@@ -577,7 +577,7 @@ protected:
     bool m_mutsAreOrdered{false};
 
     friend void readGrgCommon(const GRGFileHeader& header, const GRGPtr& grg, IFSPointer& inStream);
-    friend std::pair<NodeIDSizeT, size_t>
+    friend std::pair<NodeIDSizeT, EdgeSizeT>
     simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutputFilter& filter, bool allowSimplify);
 
     // Google-test unit tests that need private/protected access.
