@@ -11,7 +11,7 @@ TEST(Common, FloatRange) {
     ASSERT_TRUE(orig.isUnspecified());
     ASSERT_EQ(orig, orig.normalized(0, 100));
     denorm = orig.denormalized(0, 100);
-    ASSERT_EQ((size_t)orig.start(), denorm.start());
+    ASSERT_EQ(0, denorm.start());
     ASSERT_EQ((size_t)denorm.end(), std::numeric_limits<size_t>::max());
 
     orig = {0, 1000};

@@ -143,7 +143,8 @@ void GRG::visitDfs(GRGVisitor& visitor, TraversalDirection direction, const Node
             }
             bool keepGoing = visitor.visit(sharedThis, nodeId, direction, DFS_PASS_THERE);
             if (keepGoing) {
-                auto successors = (direction == DIRECTION_UP) ? this->getUpEdges(nodeId) : this->getDownEdges(nodeId);
+                const auto& successors =
+                    (direction == DIRECTION_UP) ? this->getUpEdges(nodeId) : this->getDownEdges(nodeId);
                 for (const auto& succId : successors) {
                     lifo.push_back(succId);
                 }

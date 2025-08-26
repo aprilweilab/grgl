@@ -649,6 +649,11 @@ public:
      */
     NodeID makeNode(const size_t count = 1, bool forceOrdered = false) {
         const auto nextId = this->m_nodes.size();
+        if (nextId + count > MAX_GRG_NODES) {
+            std::stringstream ssErr;
+            ssErr << "Cannot create more than " << MAX_GRG_NODES << " nodes in a GRG";
+            throw ApiMisuseFailure(ssErr.str().c_str());
+        }
         for (size_t i = 0; i < count; i++) {
             this->m_nodes.push_back(std::make_shared<GRGNode>());
         }

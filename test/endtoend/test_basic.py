@@ -37,6 +37,37 @@ class TestGrgBasic(unittest.TestCase):
         cls.grg_filename = construct_grg("test-200-samples.vcf.gz")
         cls.grg = pygrgl.load_immutable_grg(cls.grg_filename)
 
+    def test_up_edges(self):
+        only_down_grg = pygrgl.load_immutable_grg(
+            self.grg_filename, load_up_edges=False
+        )
+        self.assertEqual(only_down_grg.num_samples, self.grg.num_samples)
+        self.assertEqual(only_down_grg.num_mutations, self.grg.num_mutations)
+        self.assertEqual(only_down_grg.num_nodes, self.grg.num_nodes)
+        as_child = [0 for _ in range(self.grg.num_nodes)]
+        for i in range(only_down_grg.num_nodes):
+            self.assertEqual(
+                only_down_grg.get_down_edges(i), self.grg.get_down_edges(i)
+            )
+            self.assertEqual(only_down_grg.num_up_edges(i), pygrgl.NO_UP_EDGES)
+            self.assertNotEqual(self.grg.num_up_edges(i), pygrgl.NO_UP_EDGES)
+            for c in self.grg.get_down_edges(i):
+                as_child[c] += 1
+
+        # Sanity check: the number of times a node is a child (above) is equal to the
+        # number of up edges.
+        for i in range(self.grg.num_nodes):
+            self.assertEqual(self.grg.num_up_edges(i), as_child[i])
+            self.assertEqual(self.grg.num_up_edges(i), len(self.grg.get_up_edges(i)))
+
+    def test_too_many_nodes(self):
+        max_nodes = 0x7FFFFFFF - 1
+        num_samples = 1_000_000
+        grg = pygrgl.MutableGRG(num_samples, 2)
+        with self.assertRaises(RuntimeError):
+            grg.make_node(count=(max_nodes - num_samples) + 1)
+        self.assertEqual(grg.num_nodes, num_samples)
+
     def test_construct_allele_freq(self):
         # Use "grg process" to compute allele frequencies.
         af = subprocess.check_output(["grg", "process", "freq", self.grg_filename])

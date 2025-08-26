@@ -170,7 +170,7 @@ constexpr uint64_t GRG_FLAG_UNPHASED = 0x2;
 
 constexpr uint64_t GRG_FILE_MAGIC = 0xE9366C64DDC8C5B0;
 constexpr uint16_t GRG_FILE_MAJOR_VERSION = 5;
-constexpr uint16_t GRG_FILE_MINOR_VERSION = 1;
+constexpr uint16_t GRG_FILE_MINOR_VERSION = 2;
 
 #pragma pack(push, 1)
 struct GRGFileHeader {

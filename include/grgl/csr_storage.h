@@ -368,7 +368,7 @@ public:
         m_nodeIndexes.resize(numNodes + 1);
     }
 
-    explicit CSRStorageImm(EagerFileVector<NodeIDSizeT> nodeIndexes,
+    explicit CSRStorageImm(EagerFileVector<EdgeSizeT> nodeIndexes,
                            EdgeVect<uint8_t> nodeBuckets,
                            size_t numValues,
                            bool reverse = false)
@@ -562,7 +562,7 @@ protected:
     VByteDispatcher<IType, Encoded, Sorted> m_dispatch;
 
     // For N nodes, this vector has N elements. Each element is an index into the buckets
-    EagerFileVector<NodeIDSizeT> m_nodeIndexes;
+    EagerFileVector<EdgeSizeT> m_nodeIndexes;
     EdgeVect<uint8_t> m_nodeBuckets;
     size_t m_numNodes;
     size_t m_appendIndex;
