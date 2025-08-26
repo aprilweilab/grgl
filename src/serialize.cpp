@@ -75,6 +75,14 @@ versionIsAtLeast(const GRGFileHeader& header, const uint16_t versionMajor, const
            (header.versionMajor == versionMajor && header.versionMinor >= versionMinor);
 }
 
+static inline bool
+versionIsUpTo(const GRGFileHeader& header, const uint16_t versionMajor, const uint16_t versionMinor) {
+    return (header.versionMajor < versionMajor) ||
+           (header.versionMajor == versionMajor && header.versionMinor <= versionMinor);
+}
+
+#define HAS_SMALL_CSR_IDX versionIsUpTo(header, 5, 1)
+
 static inline bool hasFlag(const GRGFileHeader& header, const uint64_t flagValue) {
     return static_cast<bool>(header.flags & flagValue);
 }
@@ -205,16 +213,17 @@ public:
 
     // Set which mutations we want to keep; if never called then we keep all mutations.
     NodeIDList setKeepMutations(const grgl::GRGPtr& grg, const grgl::NodeIDList& mutationIDList) {
-        NodeIDList keptMutNodes;
+        NodeIDList result;
+        NodeIDSet keptMutNodes;
         if (!mutationIDList.empty()) {
-            m_keepMutations.resize(grg->numMutations());
-            for (auto id : mutationIDList) {
+            m_keepMutations.resize(grg->numMutations(), false);
+            for (const auto id : mutationIDList) {
                 m_keepMutations.at(id) = true;
             }
             for (const auto& nodeIdAndMutId : grg->getNodeMutationPairs()) {
                 if (m_keepMutations[nodeIdAndMutId.second]) {
                     if (nodeIdAndMutId.first != INVALID_NODE_ID) {
-                        keptMutNodes.push_back(nodeIdAndMutId.first);
+                        keptMutNodes.emplace(nodeIdAndMutId.first);
                     }
                 }
             }
@@ -222,7 +231,10 @@ public:
             m_keepMutations.resize(0);
             m_keepMutations.shrink_to_fit();
         }
-        return std::move(keptMutNodes);
+        for (const auto& nodeId : keptMutNodes) {
+            result.emplace_back(nodeId);
+        }
+        return std::move(result);
     }
 
     bool keepMutation(const MutationId mutId) { return m_keepMutations.empty() || m_keepMutations[mutId]; }
@@ -259,6 +271,9 @@ public:
                 m_revIdMap[newNodeId] = nodeId;
                 m_newNodeData.setPopId(newNodeId, grg->getPopulationId(nodeId));
             } else {
+                // We should never visit a node more than once
+                assert(m_nodeIdMap[nodeId] == INVALID_NODE_ID);
+
                 NodeIDList children;
                 NodeIDSizeT parentCoals = grg->getNumIndividualCoals(nodeId);
                 getChildren(grg, nodeId, children, parentCoals);
@@ -304,7 +319,7 @@ public:
 
     NodeIDSizeT getNumNodes() const { return m_nodeCounter; }
 
-    NodeIDSizeT getNumEdges() const { return m_edgeCounter; }
+    EdgeSizeT getNumEdges() const { return m_edgeCounter; }
 
     NodeID getNewID(const NodeID nodeId) const {
         if (nodeId == INVALID_NODE_ID) {
@@ -336,11 +351,11 @@ private:
     std::vector<NodeIDSizeT> m_nodeIdMap;
     NodeIDSizeT m_newSampleCount{};
     NodeIDSizeT m_nodeCounter{};
-    NodeIDSizeT m_edgeCounter{};
+    EdgeSizeT m_edgeCounter{};
     bool m_allowSimplify;
 };
 
-std::pair<NodeIDSizeT, size_t>
+std::pair<NodeIDSizeT, EdgeSizeT>
 simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutputFilter& filter, bool allowSimplify) {
     assert_deserialization(outStream.good(), "Bad output stream");
     const size_t numMutations = grg->getMutations().size();
@@ -382,7 +397,7 @@ simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutput
             grg->visitTopo(visitor, TraversalDirection::DIRECTION_UP, filter.seedList);
         } else {
             assert(filter.direction == TraversalDirection::DIRECTION_DOWN);
-            NodeIDList keptMutNodes = visitor.setKeepMutations(grg, filter.seedList);
+            const NodeIDList keptMutNodes = visitor.setKeepMutations(grg, filter.seedList);
             grg->visitDfs(visitor, TraversalDirection::DIRECTION_DOWN, keptMutNodes);
         }
     } else {
@@ -466,10 +481,10 @@ simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutput
     outStream.seekp(0);
     outStream.write(reinterpret_cast<const char*>(&header), sizeof(header));
     assert_deserialization(outStream.good(), "Writing GRG failed");
-    return {(NodeIDSizeT)header.nodeCount, (size_t)header.edgeCount};
+    return {(NodeIDSizeT)header.nodeCount, (EdgeSizeT)header.edgeCount};
 }
 
-std::pair<NodeIDSizeT, size_t> writeGrg(const GRGPtr& grg, std::ostream& out, bool allowSimplify) {
+std::pair<NodeIDSizeT, EdgeSizeT> writeGrg(const GRGPtr& grg, std::ostream& out, bool allowSimplify) {
     GRGOutputFilter emptyFilter;
     return simplifyAndSerialize(grg, out, emptyFilter, allowSimplify);
 }
@@ -532,7 +547,14 @@ void readGrgCommon(const GRGFileHeader& header, const GRGPtr& grg, IFSPointer& i
     if (hasFlag(header, GRG_FLAG_HAS_INDIV_IDS)) {
         const size_t indivIdBytes = readScalar<uint64_t>(*inStream);
         EagerFileVector<uint8_t> stringValues(inStream, inStream->tellg(), indivIdBytes);
-        EagerFileVector<uint32_t> stringPointers(inStream, inStream->tellg(), grg->numIndividuals() + 1);
+        EagerFileVector<EdgeSizeT> stringPointers;
+        if (HAS_SMALL_CSR_IDX) {
+            EagerFileVector<uint32_t> smallPointers(inStream, inStream->tellg(), grg->numIndividuals() + 1);
+            stringPointers = convertTo64BitFV(smallPointers);
+        } else {
+            EagerFileVector<EdgeSizeT> bigPointers(inStream, inStream->tellg(), grg->numIndividuals() + 1);
+            stringPointers = std::move(bigPointers);
+        }
         CSRStringTable individualIds(std::move(stringPointers), std::move(stringValues), indivIdBytes);
         assert_deserialization(individualIds.numNodes() == grg->numIndividuals(), "Malformed GRG file: individual IDs");
         grg->m_individualIds = std::move(individualIds);
@@ -565,7 +587,14 @@ MutableGRGPtr readMutableGrg(IFSPointer& inStream) {
         LazyFileVector<uint8_t> edges(inStream, inStream->tellg(), edgeBytes);
         inStream->seekg(beforeEdges + (std::streamoff)edgeBytes);
         assert_deserialization(inStream->good(), "Malformed GRG file");
-        EagerFileVector<uint32_t> nodes(inStream, inStream->tellg(), header.nodeCount + 1);
+        EagerFileVector<EdgeSizeT> nodes;
+        if (HAS_SMALL_CSR_IDX) {
+            EagerFileVector<uint32_t> smallNodes(inStream, inStream->tellg(), header.nodeCount + 1);
+            nodes = convertTo64BitFV(smallNodes);
+        } else {
+            EagerFileVector<EdgeSizeT> bigNodes(inStream, inStream->tellg(), header.nodeCount + 1);
+            nodes = std::move(bigNodes);
+        }
         LazyCSREdges32 edgeCSR(std::move(nodes), std::move(edges), header.edgeCount);
         assert_deserialization(inStream->good(), "Malformed GRG file");
         const std::streamoff afterNodes = inStream->tellg();
@@ -607,7 +636,14 @@ GRGPtr readImmutableGrg(IFSPointer& inStream, bool loadUpEdges) {
 
     const size_t edgeBytes = readScalar<uint64_t>(*inStream);
     EagerFileVector<uint8_t> edges(inStream, inStream->tellg(), edgeBytes);
-    EagerFileVector<uint32_t> nodes(inStream, inStream->tellg(), header.nodeCount + 1);
+    EagerFileVector<EdgeSizeT> nodes;
+    if (HAS_SMALL_CSR_IDX) {
+        EagerFileVector<uint32_t> smallNodes(inStream, inStream->tellg(), header.nodeCount + 1);
+        nodes = convertTo64BitFV(smallNodes);
+    } else {
+        EagerFileVector<EdgeSizeT> bigNodes(inStream, inStream->tellg(), header.nodeCount + 1);
+        nodes = std::move(bigNodes);
+    }
     EagerCSREdges32 edgeCSR(std::move(nodes), std::move(edges), header.edgeCount);
     assert_deserialization(inStream->good(), "Malformed GRG file");
 
@@ -616,16 +652,16 @@ GRGPtr readImmutableGrg(IFSPointer& inStream, bool loadUpEdges) {
         // Even now it's not very compact; to make it more compact we need to either (a) write
         // upEdges[] to disk before coverted or (b) use the same vector for upEdges and
         // upEdgeCSR, which means swapping the order.
-        std::vector<NodeIDSizeT> upDegree(header.nodeCount);
+        std::vector<NodeIDSizeT> upDegree(header.nodeCount, 0);
         for (NodeID srcId = 0; srcId < header.nodeCount; srcId++) {
             NodeIDList targets;
             edgeCSR.getData(srcId, targets);
-            for (NodeID tgtId : targets) {
+            for (const NodeID tgtId : targets) {
                 upDegree[tgtId] += 1;
             }
         }
-        std::vector<NodeIDSizeT> upIndexes(header.nodeCount);
-        NodeIDSizeT prevIndex = 0;
+        std::vector<EdgeSizeT> upIndexes(header.nodeCount, 0);
+        EdgeSizeT prevIndex = 0;
         for (NodeID i = header.nodeCount; i > 0; i--) {
             const NodeID nodeId = i - 1;
             upIndexes[nodeId] = prevIndex + upDegree[nodeId];
@@ -638,7 +674,7 @@ GRGPtr readImmutableGrg(IFSPointer& inStream, bool loadUpEdges) {
             NodeIDList targets;
             edgeCSR.getData(srcId, targets);
             for (NodeID tgtId : targets) {
-                auto& index = upIndexes[tgtId];
+                EdgeSizeT& index = upIndexes[tgtId];
                 upEdges[--index] = srcId;
             }
         }

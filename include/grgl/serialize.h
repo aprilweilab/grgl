@@ -46,14 +46,14 @@ using IFSPointer = std::shared_ptr<std::istream>;
  * @param[in] grg The GRG to be serialized.
  * @param[in] out The (binary) output stream.
  */
-std::pair<NodeIDSizeT, size_t> writeGrg(const GRGPtr& grg, std::ostream& out, bool allowSimplify = true);
+std::pair<NodeIDSizeT, EdgeSizeT> writeGrg(const GRGPtr& grg, std::ostream& out, bool allowSimplify = true);
 
 class GRGOutputFilter;
 
-std::pair<NodeIDSizeT, size_t> simplifyAndSerialize(const GRGPtr& grg,
-                                                    std::ostream& outStream,
-                                                    const GRGOutputFilter& filter,
-                                                    bool allowSimplify = true);
+std::pair<NodeIDSizeT, EdgeSizeT> simplifyAndSerialize(const GRGPtr& grg,
+                                                       std::ostream& outStream,
+                                                       const GRGOutputFilter& filter,
+                                                       bool allowSimplify = true);
 
 /**
  * Deserialize the GRG from the given input stream.

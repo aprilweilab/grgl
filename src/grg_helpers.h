@@ -136,7 +136,7 @@ static inline GRGPtr loadImmutableGRG(const std::string& filename, bool loadUpEd
     return result;
 }
 
-static inline std::pair<NodeIDSizeT, NodeIDSizeT>
+static inline std::pair<NodeIDSizeT, EdgeSizeT>
 saveGRG(const GRGPtr& theGRG, const std::string& filename, bool allowSimplify = true) {
     std::ofstream outStream(filename, std::ios::binary);
     return grgl::writeGrg(theGRG, outStream, allowSimplify);

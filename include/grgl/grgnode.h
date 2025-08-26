@@ -46,6 +46,8 @@
 
 namespace grgl {
 
+using EdgeSizeT = uint64_t;
+
 #ifdef COMPACT_NODE_IDS
 using NodeID = uint32_t;
 using NodeIDSizeT = uint32_t;

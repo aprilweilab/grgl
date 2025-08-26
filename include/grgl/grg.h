@@ -577,7 +577,7 @@ protected:
     bool m_mutsAreOrdered{false};
 
     friend void readGrgCommon(const GRGFileHeader& header, const GRGPtr& grg, IFSPointer& inStream);
-    friend std::pair<NodeIDSizeT, size_t>
+    friend std::pair<NodeIDSizeT, EdgeSizeT>
     simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutputFilter& filter, bool allowSimplify);
 
     // Google-test unit tests that need private/protected access.
@@ -649,6 +649,11 @@ public:
      */
     NodeID makeNode(const size_t count = 1, bool forceOrdered = false) {
         const auto nextId = this->m_nodes.size();
+        if (nextId + count > MAX_GRG_NODES) {
+            std::stringstream ssErr;
+            ssErr << "Cannot create more than " << MAX_GRG_NODES << " nodes in a GRG";
+            throw ApiMisuseFailure(ssErr.str().c_str());
+        }
         for (size_t i = 0; i < count; i++) {
             this->m_nodes.push_back(std::make_shared<GRGNode>());
         }

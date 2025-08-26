@@ -309,6 +309,15 @@ protected:
     const size_t m_bufferAmount;
 };
 
+template <typename T> EagerFileVector<uint64_t> convertTo64BitFV(EagerFileVector<T>& vect) {
+    EagerFileVector<uint64_t> result;
+    result.resize(vect.size(), 0);
+    for (size_t i = 0; i < vect.size(); i++) {
+        result.ref(i) = vect[i];
+    }
+    return std::move(result);
+}
+
 } // namespace grgl
 
 #endif

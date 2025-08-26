@@ -181,7 +181,7 @@ TEST(CSRStorageImm, Writing) {
     uint64_t valueBytesRd = 0;
     infile->read((char*)&valueBytesRd, sizeof(uint64_t));
     EagerFileVector<uint8_t> edges(infile, sizeof(uint64_t), valueBytesRd);
-    EagerFileVector<uint32_t> nodes(infile, sizeof(uint64_t)+valueBytesRd, numNodes+1);
+    EagerFileVector<uint64_t> nodes(infile, sizeof(uint64_t)+valueBytesRd, numNodes+1);
     CSRStorageImm<EagerFileVector, uint32_t, true, true> compressedRead(
         std::move(nodes), std::move(edges), 0);
     for (size_t i = 0; i < numNodes; i++) {

@@ -117,3 +117,16 @@ Construction for small datasets (such as those included as tests in this reposit
 ## Usage (Python API)
 
 See the provided [jupyter notebooks](https://github.com/aprilweilab/grgl/tree/main/jupyter) and [GettingStarted.md](https://github.com/aprilweilab/grgl/blob/main/GettingStarted.md) for more examples.
+
+
+## Limits
+
+| Quantity | Limit |
+| -------- | ----- |
+| Haploid samples | 2,147,483,646 |
+| Total nodes | 2,147,483,646 |
+| Total mutations (variants) | 4,294,967,294 |
+| Total edges | 18,446,744,073,709,551,615 |
+| Edges to/from a single node | 4,294,967,295 |
+
+_Note_: Node limits can theoretically be expanded to about a trillion, by turning off the `COMPACT_NODE_IDS` preprocessor flag, but this mode is not well tested.

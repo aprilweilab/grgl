@@ -451,7 +451,7 @@ MutableGRGPtr buildTree(HapWindowContext& context,
         const auto& hapVect2 = context.sampleHapVects.at(node2);
         size_t dist = 0;
         assert(hapVect1.size() == hapVect2.size());
-        assert(hapVect1.size() == windowInfo.size());
+        assert(hapVect1.size() == context.windowInfo.size());
         for (size_t i = 0; i < hapVect1.size(); i++) {
             dist += context.windowInfo[i].getDistance(hapVect1[i], hapVect2[i]);
         }
@@ -666,7 +666,7 @@ MutableGRGPtr buildTree(HapWindowContext& context,
         std::vector<NodeIDList> mutIndexToNodes(context.allMutations.size());
         for (const NodeID rootId : result->getRootNodes()) {
             size_t haps = 0;
-            assert(nodeToIndivs.find(rootId) != nodeToIndivs.end());
+            assert(nodeToIndivs.find(rootId) != nodeToIndivs.end() || rootId < numSamples);
             std::vector<size_t> mutIndices = hapsToMutIndices(context.sampleHapVects[rootId], context.windowInfo);
             DEBUG_PRINT("Root " << rootId << " has " << mutIndices.size() << " mutations\n");
             for (const size_t mutIndex : mutIndices) {
@@ -891,7 +891,7 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
 #ifndef NDEBUG
     size_t _ignore_debug = 0;
     MutationAndSamples mutAndSamples;
-    assert(!mutIterator->next(mutAndSamples, _ignore));
+    assert(!mutIterator->next(mutAndSamples, _ignore_debug));
 #endif
 
 #ifdef DEBUG_SANITY_CHECKS

@@ -260,15 +260,9 @@ sharedFrontier(const grgl::GRGPtr& grg, grgl::TraversalDirection direction, cons
     return std::move(visitor.m_frontier);
 }
 
-std::pair<size_t, size_t>
-grgShape(const grgl::GRGPtr& grg) {
-    return {grg->numIndividuals(), grg->numMutations()};
-}
+std::pair<size_t, size_t> grgShape(const grgl::GRGPtr& grg) { return {grg->numIndividuals(), grg->numMutations()}; }
 
-std::pair<size_t, size_t>
-grgHapShape(const grgl::GRGPtr& grg) {
-    return {grg->numSamples(), grg->numMutations()};
-}
+std::pair<size_t, size_t> grgHapShape(const grgl::GRGPtr& grg) { return {grg->numSamples(), grg->numMutations()}; }
 
 PYBIND11_MODULE(_grgl, m) {
     py::class_<grgl::Mutation>(m, "Mutation")
@@ -581,7 +575,25 @@ PYBIND11_MODULE(_grgl, m) {
         .export_values();
 
     py::class_<grgl::MutableGRG, std::shared_ptr<grgl::MutableGRG>>(m, "MutableGRG", grgClass)
-        .def(py::init<size_t, size_t>(), R"^()^")
+        .def(py::init<size_t, size_t, bool, size_t>(),
+             py::arg("num_samples"),
+             py::arg("ploidy"),
+             py::arg("phased") = true,
+             py::arg("initial_node_capacity") = 1024,
+             R"^(
+            Construct a MutableGRG with the given number of samples and ploidy.
+
+            :param num_samples: The number of samples in the dataset. Cannot be changed; a new GRG needs to be created
+                if the number of samples changes.
+            :type num_samples: int
+            :param ploidy: The ploidy of each individual.
+            :type ploidy: int
+            :param phased: True if the data is phased, False otherwise. Default: True.
+            :type phased: bool
+            :param initial_node_capacity: Number of nodes to reserve (but not allocate) in memory. If you know how many
+                nodes the graph will have, setting this to that number will speed things up.
+            :type initial_node_capacity: int
+        )^")
         .def("make_node", &grgl::MutableGRG::makeNode, py::arg("count") = 1, py::arg("force_ordered") = false, R"^(
             Create one or more new nodes in the graph.
 
@@ -906,6 +918,7 @@ PYBIND11_MODULE(_grgl, m) {
 
     m.attr("INVALID_NODE") = grgl::INVALID_NODE_ID;
     m.attr("COAL_COUNT_NOT_SET") = grgl::COAL_COUNT_NOT_SET;
+    m.attr("NO_UP_EDGES") = grgl::NO_UP_EDGES;
 
     std::stringstream versionString;
     versionString << GRGL_MAJOR_VERSION << "." << GRGL_MINOR_VERSION;
