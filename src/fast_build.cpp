@@ -677,15 +677,26 @@ MutableGRGPtr buildTree(HapWindowContext& context,
         // Now create the mutation nodes and connect them. TODO: in the future we might want to call
         // MapMutations with non-sample nodes as the seeds and let it do the work here, which might
         // give us much better hierarchy.
+        std::pair<BpPosition, NodeID> currentMissing = {INVALID_POSITION, INVALID_NODE_ID};
+        BpPosition currentPosition = INVALID_POSITION;
         for (size_t mutIdx = 0; mutIdx < mutIndexToNodes.size(); mutIdx++) {
-            const NodeID mutNode = result->makeNode();
+            const NodeID newNode = result->makeNode();
             const Mutation& mut = context.allMutations.at(mutIdx);
-            result->addMutation(mut, mutNode);
-            DEBUG_PRINT("Adding mutation " << mut.getPosition() << ", " << mut.getAllele() << " to ");
+            const auto pos = mut.getPosition();
+            if (mut.isMissing()) {
+                // Any missing Mutation must be the _first_ Mutation at the given bp position.
+                release_assert(currentPosition != pos);
+                currentMissing = {pos, newNode};
+                DEBUG_PRINT("Adding missingness node " << mut.getPosition() << " to ");
+            } else {
+                const NodeID missNode = (currentMissing.first == pos) ? currentMissing.second : INVALID_NODE_ID;
+                result->addMutation(mut, newNode, missNode);
+                DEBUG_PRINT("Adding mutation " << mut.getPosition() << ", " << mut.getAllele() << " to ");
+            }
             const auto& nodeList = mutIndexToNodes[mutIdx];
             for (const NodeID childNode : nodeList) {
                 DEBUG_PRINT(childNode << ", ");
-                result->connect(mutNode, childNode);
+                result->connect(newNode, childNode);
             }
             DEBUG_PRINT("\n");
 
@@ -694,8 +705,9 @@ MutableGRGPtr buildTree(HapWindowContext& context,
                 std::unordered_set<NodeIDSizeT> uncoalescedIndividuals;
                 NodeIDSizeT mutNodeCoals =
                     getCoalsForParent(result, nodeToIndivs, nodeList, uncoalescedIndividuals, false);
-                result->setNumIndividualCoalsGrow(mutNode, mutNodeCoals);
+                result->setNumIndividualCoalsGrow(newNode, mutNodeCoals);
             }
+            currentPosition = mut.getPosition();
         }
     }
     return result;

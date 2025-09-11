@@ -172,8 +172,12 @@ public:
         return hasChildren;
     }
 
-    // Does the given node have mutations (after filtering)?
-    bool hasMutations(const grgl::GRGPtr& grg, const grgl::NodeID nodeId) const {
+    // Does the given node have mutations (after filtering) or other important properties?
+    bool shouldKeep(const grgl::GRGPtr& grg, const grgl::NodeID nodeId) const {
+        // We keep all missingness nodes _that are visited during traversal_.
+        if (grg->hasMissingData() && m_isMissingnessNode.at(nodeId)) {
+            return true;
+        }
         if (grg->nodeHasMutations(nodeId)) {
             if (m_keepMutations.empty()) {
                 return true;
@@ -212,24 +216,38 @@ public:
     }
 
     // Set which mutations we want to keep; if never called then we keep all mutations.
+    // Returns the list of seeds that need to be traversed (downwards) in order to ensure that
+    // all of the children of the kept mutations are kept.
     NodeIDList setKeepMutations(const grgl::GRGPtr& grg, const grgl::NodeIDList& mutationIDList) {
         NodeIDList result;
         NodeIDSet keptMutNodes;
         if (!mutationIDList.empty()) {
             m_keepMutations.resize(grg->numMutations(), false);
+            m_isMissingnessNode.resize(grg->numNodes(), false);
             for (const auto id : mutationIDList) {
                 m_keepMutations.at(id) = true;
             }
-            for (const auto& nodeIdAndMutId : grg->getNodeMutationPairs()) {
-                if (m_keepMutations[nodeIdAndMutId.second]) {
-                    if (nodeIdAndMutId.first != INVALID_NODE_ID) {
-                        keptMutNodes.emplace(nodeIdAndMutId.first);
+            for (const auto& item : grg->getNodesAndMutations<GRG::NodeMutMiss>()) {
+                if (m_keepMutations[std::get<1>(item)]) {
+                    const NodeID mutNode = std::get<0>(item);
+                    if (mutNode != INVALID_NODE_ID) {
+                        keptMutNodes.emplace(mutNode);
+                    }
+                    const NodeID missingnessNode = std::get<2>(item);
+                    if (missingnessNode != INVALID_NODE_ID) {
+                        keptMutNodes.emplace(missingnessNode);
+                        m_isMissingnessNode.at(missingnessNode) = true;
                     }
                 }
             }
         } else {
             m_keepMutations.resize(0);
             m_keepMutations.shrink_to_fit();
+            m_isMissingnessNode.resize(grg->numNodes(), false);
+            for (const auto& item : grg->getNodesAndMutations<GRG::NodeMutMiss>()) {
+                const NodeID missingnessNode = std::get<2>(item);
+                m_isMissingnessNode.at(missingnessNode) = true;
+            }
         }
         for (const auto& nodeId : keptMutNodes) {
             result.emplace_back(nodeId);
@@ -260,6 +278,15 @@ public:
                     m_newNodeData.setPopId(sampleId, grg->getPopulationId(nodeId));
                 }
             }
+            if (m_isMissingnessNode.empty() && grg->hasMissingData()) {
+                m_isMissingnessNode.resize(grg->numNodes(), false);
+                for (const auto& item : grg->getNodesAndMutations<GRG::NodeMutMiss>()) {
+                    const NodeID missingnessNode = std::get<2>(item);
+                    if (missingnessNode != INVALID_NODE_ID) {
+                        m_isMissingnessNode.at(missingnessNode) = true;
+                    }
+                }
+            }
         }
         if (dfsPass != DfsPass::DFS_PASS_THERE) {
             // A flag we use to track which nodes we have visited, any unvisited nodes are filtered out during
@@ -283,7 +310,7 @@ public:
                     (children.size() <= 1 || numParents <= 1 || (children.size() == 2 && numParents == 2));
                 // Nodes with no children but with mutations arise when removing samples, and we keep the mutation
                 // but ditch the node.
-                const bool keepMutNode = !children.empty() && hasMutations(grg, nodeId);
+                const bool keepMutNode = !children.empty() && shouldKeep(grg, nodeId);
                 if (!m_allowSimplify || !extraneousNode || keepMutNode) {
                     // Save the position of the start of our edges.
                     const NodeID newNodeId = m_nodeCounter++;
@@ -339,6 +366,9 @@ public:
     std::vector<NodeIDSizeT> m_revIdMap;
     std::vector<bool> m_keepBeneath;
     std::vector<bool> m_keepMutations;
+    // True if the node is a missingness node, false otherwise.
+    std::vector<bool> m_isMissingnessNode;
+
     // Updated node data
     NodeDataContainer m_newNodeData;
 
@@ -359,8 +389,9 @@ std::pair<NodeIDSizeT, EdgeSizeT>
 simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutputFilter& filter, bool allowSimplify) {
     assert_deserialization(outStream.good(), "Bad output stream");
     const size_t numMutations = grg->getMutations().size();
-    release_assert(grg->getNodeMutationPairs().size() == numMutations);
+    release_assert(grg->getNodesAndMutations().size() == numMutations);
     const auto bpRange = grg->getBPRange();
+    uint64_t flags = (!grg->isPhased() ? GRG_FLAG_UNPHASED : 0) | (grg->hasMissingData() ? GRG_FLAG_HAS_MISSING : 0);
     GRGFileHeader header = {
         GRG_FILE_MAGIC,
         GRG_FILE_MAJOR_VERSION,
@@ -373,7 +404,7 @@ simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutput
         static_cast<uint64_t>(grg->numEdges()),
         filter.isSpecified() ? filter.bpRange.first : grg->getSpecifiedBPRange().first,
         filter.isSpecified() ? filter.bpRange.second : grg->getSpecifiedBPRange().second,
-        !grg->isPhased() ? GRG_FLAG_UNPHASED : 0, /* Flags */
+        flags,
         0,
         0,
         0,
@@ -397,8 +428,8 @@ simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutput
             grg->visitTopo(visitor, TraversalDirection::DIRECTION_UP, filter.seedList);
         } else {
             assert(filter.direction == TraversalDirection::DIRECTION_DOWN);
-            const NodeIDList keptMutNodes = visitor.setKeepMutations(grg, filter.seedList);
-            grg->visitDfs(visitor, TraversalDirection::DIRECTION_DOWN, keptMutNodes);
+            const NodeIDList keptSeedNodes = visitor.setKeepMutations(grg, filter.seedList);
+            grg->visitDfs(visitor, TraversalDirection::DIRECTION_DOWN, keptSeedNodes);
         }
     } else {
         fastCompleteDFS(grg, visitor);
@@ -421,15 +452,16 @@ simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutput
     outStream.seekp(savedPos);
 
     ///////////// Mutations /////////////
-    auto mutToNode = grg->getMutationsToNodeOrdered();
+    const auto mutToNode = grg->getMutationsToNodeOrdered<GRG::MutNodeMiss>();
     // Nodes in (new) MutationID order.
     {
         EagerFileVector<NodeID> mutNodes;
         mutNodes.reserve(mutToNode.size());
         header.mutationCount = 0;
-        for (const auto& mutIdAndNodeId : mutToNode) {
-            if (visitor.keepMutation(mutIdAndNodeId.first)) {
-                const NodeID nodeId = visitor.getNewID(mutIdAndNodeId.second);
+        for (const auto& item : mutToNode) {
+            const MutationId& mutId = std::get<0>(item);
+            if (visitor.keepMutation(mutId)) {
+                const NodeID nodeId = visitor.getNewID(std::get<1>(item));
                 mutNodes.push_back(nodeId);
                 header.mutationCount++;
             }
@@ -440,11 +472,12 @@ simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutput
     // Mutations in (new) MutationID order.
     {
         std::vector<MutationId> deferredAlleles;
-        for (const auto& mutIdAndNodeId : mutToNode) {
-            if (visitor.keepMutation(mutIdAndNodeId.first)) {
-                const auto& mutation = grg->getMutationById(mutIdAndNodeId.first);
+        for (const auto& item : mutToNode) {
+            const MutationId& mutId = std::get<0>(item);
+            if (visitor.keepMutation(mutId)) {
+                const auto& mutation = grg->getMutationById(mutId);
                 if (!mutation.isShort()) {
-                    deferredAlleles.push_back(mutIdAndNodeId.first);
+                    deferredAlleles.push_back(mutId);
                 }
                 writeScalar<Mutation>(mutation, outStream);
             }
@@ -475,6 +508,20 @@ simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutput
         grg->m_individualIds.flushBuckets(outStream, /*clearData=*/false);
         grg->m_individualIds.flushIndexes(outStream, /*clearData=*/false);
         header.flags |= GRG_FLAG_HAS_INDIV_IDS;
+    }
+
+    if (grg->hasMissingData()) {
+        EagerFileVector<NodeID> missingnessNodes;
+        missingnessNodes.reserve(mutToNode.size());
+        for (const auto& item : mutToNode) {
+            const MutationId& mutId = std::get<0>(item);
+            if (visitor.keepMutation(mutId)) {
+                const NodeID missNodeId = visitor.getNewID(std::get<2>(item));
+                missingnessNodes.push_back(missNodeId);
+            }
+        }
+        missingnessNodes.flush(outStream);
+        assert_deserialization(outStream.good(), "Writing GRG failed");
     }
 
     // Rewrite the header, since some fields can change.
@@ -514,10 +561,6 @@ void readGrgCommon(const GRGFileHeader& header, const GRGPtr& grg, IFSPointer& i
     EagerFileVector<NodeID> mutNodes(inStream, inStream->tellg(), header.mutationCount);
     EagerFileVector<Mutation> mutations(inStream, inStream->tellg(), header.mutationCount);
     assert_deserialization(mutNodes.size() == mutations.size(), "Malformed GRG file (inconsistent mutations)");
-    for (MutationId mutId = 0; mutId < mutNodes.size(); mutId++) {
-        grg->m_mutIdsByNodeId.emplace_back(mutNodes[mutId], mutId);
-    }
-    grg->sortMutIdsByNodeID();
     std::vector<MutationId> deferredAlleles;
     for (MutationId mutId = 0; mutId < header.mutationCount; mutId++) {
         if (!mutations[mutId].isShort()) {
@@ -559,6 +602,19 @@ void readGrgCommon(const GRGFileHeader& header, const GRGPtr& grg, IFSPointer& i
         assert_deserialization(individualIds.numNodes() == grg->numIndividuals(), "Malformed GRG file: individual IDs");
         grg->m_individualIds = std::move(individualIds);
     }
+
+    if (hasFlag(header, GRG_FLAG_HAS_MISSING)) {
+        EagerFileVector<NodeID> missNodes(inStream, inStream->tellg(), header.mutationCount);
+        assert_deserialization(missNodes.size() == mutNodes.size(), "Invalid missingness node size");
+        for (MutationId mutId = 0; mutId < mutNodes.size(); mutId++) {
+            grg->m_mutIdsByNodeIdAndMiss.emplace_back(mutNodes[mutId], mutId, missNodes[mutId]);
+        }
+    } else {
+        for (MutationId mutId = 0; mutId < mutNodes.size(); mutId++) {
+            grg->m_mutIdsByNodeId.emplace_back(mutNodes[mutId], mutId);
+        }
+    }
+    grg->sortMutIdsByNodeID();
 
     assert_deserialization(inStream->good(), "Malformed GRG file");
     grg->m_mutsAreOrdered = true;

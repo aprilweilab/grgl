@@ -36,13 +36,24 @@ static constexpr size_t TOPO_DENSE_THRESHOLD = 10;
 
 using bitvect = std::vector<bool>;
 
-MutationId GRG::addMutation(const Mutation& mutation, const NodeID nodeId) {
+MutationId GRG::addMutation(const Mutation& mutation, const NodeID nodeId, const NodeID missNodeId) {
     const MutationId mutId = m_mutations.size();
     m_mutations.push_back(mutation);
     if (nodeId != INVALID_NODE_ID) {
         release_assert(nodeId < this->numNodes());
     }
-    this->m_mutIdsByNodeId.emplace_back(nodeId, mutId);
+    if (m_mutIdsByNodeIdAndMiss.empty() && missNodeId != INVALID_NODE_ID) {
+        for (const auto& pair : m_mutIdsByNodeId) {
+            m_mutIdsByNodeIdAndMiss.emplace_back(pair.first, pair.second, INVALID_NODE_ID);
+        }
+        m_mutIdsByNodeId.clear();
+        m_mutIdsByNodeId.shrink_to_fit();
+    }
+    if (!m_mutIdsByNodeIdAndMiss.empty() || missNodeId != INVALID_NODE_ID) {
+        m_mutIdsByNodeIdAndMiss.emplace_back(nodeId, mutId, missNodeId);
+    } else {
+        this->m_mutIdsByNodeId.emplace_back(nodeId, mutId);
+    }
     this->m_mutIdsByNodeIdSorted = false;
     if (m_mutsAreOrdered) {
         m_mutsAreOrdered = false;
@@ -50,14 +61,12 @@ MutationId GRG::addMutation(const Mutation& mutation, const NodeID nodeId) {
     return mutId;
 }
 
-using MutIdAndNode = std::pair<MutationId, NodeID>;
-
 struct MutIdAndNodeLt {
-    explicit MutIdAndNodeLt(GRGPtr& theGRG)
+    explicit MutIdAndNodeLt(const GRGPtr& theGRG)
         : grg(theGRG) {}
 
     // Sort order: position, ref allele, alt allele.
-    bool operator()(const MutIdAndNode& lhs, const MutIdAndNode& rhs) {
+    bool operator()(const GRG::MutAndNode& lhs, const GRG::MutAndNode& rhs) {
         const auto& mlhs = grg->getMutationById(lhs.first);
         const auto& mrhs = grg->getMutationById(rhs.first);
         if (mlhs.getPosition() == mrhs.getPosition()) {
@@ -71,25 +80,61 @@ struct MutIdAndNodeLt {
         return mlhs.getPosition() < mrhs.getPosition();
     }
 
-    GRGPtr& grg;
+    const GRGPtr& grg;
+};
+
+// Same as MutIdAndNodeLt
+struct MutIdAndNodeAndMissLt : public MutIdAndNodeLt {
+    explicit MutIdAndNodeAndMissLt(const GRGPtr& theGRG)
+        : MutIdAndNodeLt(theGRG) {}
+
+    bool operator()(const GRG::MutNodeMiss& lhs, const GRG::MutNodeMiss& rhs) {
+        const GRG::MutAndNode left = {std::get<0>(lhs), std::get<1>(lhs)};
+        const GRG::MutAndNode right = {std::get<0>(rhs), std::get<1>(rhs)};
+        return MutIdAndNodeLt::operator()(left, right);
+    }
 };
 
 struct MutIdAndNodeLtFast {
-    bool operator()(const MutIdAndNode& lhs, const MutIdAndNode& rhs) const { return lhs.first < rhs.first; }
+    bool operator()(const GRG::MutAndNode& lhs, const GRG::MutAndNode& rhs) const { return lhs.first < rhs.first; }
 };
 
-std::vector<MutIdAndNode> GRG::getMutationsToNodeOrdered() {
-    std::vector<MutIdAndNode> result;
-    for (const auto& nodeAndMutId : m_mutIdsByNodeId) {
-        result.emplace_back(nodeAndMutId.second, nodeAndMutId.first);
+struct MutIdAndNodeAndMissLtFast {
+    bool operator()(const GRG::MutNodeMiss& lhs, const GRG::MutNodeMiss& rhs) {
+        return std::get<0>(lhs) < std::get<0>(rhs);
     }
-    GRGPtr sharedThis = shared_from_this();
-    if (mutationsAreOrdered()) {
-        std::sort(result.begin(), result.end(), MutIdAndNodeLtFast());
+};
+
+template <> void GRG::sortByMutation<GRG::MutAndNode>(std::vector<MutAndNode>& toSort) {
+    GRGPtr grg = shared_from_this();
+    if (this->mutationsAreOrdered()) {
+        std::sort(toSort.begin(), toSort.end(), MutIdAndNodeLtFast());
     } else {
-        std::sort(result.begin(), result.end(), MutIdAndNodeLt(sharedThis));
+        std::sort(toSort.begin(), toSort.end(), MutIdAndNodeLt(grg));
     }
-    return std::move(result);
+}
+
+template <> void GRG::sortByMutation<GRG::MutNodeMiss>(std::vector<MutNodeMiss>& toSort) {
+    GRGPtr grg = shared_from_this();
+    if (this->mutationsAreOrdered()) {
+        std::sort(toSort.begin(), toSort.end(), MutIdAndNodeAndMissLtFast());
+    } else {
+        std::sort(toSort.begin(), toSort.end(), MutIdAndNodeAndMissLt(grg));
+    }
+}
+
+template <> GRG::MutAndNode GRG::nodeAndMutToRevType(const GRG::NodeAndMut& pair) { return {pair.second, pair.first}; }
+
+template <> GRG::MutNodeMiss GRG::nodeAndMutToRevType(const GRG::NodeAndMut& pair) {
+    return {pair.second, pair.first, INVALID_NODE_ID};
+}
+
+template <> GRG::MutAndNode GRG::nodeAndMutAndMissToRevType(const GRG::NodeMutMiss& triple) {
+    return {std::get<1>(triple), std::get<0>(triple)};
+}
+
+template <> GRG::MutNodeMiss GRG::nodeAndMutAndMissToRevType(const GRG::NodeMutMiss& triple) {
+    return {std::get<1>(triple), std::get<0>(triple), std::get<2>(triple)};
 }
 
 void GRG::visitBfs(GRGVisitor& visitor,

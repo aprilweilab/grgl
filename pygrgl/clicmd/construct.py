@@ -161,14 +161,14 @@ def compute_parts(input_file: str, threads: int):
     output = subprocess.check_output(cmd).decode("utf-8").split("\n")[0]
     try:
         num_variants = int(output)
+        min_var_per_part = HAP_SEG_LENGTH
+        max_parts = num_variants // min_var_per_part
     except ValueError:
         print(
-            f"Could not count number of variants in {input_file}. Try specifying --parts directly.",
+            f"Could not count number of variants in {input_file}. Using the default of 100 (use --parts to override).",
             file=sys.stderr,
         )
-        exit(1)
-    min_var_per_part = HAP_SEG_LENGTH
-    max_parts = num_variants // min_var_per_part
+        max_parts = 100
     best_parts = max(threads, round_up_to(100, threads))
     return min(max_parts, best_parts)
 

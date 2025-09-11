@@ -264,7 +264,24 @@ std::pair<size_t, size_t> grgShape(const grgl::GRGPtr& grg) { return {grg->numIn
 
 std::pair<size_t, size_t> grgHapShape(const grgl::GRGPtr& grg) { return {grg->numSamples(), grg->numMutations()}; }
 
+using NodeMutMiss = std::tuple<grgl::NodeID, grgl::MutationId, grgl::NodeID>;
+using NodeMut = std::pair<grgl::NodeID, grgl::MutationId>;
+
 PYBIND11_MODULE(_grgl, m) {
+    py::class_<grgl::GRG::NodeAndMutIterator<NodeMutMiss>>(m, "GRG_NodeMutMissIterator")
+        .def(
+            "__iter__",
+            [](const grgl::GRG::NodeAndMutIterator<NodeMutMiss>& it) {
+                return py::make_iterator(it.begin(), it.end());
+            },
+            py::keep_alive<0, 1>() /* Essential: keep object alive while iterator exists */);
+
+    py::class_<grgl::GRG::NodeAndMutIterator<NodeMut>>(m, "GRG_NodeMutIterator")
+        .def(
+            "__iter__",
+            [](const grgl::GRG::NodeAndMutIterator<NodeMut>& it) { return py::make_iterator(it.begin(), it.end()); },
+            py::keep_alive<0, 1>() /* Essential: keep object alive while iterator exists */);
+
     py::class_<grgl::Mutation>(m, "Mutation")
         .def(py::init<double, std::string, const std::string&, double>(),
              py::arg("position"),
@@ -416,7 +433,7 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: The list of NodeIDs that are root nodes.
                 :rtype: List[int]
             )^")
-        .def("get_node_mutation_pairs", &grgl::GRG::getNodeMutationPairs, R"^(
+        .def("get_node_mutation_pairs", &grgl::GRG::getNodesAndMutations<grgl::GRG::NodeAndMut>, R"^(
                 Get a list of pairs (NodeID, MutationID). Each Mutation typically
                 is associated to a single Node, but rarely it can have more than one
                 Node, in which case it will show up in more than one pair.
@@ -425,7 +442,7 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: A list of pairs of NodeID and MutationID.
                 :rtype: List[Tuple[int, int]]
             )^")
-        .def("get_mutation_node_pairs", &grgl::GRG::getMutationsToNodeOrdered, R"^(
+        .def("get_mutation_node_pairs", &grgl::GRG::getMutationsToNodeOrdered<grgl::GRG::MutAndNode>, R"^(
                 Get a list of pairs (MutationID, NodeID). Each Mutation typically
                 is associated to a single Node, but rarely it can have more than one
                 Node, in which case it will show up in more than one pair.
@@ -434,13 +451,43 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: A list of pairs of MutationID and NodeID.
                 :rtype: List[Tuple[int, int]]
             )^")
-        .def("get_mutations_for_node", &grgl::GRG::getMutationsForNode, py::arg("node_id"), R"^(
+        .def("get_node_mutation_miss", &grgl::GRG::getNodesAndMutations<grgl::GRG::NodeMutMiss>, R"^(
+                Get a list of triples (NodeID, MutationID, "missingness" NodeID). Each 
+                Mutation typically is associated to a single Node, but rarely it can 
+                have more than one Node, in which case it will show up in more than one row.
+                Results are ordered by NodeID, ascending.
+
+                :return: A list of tuples of (NodeID, MutationID, "missingness" NodeID).
+                :rtype: List[Tuple[int, int, int]]
+            )^")
+        .def("get_mutation_node_miss", &grgl::GRG::getMutationsToNodeOrdered<grgl::GRG::MutAndNode>, R"^(
+                Get a list of triples (MutationID, NodeID, "missingness" NodeID). Each
+                Mutation typically is associated to a single Node, but rarely it can have
+                more than one Node, in which case it will show up in more than one row.
+                Results are ordered by MutationID, ascending.
+
+                :return: A list of tuples of (MutationID, NodeID, "missingness" NodeID).
+                :rtype: List[Tuple[int, int, int]]
+            )^")
+        .def("get_mutations_for_node", &grgl::GRG::getMutationsForNode<grgl::MutationId>, py::arg("node_id"), R"^(
                 Get all the (zero or more) Mutations associated with the given NodeID.
 
                 :param node_id: The NodeID to get mutations for.
                 :type node_id: int
                 :return: A list of MutationIDs.
                 :rtype: List[int]
+            )^")
+        .def("get_muts_and_miss_for_node",
+             &grgl::GRG::getMutationsForNode<std::pair<grgl::MutationId, grgl::NodeID>>,
+             py::arg("node_id"),
+             R"^(
+                Get all the (zero or more) Mutations associated with the given NodeID, and for
+                each Mutation the associated missingness node.
+
+                :param node_id: The NodeID to get mutations for.
+                :type node_id: int
+                :return: A list of pairs, (MutationID, NodeID) where the NodeID is for the missingness node.
+                :rtype: List[Tuple[int, int]]
             )^")
         .def("get_mutation_by_id", &grgl::GRG::getMutationById, py::arg("mut_id"), R"^(
                 Get the Mutation associated with the given MutationID.
@@ -484,7 +531,12 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: The population descriptions.
                 :rtype: List[str]
             )^")
-        .def("add_mutation", &grgl::GRG::addMutation, py::arg("mutation"), py::arg("node_id"), R"^(
+        .def("add_mutation",
+             &grgl::GRG::addMutation,
+             py::arg("mutation"),
+             py::arg("node_id"),
+             py::arg("miss_node_id") = grgl::INVALID_NODE_ID,
+             R"^(
                 Add a new Mutation to the GRG, and associate it with the given NodeID.
 
                 :param mutation: The Mutation object.

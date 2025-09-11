@@ -34,6 +34,8 @@ namespace grgl {
         }                                                                                                              \
     } while (0)
 
+#define GRGL_DEPRECATED __attribute__((deprecated))
+
 /**
  * Exception thrown when the GRG API is used incorrectly (bad parameters, incorrect preconditions, etc.).
  */
@@ -167,6 +169,9 @@ inline std::size_t hash_combine(std::size_t hash1, std::size_t hash2) {
 constexpr uint64_t GRG_FLAG_HAS_INDIV_IDS = 0x1;
 // Set if the GRG contains unphased data.
 constexpr uint64_t GRG_FLAG_UNPHASED = 0x2;
+// Set if the GRG contains _any_ missing data, in which case it will have
+// a list of missingness nodes (one for each mutation) in the file.
+constexpr uint64_t GRG_FLAG_HAS_MISSING = 0x4;
 
 constexpr uint64_t GRG_FILE_MAGIC = 0xE9366C64DDC8C5B0;
 constexpr uint16_t GRG_FILE_MAJOR_VERSION = 5;

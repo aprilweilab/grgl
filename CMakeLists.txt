@@ -94,6 +94,7 @@ set(GRGL_TEST_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_map_muts.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_mult.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_mutation.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_mut_iterator.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_serialize.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_util.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_visitor.cpp
@@ -115,6 +116,7 @@ set(GRGL_CORE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/grg_merge.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/map_mutations.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/mut_iterator.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/mutation.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/serialize.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/ts2grg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/windowing.cpp
@@ -183,6 +185,7 @@ target_link_libraries(grgl_merge grgl vbyte)
 add_executable(gconverter
                ${CMAKE_CURRENT_LIST_DIR}/src/gconverter.cpp
                ${CMAKE_CURRENT_LIST_DIR}/src/mut_iterator.cpp
+               ${CMAKE_CURRENT_LIST_DIR}/src/mutation.cpp
                )
 target_link_libraries(gconverter ${BGEN_LIBS} z)
 
@@ -190,6 +193,7 @@ target_link_libraries(gconverter ${BGEN_LIBS} z)
 add_executable(gtime
                ${CMAKE_CURRENT_LIST_DIR}/extra/gtime.cpp
                ${CMAKE_CURRENT_LIST_DIR}/src/mut_iterator.cpp
+               ${CMAKE_CURRENT_LIST_DIR}/src/mutation.cpp
                )
 target_link_libraries(gtime ${BGEN_LIBS} z)
 

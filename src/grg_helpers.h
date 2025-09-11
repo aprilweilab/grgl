@@ -78,9 +78,14 @@ static inline size_t getNaiveEdgeCount(const GRGPtr& grg) {
     grg->visitDfs(countVisitor, TraversalDirection::DIRECTION_DOWN, grg->getRootNodes());
     const std::vector<NodeIDSizeT>& sampleCounts = countVisitor.m_sampleCounts;
     size_t edgeCount = 0;
-    for (const auto& pair : grg->getNodeMutationPairs()) {
-        if (pair.first != INVALID_NODE_ID) {
-            edgeCount += sampleCounts.at(pair.first);
+    for (const auto& tuple : grg->getNodesAndMutations<GRG::NodeMutMiss>()) {
+        const NodeID& node = std::get<0>(tuple);
+        if (node != INVALID_NODE_ID) {
+            edgeCount += sampleCounts.at(node);
+        }
+        const NodeID& missingnessNode = std::get<2>(tuple);
+        if (missingnessNode != INVALID_NODE_ID) {
+            edgeCount += sampleCounts.at(missingnessNode);
         }
     }
     return edgeCount;

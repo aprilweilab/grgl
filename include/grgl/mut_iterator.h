@@ -41,7 +41,7 @@ enum {
     MIT_FLAG_EMPTY = 0x0,
     ///< Convert variants to be biallelic, collapsing alt alleles into a single one.
     MIT_FLAG_BINARY_MUTATIONS = 0x1,
-    ///< If there is missing data, emit it as a separate Mutation.
+    ///< If there is missing data, emit it as a separate Mutation, and ALWAYS BEFORE other Mutations at the same site.
     MIT_FLAG_EMIT_MISSING_DATA = 0x2,
     ///< Flip the major allele to be the reference allele, where necessary.
     MIT_FLAG_FLIP_REF_MAJOR = 0x4,
@@ -93,6 +93,15 @@ public:
 
     bool inRange(size_t variantIndex, size_t position) const;
 
+    /**
+     * Get the next Mutation. Properties:
+     * * If emitMissingData() is true, then any mutations that represent missing data will be emitted
+     *   _before_ other Mutations that are at the same position (site).
+     *
+     * @param[out] mutAndSamples The Mutation and a list of sample identifiers that have it.
+     * @param[out] totalSamples The total number of samples for the dataset.
+     * @return True if a Mutation was found, false if we are at the end of the iterator.
+     */
     bool next(MutationAndSamples& mutAndSamples, size_t& totalSamples);
     void reset();
 

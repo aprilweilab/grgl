@@ -18,6 +18,7 @@
 
 #include "grgl/common.h"
 #include "grgl/grgnode.h"
+#include "grgl/mutation.h"
 #include "picovcf.hpp"
 #include "util.h"
 
@@ -139,6 +140,7 @@ VCFMutationIterator::VCFMutationIterator(const char* filename, FloatRange genome
     // If we got a normalized range, we have to denormalize it before use.
     if (genomeRange.isNormalized()) {
         if (useVariantRange()) {
+            std::cerr << "WARNING: Using variant ranges with VCF files is very slow, and not recommended." << std::endl;
             m_genomeRange = genomeRange.denormalized(0, m_vcf->numVariants());
         } else {
             const auto vcfGenomeRange = m_vcf->getGenomeRange();
@@ -253,10 +255,13 @@ void VCFMutationIterator::buffer_next(size_t& totalSamples) {
                                            std::move(altAlleleToSamples[altAllele])});
             }
         }
+
+        // If we have missing data, always emit it first (m_alreadyLoaded is a stack, so the end will emit first).
         if (emitMissingData() && !missingSamples.empty()) {
             m_alreadyLoaded.push_back(
                 {Mutation(variant.getPosition(), Mutation::ALLELE_MISSING, refAllele), std::move(missingSamples)});
         }
+
         m_currentVariant++;
     }
 }
@@ -322,6 +327,10 @@ size_t IGDMutationIterator::totalFileVariants() const { return m_igd->numVariant
 
 std::vector<std::string> IGDMutationIterator::getIndividualIds() { return std::move(m_igd->getIndividualIds()); }
 
+// Template for mutations that represent missing data.
+using AllelePair = std::pair<std::string, std::string>;
+static const AllelePair AP_FOR_MISSING = {Mutation::ALLELE_MISSING, Mutation::ALLELE_MISSING};
+
 void IGDMutationIterator::buffer_next(size_t& totalSamples) {
     static std::random_device randDevice;
     static std::mt19937 generator(randDevice());
@@ -330,7 +339,6 @@ void IGDMutationIterator::buffer_next(size_t& totalSamples) {
     release_assert(m_currentVariant >= m_startVariant);
     totalSamples = m_igd->numSamples();
 
-    using AllelePair = std::pair<std::string, std::string>;
     std::unordered_map<AllelePair, size_t> seenMap;
     // If we have an alt allele with > 50% occurrence, make it the new reference allele.
     while (m_currentVariant < m_igd->numVariants() && m_alreadyLoaded.empty()) {
@@ -338,23 +346,37 @@ void IGDMutationIterator::buffer_next(size_t& totalSamples) {
         bool isMissingDataRow = false;
         const size_t position = m_igd->getPosition(m_currentVariant, isMissingDataRow, numCopies);
         if (inRange(m_currentVariant, position)) {
+            NodeIDList missingSamples;
             while (m_currentVariant < m_igd->numVariants() &&
                    position == m_igd->getPosition(m_currentVariant, isMissingDataRow, numCopies)) {
-                if (!isMissingDataRow || emitMissingData()) {
-                    AllelePair alleles;
-                    alleles.first = m_igd->getRefAllele(m_currentVariant);
-                    alleles.second =
-                        isMissingDataRow ? Mutation::ALLELE_MISSING : m_igd->getAltAllele(m_currentVariant);
+                if (isMissingDataRow) {
+                    if (emitMissingData()) {
+                        const bool needsSort = !missingSamples.empty();
+                        auto sampleSet = m_igd->getSamplesWithAlt(m_currentVariant);
+                        for (auto sampleId : sampleSet) {
+                            if (numCopies >= 1) {
+                                const size_t firstCopy = sampleId * m_igd->getPloidy();
+                                for (size_t j = 0; j < numCopies; j++) {
+                                    missingSamples.push_back(firstCopy + j);
+                                }
+                            } else {
+                                missingSamples.push_back(sampleId);
+                            }
+                        }
+                        if (needsSort) {
+                            std::sort(missingSamples.begin(), missingSamples.end());
+                        }
+                    }
+                } else {
+                    AllelePair alleles = {m_igd->getRefAllele(m_currentVariant), m_igd->getAltAllele(m_currentVariant)};
 
                     // We collection sample sets by alleles
                     bool needsSort = false;
                     size_t loadedIndex = std::numeric_limits<size_t>::max();
-                    if (numCopies >= 1) {
-                        auto findIt = seenMap.find(alleles);
-                        if (findIt != seenMap.end()) {
-                            loadedIndex = findIt->second;
-                            needsSort = true;
-                        }
+                    auto findIt = seenMap.find(alleles);
+                    if (findIt != seenMap.end()) {
+                        loadedIndex = findIt->second;
+                        needsSort = !m_alreadyLoaded[loadedIndex].samples.empty();
                     }
                     if (loadedIndex > m_alreadyLoaded.size()) {
                         loadedIndex = m_alreadyLoaded.size();
@@ -379,6 +401,11 @@ void IGDMutationIterator::buffer_next(size_t& totalSamples) {
                     }
                 }
                 m_currentVariant++;
+            }
+            // If we have missing data, always emit it first (m_alreadyLoaded is a stack, so the end will emit first).
+            if (!missingSamples.empty()) {
+                Mutation mutForMissing = {Mutation(position, Mutation::ALLELE_MISSING, Mutation::ALLELE_MISSING)};
+                m_alreadyLoaded.push_back({std::move(mutForMissing), std::move(missingSamples)});
             }
         } else {
             m_currentVariant++;
@@ -596,10 +623,13 @@ void BGENMutationIterator::buffer_next(size_t& totalSamples) {
                      std::move(alleleToSamples[i])});
             }
         }
+
+        // If we have missing data, always emit it first (m_alreadyLoaded is a stack, so the end will emit first).
         if (emitMissingData() && !missingSamples.empty()) {
             m_alreadyLoaded.push_back(
                 {Mutation(variant->position, Mutation::ALLELE_MISSING, refAllele), std::move(missingSamples)});
         }
+
         m_currentVariant++;
     }
 }

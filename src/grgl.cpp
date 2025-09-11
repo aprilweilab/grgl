@@ -42,7 +42,6 @@ enum MissingDataHandling {
     MDH_INVALID = 0,
     MDH_IGNORE = 1,
     MDH_ADD_TO_GRG = 2,
-    MDH_SEPARATE_GRG = 3,
 };
 
 inline bool supportedInputFormat(const std::string& filename) {
@@ -84,12 +83,8 @@ int main(int argc, char** argv) {
     args::Flag MAFFlip(
         parser, "maf-flip", "Switch the reference allele with the major allele when they differ", {"maf-flip"});
     args::Flag showVersion(parser, "version", "Show version and exit", {"version"});
-    args::ValueFlag<std::string> missingData(
-        parser,
-        "missing-data",
-        "How to handle missing data: \"ignore\" (default), \"add\" (add to GRG), \"separate\""
-        " (emit separate GRG for missing data)",
-        {'d', "missing-data"});
+    args::Flag ignoreMissing(
+        parser, "ignore-missing", "Ignore missing data (treat missing alleles as REF)", {"ignore-missing"});
     args::ValueFlag<std::string> windowedSplit(
         parser,
         "windowedSplit",
@@ -171,22 +166,11 @@ int main(int argc, char** argv) {
     std::cout << std::fixed << std::setprecision(4);
 
     // Default values for parameters.
-    MissingDataHandling missingDataHandling =
-        missingData ? (*missingData == "ignore"
-                           ? MDH_IGNORE
-                           : (*missingData == "add" ? MDH_ADD_TO_GRG
-                                                    : (*missingData == "separate" ? MDH_SEPARATE_GRG : MDH_INVALID)))
-                    : MDH_IGNORE;
-    if (missingDataHandling == MDH_INVALID) {
-        std::cerr << "Invalid missing-data handling: " << *missingData << std::endl;
-        return 1;
-    }
-
     grgl::MutationIteratorFlags itFlags = grgl::MIT_FLAG_EMPTY;
     if (binaryMutations) {
         itFlags |= grgl::MIT_FLAG_BINARY_MUTATIONS;
     }
-    if (missingDataHandling == MDH_ADD_TO_GRG) {
+    if (!ignoreMissing) {
         itFlags |= grgl::MIT_FLAG_EMIT_MISSING_DATA;
     }
     if (MAFFlip) {
