@@ -113,6 +113,11 @@ def add_options(subparser):
         action="store_true",
         help="Do not storage individual string identifiers in the GRG.",
     )
+    subparser.add_argument(
+        "--ignore-missing",
+        action="store_true",
+        help="Do not store missing data in the GRG, pretend missing alleles are the reference allele.",
+    )
     # There are 9 compression levels:
     # 1: same as 2
     # 2: single-pass, use FASTER2 to determine # of trees, direct-map muts with count less
@@ -214,6 +219,8 @@ def build_shape(
         command.append("--no-indiv-ids")
     if args.verbose:
         command.extend(["--verbose", "-s"])
+    if args.ignore_missing:
+        command.append("--ignore-missing")
     shape_filename = out_filename(output_file, part)
     command.extend(
         [
@@ -248,6 +255,8 @@ def build_grg(
             command.append("--maf-flip")
         if args.verbose:
             command.extend(["--verbose", "-s"])
+        if args.ignore_missing:
+            command.append("--ignore-missing")
         command.extend(
             [
                 "-r",

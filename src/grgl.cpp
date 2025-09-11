@@ -38,12 +38,6 @@
 
 #include "grgl/version.h"
 
-enum MissingDataHandling {
-    MDH_INVALID = 0,
-    MDH_IGNORE = 1,
-    MDH_ADD_TO_GRG = 2,
-};
-
 inline bool supportedInputFormat(const std::string& filename) {
     return ends_with(filename, ".vcf") || ends_with(filename, ".vcf.gz") || ends_with(filename, ".igd") ||
            ends_with(filename, ".bgen");
