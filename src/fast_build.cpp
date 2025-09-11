@@ -258,11 +258,11 @@ void getHapSegments(MutationIterator& mutIterator,
     size_t windex = 0;
 
     // If the threshold is <1.0, it is a frequency.
-    size_t dropBelowCount = 0;
+    size_t directMapBelowCt = 0;
     if (dropBelowThreshold < 1.0) {
-        dropBelowCount = (size_t)((double)numSamples * dropBelowThreshold);
+        directMapBelowCt = (size_t)((double)numSamples * dropBelowThreshold);
     } else {
-        dropBelowCount = (size_t)dropBelowThreshold;
+        directMapBelowCt = (size_t)dropBelowThreshold;
     }
 
     hapContext.sampleHapVects.resize(numSamples);
@@ -277,6 +277,10 @@ void getHapSegments(MutationIterator& mutIterator,
     bool done = false;
     size_t _ignore = 0;
     MutationAndSamples mutAndSamples;
+    // The missing data Mutations always come first, so this tells us if the position of any _non-missing-data_
+    // Mutation also has missing data.
+    size_t lastPositionWithMissing = std::numeric_limits<size_t>::max();
+
     while (!done && mutIterator.next(mutAndSamples, _ignore)) {
         // Stopping when we reach a certain mutation threshold.
         if (stopAfterIsMutCount) {
@@ -285,7 +289,15 @@ void getHapSegments(MutationIterator& mutIterator,
                 done = true;
             }
         }
-        if (mutAndSamples.samples.size() < dropBelowCount) {
+
+        const size_t position = mutAndSamples.mutation.getPosition();
+        if (mutAndSamples.mutation.isMissing()) {
+            lastPositionWithMissing = position;
+        }
+
+        // We will only direct map mutations if there is no missing data at the site. Otherwise, tracking
+        // the missingness NodeIDs across regular and direct mapping is a nightmare.
+        if (mutAndSamples.samples.size() < directMapBelowCt && lastPositionWithMissing != position) {
             hapContext.directMap.emplace_back(std::move(mutAndSamples));
             continue;
         }
@@ -879,7 +891,8 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
     }
     release_assert(treeCount != 0 || remainingMuts == 0);
 
-    const size_t mutsPerTree = roundUpToMultiple<size_t>(remainingMuts, treeCount) / treeCount;
+    const size_t mutsPerTree =
+        (remainingMuts == 0) ? 0 : roundUpToMultiple<size_t>(remainingMuts, treeCount) / treeCount;
     for (size_t i = 1; i <= treeCount; i++) {
         HapWindowContext hapContext;
         getHapSegments(*mutIterator,
@@ -914,12 +927,11 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
     }
 #endif
 
-    MutableGRGPtr result;
-    if (treeFiles.size() == 1) {
-        result = loadMutableGRG(treeFiles.front());
-    } else {
-        result = std::make_shared<MutableGRG>(numSamples, ploidy, isPhased);
-        result->merge(treeFiles, true, false);
+    MutableGRGPtr result = loadMutableGRG(treeFiles.front());
+    if (treeFiles.size() > 1) {
+        std::list<std::string> toMerge = treeFiles;
+        toMerge.pop_front();
+        result->merge(toMerge, true, false);
     }
     for (const auto& filename : treeFiles) {
         deleteFile(filename);
