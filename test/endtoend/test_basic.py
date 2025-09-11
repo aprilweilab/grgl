@@ -24,7 +24,7 @@ def get_freqs_unordered(lines: List[str]) -> Dict[Tuple[str, str, str], int]:
         line = line.strip()
         if not line:
             continue
-        pos, ref, alt, freq, total = line.split("\t")
+        pos, ref, alt, freq, miss, total = line.split("\t")
         if pos == "POSITION":
             continue
         fmap[(float(pos), ref, alt)] = int(freq)
