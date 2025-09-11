@@ -705,6 +705,19 @@ public:
         return {reinterpret_cast<const char*>(characters.data()), characters.size()};
     }
 
+    // When nodeIds change (e.g., during merging) we need to make a post-processing
+    // pass over the missinginess nodes to adjust their IDs.
+    void adjustMissingnessNodeIds(const size_t afterIndex, const std::vector<NodeID>& replaceMap) {
+        if (!m_mutIdsByNodeIdAndMiss.empty()) {
+            for (size_t i = afterIndex; i < m_mutIdsByNodeIdAndMiss.size(); i++) {
+                NodeID& missingnessNode = std::get<2>(m_mutIdsByNodeIdAndMiss[i]);
+                if (missingnessNode != INVALID_NODE_ID) {
+                    missingnessNode = replaceMap.at(missingnessNode);
+                }
+            }
+        }
+    }
+
 protected:
     void visitTopoNodeOrderedDense(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
     void visitTopoNodeOrderedSparse(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
@@ -1035,6 +1048,13 @@ using ConstCSRGRGPtr = std::shared_ptr<const CSRGRG>;
 // functions/classes that are needed by matrix multiplication.
 #include "internal_mult.h"
 
+#include <unistd.h>
+
+// Notes on parameter constraints/assumptions (_CALLERS_ must ensure these):
+// * initMatrix and nodeInit match -- the dimensions of the former are defined by the latter
+// * missMatrix, if provided, must be a vector of length inputCols (C). Unlike inputMatrix which
+//   is (k x C), missMatrix is (1 x C). I.e., you can't provide different missing values for each
+//   row (it is assumed to be constant).
 template <typename IOType, typename NodeValueType, bool useBitVector>
 void GRG::matrixMultiplication(const IOType* inputMatrix,
                                size_t inputCols,
@@ -1047,6 +1067,11 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
                                const IOType* initMatrix,
                                NodeInitEnum nodeInit,
                                const IOType* missMatrix) {
+
+    volatile static bool doSleep = std::getenv("DO_SLEEP") != nullptr;
+    while (doSleep) {
+        sleep(0.1);
+    }
     release_assert(inputCols > 0);
     release_assert(inputRows > 0);
     const size_t outputCols = outputSize / inputRows;
@@ -1111,11 +1136,10 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
             }
             if (missMatrix != nullptr && missingnessNode != INVALID_NODE_ID) {
                 const size_t base = missingnessNode * effectiveInputRows;
-                for (size_t row = 0; row < inputRows; row++) {
-                    const size_t rowStart = row * inputCols;
-                    matmulPerformIOAddition<NodeValueType, IOType, useBitVector>(
-                        nodeValues.data(), base + row, missMatrix, rowStart + mutId);
-                }
+                // Apply the single missing-data value for this mutation to all the node values
+                // associated with the missingness node.
+                matmulPerformIOAddition<NodeValueType, IOType, useBitVector>(
+                    nodeValues.data(), base, missMatrix[mutId], inputRows);
             }
         }
         if (this->nodesAreOrdered()) {

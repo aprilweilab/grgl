@@ -50,7 +50,7 @@ public:
         if (!(condition)) {                                                                                            \
             std::stringstream ssErr;                                                                                   \
             ssErr << msg;                                                                                              \
-            throw ApiMisuseFailure(ssErr.str().c_str());                                                               \
+            throw grgl::ApiMisuseFailure(ssErr.str().c_str());                                                         \
         }                                                                                                              \
     } while (0)
 

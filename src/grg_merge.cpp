@@ -178,10 +178,10 @@ public:
     }
 
     size_t m_mappedExactly{};
+    std::vector<NodeID> m_nodeIdToTargetNodeId;
 
 private:
     MutableGRG& m_targetGrg;
-    std::vector<NodeID> m_nodeIdToTargetNodeId;
     DigestToNode& m_targetHashToNodeId;
     bool m_combineNodes;
 };
@@ -228,7 +228,7 @@ public:
         } else {
             return true;
         }
-        // Previousl we merged based on covered samples, now we merge based on (immediate) children nodes.
+        // Previously we merged based on covered samples, now we merge based on (immediate) children nodes.
         // The difference is that we previously merged more nodes, but now we maintain more hierarchy. In
         //
         // There may be post-processing steps we can do later to "cleanup" duplication that involves hierarchy
@@ -287,10 +287,10 @@ public:
     }
 
     size_t m_mappedExactly{};
+    std::vector<NodeID> m_nodeIdToTargetNodeId;
 
 private:
     MutableGRG& m_targetGrg;
-    std::vector<NodeID> m_nodeIdToTargetNodeId;
     DigestToNode& m_targetHashToNodeId;
     bool m_combineNodes;
 };
@@ -319,8 +319,12 @@ void mergeHelper(MutableGRG& grg, const std::list<std::string>& otherGrgFiles, b
             throw ApiMisuseFailure(err.str().c_str());
         }
         seenMutations += otherGrg->numMutations();
+
+        // We need to adjust these mutations (their missingness nodes) after we map them into the target.
+        const size_t adjustMutsAfter = grg.numMutations();
+
         // Do the actual node mapping and copy relevant nodes/mutations/edges to the target GRG.
-        NodeMapperVisitor mapperVisitor(otherGrg, grg, hashToNodeId, combineNodes);
+        Mapper mapperVisitor(otherGrg, grg, hashToNodeId, combineNodes);
         fastCompleteDFS(otherGrg, mapperVisitor);
         if (verbose) {
             std::cout << "Mapped exactly: " << mapperVisitor.m_mappedExactly << std::endl;
@@ -330,6 +334,9 @@ void mergeHelper(MutableGRG& grg, const std::list<std::string>& otherGrgFiles, b
             const auto& mutation = otherGrg->getMutationById(mutAndMiss.first);
             grg.addMutation(mutation, INVALID_NODE_ID, mutAndMiss.second);
         }
+        // Adjust all the missingness node ID's to use the new mapping.
+        grg.adjustMissingnessNodeIds(adjustMutsAfter, mapperVisitor.m_nodeIdToTargetNodeId);
+
         // The range has to be contiguous, even if there is a "gap" between the two merged GRGs.
         const auto& otherRange = otherGrg->getSpecifiedBPRange();
         auto myRange = grg.getSpecifiedBPRange();
