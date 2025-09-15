@@ -67,7 +67,7 @@ int main(int argc, char** argv) {
             otherFiles.push_back(filename);
         }
     }
-    grgl::MutableGRGPtr grg1 = grgl::loadMutableGRG(firstFile);
+    grgl::MutableGRGPtr grg1 = grgl::loadMutableGRG(firstFile, /*loadUpEdges=*/false);
     if (!grg1) {
         return 2;
     }

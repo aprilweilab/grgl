@@ -823,6 +823,9 @@ inline std::pair<NodeID, MutationId> GRG::NodeAndMutIterator<std::pair<NodeID, M
     return (*m_pair).at(m_position);
 }
 
+/**
+ * A MutableGRG can be changed by adding/removing nodes and edges.
+ */
 class MutableGRG : public GRG {
 public:
     /**
@@ -835,8 +838,10 @@ public:
     explicit MutableGRG(size_t numSamples,
                         uint16_t ploidy,
                         bool phased = true,
-                        size_t initialNodeCapacity = DEFAULT_NODE_CAPACITY)
-        : GRG(numSamples, ploidy, phased) {
+                        size_t initialNodeCapacity = DEFAULT_NODE_CAPACITY,
+                        bool useUpEdges = true)
+        : GRG(numSamples, ploidy, phased),
+          m_hasUpEdges(useUpEdges) {
         if (initialNodeCapacity < numSamples) {
             initialNodeCapacity = numSamples * 2;
         }
@@ -858,13 +863,22 @@ public:
 
     size_t numDownEdges(NodeID nodeId) override { return m_nodes.at(nodeId)->getDownEdges().size(); }
 
-    size_t numUpEdges(NodeID nodeId) override { return m_nodes.at(nodeId)->getUpEdges().size(); }
+    size_t numUpEdges(NodeID nodeId) override {
+        if (!m_hasUpEdges) {
+            release_assert(m_nodes.at(nodeId)->getUpEdges().empty());
+            return NO_UP_EDGES;
+        }
+        return m_nodes.at(nodeId)->getUpEdges().size();
+    }
 
     NodeIDList getDownEdges(NodeID nodeId) override { return m_nodes.at(nodeId)->getDownEdges(); }
 
-    NodeIDList getUpEdges(NodeID nodeId) override { return m_nodes.at(nodeId)->getUpEdges(); }
+    NodeIDList getUpEdges(NodeID nodeId) override {
+        api_exc_check(m_hasUpEdges, "No up edges were loaded/enabled");
+        return m_nodes.at(nodeId)->getUpEdges();
+    }
 
-    bool hasUpEdges() const override { return true; }
+    bool hasUpEdges() const override { return m_hasUpEdges; }
 
     bool edgesAreOrdered() const override { return false; }
 
@@ -975,10 +989,12 @@ private:
     // The list of nodes. The node's position in this vector must match its ID.
     std::vector<GRGNodePtr> m_nodes;
 
-    friend MutableGRGPtr readMutableGrg(IFSPointer& inStream);
+    friend MutableGRGPtr readMutableGrg(IFSPointer&, bool);
 
     // True if the nodeId order matches the bottom-up topological order.
     bool m_nodesAreOrdered{true};
+    // True if we are tracking up edges -- not all analyses need them.
+    bool m_hasUpEdges;
 };
 
 // Eager CSR sorted 32-bit edges, encoded.

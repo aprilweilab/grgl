@@ -187,7 +187,7 @@ private:
 };
 
 /**
- * Option 2: Maps nodes using unique hashes based on the set immediate children beneath the node.
+ * Option 2: Maps nodes using unique hashes based on the set of immediate children beneath the node.
  * This is RAM/CPU efficient, maintains more hierachy, but produces 5-8% larger graphs.
  */
 class NodeMapperVisitor : public GRGVisitor {
@@ -307,7 +307,7 @@ void mergeHelper(MutableGRG& grg, const std::list<std::string>& otherGrgFiles, b
 
     size_t seenMutations = grg.numMutations();
     for (const auto& otherGrgFile : otherGrgFiles) {
-        const auto otherGrg = loadImmutableGRG(otherGrgFile);
+        const auto otherGrg = loadImmutableGRG(otherGrgFile, /*loadUpEdges=*/false);
         if (!otherGrg) {
             std::stringstream err;
             err << "Could not load GRG from " << otherGrgFile;

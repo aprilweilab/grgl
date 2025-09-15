@@ -109,7 +109,7 @@ static inline void dumpStats(const GRGPtr& grg, const bool calculateNaiveEdges =
     std::cout << "======================" << std::endl;
 }
 
-static inline MutableGRGPtr loadMutableGRG(const std::string& filename) {
+static inline MutableGRGPtr loadMutableGRG(const std::string& filename, const bool loadUpEdges = true) {
     MutableGRGPtr result;
     IFSPointer inStream = std::make_shared<std::ifstream>(filename, std::ios::binary);
     if (!inStream->good()) {
@@ -117,7 +117,7 @@ static inline MutableGRGPtr loadMutableGRG(const std::string& filename) {
         return result;
     }
     try {
-        result = readMutableGrg(inStream);
+        result = readMutableGrg(inStream, loadUpEdges);
     } catch (SerializationFailure& e) {
         std::cerr << "Failed to load GRG: " << e.what() << std::endl;
         return result;

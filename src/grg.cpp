@@ -205,12 +205,16 @@ void GRG::visitDfs(GRGVisitor& visitor, TraversalDirection direction, const Node
 
 void MutableGRG::connect(const NodeID srcId, const NodeID tgtId) {
     m_nodes.at(srcId)->addDownEdge(tgtId);
-    m_nodes.at(tgtId)->addUpEdge(srcId);
+    if (m_hasUpEdges) {
+        m_nodes.at(tgtId)->addUpEdge(srcId);
+    }
 }
 
 void MutableGRG::disconnect(const NodeID srcId, const NodeID tgtId) {
     m_nodes.at(srcId)->deleteDownEdge(tgtId);
-    m_nodes.at(tgtId)->deleteUpEdge(srcId);
+    if (m_hasUpEdges) {
+        m_nodes.at(tgtId)->deleteUpEdge(srcId);
+    }
 }
 
 class TopoOrderVisitor : public grgl::GRGVisitor {

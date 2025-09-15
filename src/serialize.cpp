@@ -620,7 +620,7 @@ void readGrgCommon(const GRGFileHeader& header, const GRGPtr& grg, IFSPointer& i
     grg->m_mutsAreOrdered = true;
 }
 
-MutableGRGPtr readMutableGrg(IFSPointer& inStream) {
+MutableGRGPtr readMutableGrg(IFSPointer& inStream, bool loadUpEdges) {
     assert_deserialization(inStream->good(), "Bad input stream");
     // Read header.
     GRGFileHeader header = {};
@@ -633,7 +633,7 @@ MutableGRGPtr readMutableGrg(IFSPointer& inStream) {
 
     // Construct GRG and allocate all the nodes.
     MutableGRGPtr grg = std::make_shared<MutableGRG>(
-        header.sampleCount, header.ploidy, !hasFlag(header, GRG_FLAG_UNPHASED), header.nodeCount);
+        header.sampleCount, header.ploidy, !hasFlag(header, GRG_FLAG_UNPHASED), header.nodeCount, loadUpEdges);
     grg->setSpecifiedBPRange({header.rangeStart, header.rangeEnd});
     grg->makeNode(header.nodeCount - header.sampleCount);
     release_assert(grg->numNodes() == header.nodeCount);
