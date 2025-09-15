@@ -1064,8 +1064,6 @@ using ConstCSRGRGPtr = std::shared_ptr<const CSRGRG>;
 // functions/classes that are needed by matrix multiplication.
 #include "internal_mult.h"
 
-#include <unistd.h>
-
 // Notes on parameter constraints/assumptions (_CALLERS_ must ensure these):
 // * initMatrix and nodeInit match -- the dimensions of the former are defined by the latter
 // * missMatrix, if provided, must be a vector of length inputCols (C). Unlike inputMatrix which
@@ -1083,11 +1081,6 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
                                const IOType* initMatrix,
                                NodeInitEnum nodeInit,
                                const IOType* missMatrix) {
-
-    volatile static bool doSleep = std::getenv("DO_SLEEP") != nullptr;
-    while (doSleep) {
-        sleep(0.1);
-    }
     release_assert(inputCols > 0);
     release_assert(inputRows > 0);
     const size_t outputCols = outputSize / inputRows;
