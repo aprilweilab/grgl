@@ -553,7 +553,7 @@ public:
                               bool byIndividual = false,
                               const IOType* initMatrix = nullptr,
                               NodeInitEnum nodeInit = NIE_ZERO,
-                              const IOType* missMatrix = nullptr);
+                              IOType* missMatrix = nullptr);
 
     /**
      * Compute one of two possible matrix multiplications across the entire
@@ -1080,7 +1080,7 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
                                bool byIndividual,
                                const IOType* initMatrix,
                                NodeInitEnum nodeInit,
-                               const IOType* missMatrix) {
+                               IOType* missMatrix) {
     release_assert(inputCols > 0);
     release_assert(inputRows > 0);
     const size_t outputCols = outputSize / inputRows;
@@ -1205,14 +1205,22 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
         if (!emitAllNodes) {
             for (size_t row = 0; row < inputRows; row++) {
                 const size_t rowStart = row * outputCols;
-                for (const auto& nodeAndMutId : this->getNodesAndMutations()) {
-                    const NodeID& nodeId = nodeAndMutId.first;
-                    const MutationId& mutId = nodeAndMutId.second;
+                for (const auto& triple : this->getNodesAndMutations<GRG::MutNodeMiss>()) {
+                    const NodeID& nodeId = std::get<0>(triple);
+                    const MutationId& mutId = std::get<1>(triple);
                     assert(rowStart + mutId < outputSize);
                     if (nodeId != INVALID_NODE_ID) {
                         const size_t base = nodeId * effectiveInputRows;
                         matmulPerformIOAddition<IOType, NodeValueType, useBitVector>(
                             outputMatrix, rowStart + mutId, nodeValues.data(), base + row);
+                    }
+                    const NodeID& missingnessNode = std::get<2>(triple);
+                    if (missMatrix != nullptr && missingnessNode != INVALID_NODE_ID) {
+                        const size_t base = missingnessNode * effectiveInputRows;
+                        // Add the missing-data value for this mutation to the output vector position
+                        // associated with the mutation.
+                        matmulPerformIOAddition<IOType, NodeValueType, useBitVector>(
+                            missMatrix[mutId], nodeValues.data(), base, inputRows);
                     }
                 }
             }

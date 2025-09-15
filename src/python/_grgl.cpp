@@ -119,9 +119,15 @@ inline py::array_t<IOType> dispatchMult(grgl::GRGPtr& grg,
         api_exc_check(missBuffer.ndim == 1,
                       "\"miss\" must be a single-dimension numpy array (vector). ndim=" << missBuffer.ndim);
         const size_t missLength = missBuffer.shape.at(0);
-        api_exc_check(
-            missLength == inCols,
-            "The \"miss\" input must have length matching the columns in the input matrix. Got: " << missLength);
+        if (direction == grgl::TraversalDirection::DIRECTION_DOWN) {
+            api_exc_check(
+                missLength == inCols,
+                "The \"miss\" input must have length matching the columns in the input matrix. Got: " << missLength);
+        } else {
+            api_exc_check(
+                missLength == outCols,
+                "The \"miss\" input must have length matching the columns in the output matrix. Got: " << missLength);
+        }
     }
 
     grg->matrixMultiplication<IOType, NodeValueType, useBitVector>((const IOType*)buffer.ptr,
@@ -134,7 +140,7 @@ inline py::array_t<IOType> dispatchMult(grgl::GRGPtr& grg,
                                                                    byIndividual,
                                                                    (const IOType*)initBuffer.ptr,
                                                                    nodeInitMode,
-                                                                   (const IOType*)missBuffer.ptr);
+                                                                   (IOType*)missBuffer.ptr);
     return std::move(result);
 }
 
@@ -936,13 +942,16 @@ PYBIND11_MODULE(_grgl, m) {
             3. A two dimensional numpy array (matrix) of size KxT, where T is the total number of nodes in the
             graph (grg.num_nodes). This fully specifies every node value for the entire matrix operation.
         :type init: Union[str, numpy.array]
-        :param miss: Optional, only applicable when direction is DOWN. This is a matrix of the same dimensions
-            as the input matrix which contains the initialization value to use for missing data associated
-            with each Mutation. Note that missing data is tracked _per-site_, so for a multi-allelic site each
-            Mutation will have a value miss[i] in this vector, and for all "i" for the same site the missing
-            data initialization value will be additive: sum(miss[i] for all i at the same site). By default,
-            the missing data will be initialized to 0 (just like all other nodes), which means it will have no
-            affect on the downward traversal values unless this parameter is specified.
+        :param miss: Optional. This is an _input_ when the direction is DOWN and an _output_ when the direction
+            is up. In both cases (input or output), it is a vector (single dimensional numpy.array) of length
+            num_mutations. Each value miss[i] in the vector is the "missing data quantity" associated with the
+            mutation having MutationID "i". There exists a missingness node in the graph representing the 
+            sample set with missing data for each site `s`. When "miss" is an input then the missingness node
+            is initialized by adding to it the value miss[i] for each mutation "i" that corresponds to site "s".
+            When "miss" is an output, miss[i] gets set to the sum of all values at the missingness node; i.e.,
+            if the input matrix is a vector (:math:`1xN` matrix) then miss[i] will be exactly the value of the
+            missingness node. If there is more than one input row, miss[i] will be the sum of the missingness
+            node's values for all rows.
         :type miss: numpy.array
         :return: The numpy 2-dimensional array of output values.
         :rtype: numpy.array
