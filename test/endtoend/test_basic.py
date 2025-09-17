@@ -5,7 +5,7 @@ import pygrgl
 import subprocess
 import sys
 import unittest
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple
 
 JOBS = 4
 CLEANUP = True
@@ -107,8 +107,10 @@ class TestGrgBasic(unittest.TestCase):
         for mut_id in range(self.grg.num_mutations):
             maxpos = max(maxpos, self.grg.get_mutation_by_id(mut_id).position)
         assert maxpos == 9999126
-        assert self.grg.specified_bp_range == (55829, 9999127)
-        assert self.grg.specified_bp_range == self.grg.bp_range
+        # The specified range comes from the contig meta-data, which for our test file is
+        # an order of magnitude larger than the actual range (because we filtered it).
+        # The splitting uses the GRG's actual range (from mutations), not the specified range.
+        assert self.grg.specified_bp_range == (0, 100000001)
 
         # Split the GRG
         subprocess.check_output(

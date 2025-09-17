@@ -858,7 +858,7 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
     // Read in the haplotypes for the first tree, and then estimate the number of trees by looking at
     // the span (in number of variants) that the first tree covered vs. the total range we need all trees
     // to cover.
-    if (treeCount == 0) {
+    if (treeCount == 0 && remainingMuts > 0) {
         const double hapSumMultiplier =
             hasBSFlag(buildFlags, GBF_TREES_FASTER1) ? 0.75 : (hasBSFlag(buildFlags, GBF_TREES_FASTER2) ? 0.5 : 1.0);
         const size_t targetHapSegSum = static_cast<size_t>(getOptimalHapSegSum(numSamples, hapSumMultiplier));
@@ -927,7 +927,12 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
     }
 #endif
 
-    MutableGRGPtr result = loadMutableGRG(treeFiles.front());
+    MutableGRGPtr result;
+    if (treeFiles.empty()) {
+        result = std::make_shared<MutableGRG>(numSamples, ploidy, isPhased);
+    } else {
+        result = loadMutableGRG(treeFiles.front());
+    }
     if (treeFiles.size() > 1) {
         std::list<std::string> toMerge = treeFiles;
         toMerge.pop_front();

@@ -115,6 +115,7 @@ int main(int argc, char** argv) {
         " in the region) or a string value of 'optimal' (best for compression), 'faster1' (less optimal), "
         "'faster2' (even less optimal).",
         {"trees"});
+    args::Flag force(parser, "force", "Ignore any warnings that normally terminate execution.", {"force"});
 
     ///// Tree-sequence related arguments /////
     args::Flag tsNodeTimes(parser,
@@ -169,6 +170,9 @@ int main(int argc, char** argv) {
     }
     if (MAFFlip) {
         itFlags |= grgl::MIT_FLAG_FLIP_REF_MAJOR;
+    }
+    if (force) {
+        itFlags |= grgl::MIT_FLAG_FORCE;
     }
 
     grgl::FloatRange restrictRange;
@@ -246,6 +250,10 @@ int main(int argc, char** argv) {
         }
     } else if (supportedInputFormat(*infile)) {
         if (countVariants) {
+            if (ends_with(*infile, ".vcf") || ends_with(*infile, ".vcf.gz")) {
+                std::cerr << "Will not count variants in VCF files (too slow)" << std::endl;
+                return 1;
+            }
             std::shared_ptr<grgl::MutationIterator> mutIt = makeMutationIterator(*infile, restrictRange, itFlags);
             if (!mutIt) {
                 std::cerr << "Could not load input file " << *infile << std::endl;

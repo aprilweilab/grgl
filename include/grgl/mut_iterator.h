@@ -49,6 +49,8 @@ enum {
     MIT_FLAG_SKIP_EMPTY = 0x8,
     ///< Treat range as a range across _numbered variants_ instead of base pairs.
     MIT_FLAG_USE_VARIANT_RANGE = 0x10,
+    ///< Force ignore all warnings that result in stopping.
+    MIT_FLAG_FORCE = 0x20,
 };
 
 class Mutation;
@@ -161,6 +163,8 @@ protected:
 
 private:
     std::unique_ptr<picovcf::VCFFile> m_vcf;
+    size_t m_ploidy{};
+    bool m_needsReset;
 };
 
 /**

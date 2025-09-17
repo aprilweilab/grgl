@@ -150,6 +150,11 @@ def add_options(subparser):
         action="store_true",
         help="The slowest (most compressive) level.",
     )
+    subparser.add_argument(
+        "--force",
+        action="store_true",
+        help="Ignore any warning conditions that cause execution to stop.",
+    )
 
 
 grgl_exe = which("grgl")
@@ -163,16 +168,17 @@ def compute_parts(input_file: str, threads: int):
     if not os.path.isfile(input_file):
         raise FileNotFoundError(f"Input file not found: {input_file}")
     cmd = [grgl_exe, "--count-variants", input_file]
-    output = subprocess.check_output(cmd).decode("utf-8").split("\n")[0]
     try:
+        output = subprocess.check_output(cmd).decode("utf-8").split("\n")[0]
         num_variants = int(output)
         min_var_per_part = HAP_SEG_LENGTH
         max_parts = num_variants // min_var_per_part
-    except ValueError:
+    except (ValueError, subprocess.CalledProcessError):
         print(
             f"Could not count number of variants in {input_file}. Using the default of 100 (use --parts to override).",
             file=sys.stderr,
         )
+        # 100 is obviously not optimal for small datasets, but oh well!
         max_parts = 100
     best_parts = max(threads, round_up_to(100, threads))
     return min(max_parts, best_parts)
@@ -221,6 +227,8 @@ def build_shape(
         command.extend(["--verbose", "-s"])
     if args.ignore_missing:
         command.append("--ignore-missing")
+    if args.force:
+        command.append("--force")
     shape_filename = out_filename(output_file, part)
     command.extend(
         [
@@ -257,6 +265,8 @@ def build_grg(
             command.extend(["--verbose", "-s"])
         if args.ignore_missing:
             command.append("--ignore-missing")
+        if args.force:
+            command.append("--force")
         command.extend(
             [
                 "-r",

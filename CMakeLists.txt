@@ -203,13 +203,7 @@ add_executable(gindexer
                )
 target_link_libraries(gindexer ${BGEN_LIBS} z)
 
-# Tool for timing VCF scanning.
-add_executable(vcftime
-               ${CMAKE_CURRENT_LIST_DIR}/extra/vcftime.cpp
-               )
-target_link_libraries(vcftime ${BGEN_LIBS} z)
-
-install(TARGETS grgl_tool grgl_merge gconverter gindexer vcftime)
+install(TARGETS grgl_tool grgl_merge gconverter gindexer)
 
 # Build Python support as "_grgl"
 if(PYTHON_SUPPORT)
