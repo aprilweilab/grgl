@@ -192,7 +192,8 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
                                     const Mutation& newMutation,
                                     const NodeIDList& mutSamples,
                                     MutationMappingStats& stats,
-                                    const NodeID shapeNodeIdMax) {
+                                    const NodeID shapeNodeIdMax,
+                                    std::pair<BpPosition, NodeID>& currentMissing) {
     // The topological order of nodeIDs is maintained through-out this algorithm, because newly added
     // nodes are only ever _root nodes_ (at the time they are added).
     release_assert(grg->nodesAreOrdered());
@@ -211,6 +212,12 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     candidates.erase(endOfUnique, candidates.end());
     std::sort(candidates.begin(), candidates.end(), cmpNodeSamples);
 
+    // The missingness node associated with this mutation. This relies on the fact that
+    // missing data is always emitted BEFORE other data for the same site, which is a
+    // property of the MutationIterator.
+    const NodeID missingnessNode =
+        (currentMissing.first == newMutation.getPosition()) ? currentMissing.second : INVALID_NODE_ID;
+
     if (candidates.empty()) {
         stats.mutationsWithNoCandidates++;
     } else {
@@ -220,7 +227,11 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
         if (candidateSetSize == mutSamples.size()) {
             const auto candidateId = std::get<0>(candidate);
             stats.reusedExactly++;
-            grg->addMutation(newMutation, candidateId);
+            if (!newMutation.isMissing()) {
+                grg->addMutation(newMutation, candidateId, missingnessNode);
+            } else {
+                currentMissing = {newMutation.getPosition(), candidateId};
+            }
             if (candidateId >= shapeNodeIdMax) {
                 stats.reusedMutNodes++;
             }
@@ -232,7 +243,11 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     // Map from an individual to which child contained it.
     std::unordered_map<NodeIDSizeT, NodeIDSizeT> individualToChild;
     const NodeID mutNodeId = grg->makeNode(1, true);
-    grg->addMutation(newMutation, mutNodeId);
+    if (!newMutation.isMissing()) {
+        grg->addMutation(newMutation, mutNodeId, missingnessNode);
+    } else {
+        currentMissing = {newMutation.getPosition(), mutNodeId};
+    }
     NodeIDList addedNodes;
     const size_t numMutSamples = mutSamples.size();
     while (!candidates.empty() && covered.size() < numMutSamples) {
@@ -355,6 +370,7 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
     // For each mutation, perform a topological bottom-up traversal from the sample
     // nodes of interest, and collect all nodes that reach a subset of those nodes.
     size_t _ignored = 0;
+    std::pair<BpPosition, NodeID> currentMissing = {INVALID_POSITION, INVALID_NODE_ID};
     MutationAndSamples unmapped = {Mutation(0.0, ""), NodeIDList()};
     while (mutations.next(unmapped, _ignored)) {
         const NodeIDList& mutSamples = unmapped.samples;
@@ -364,8 +380,8 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
                 stats.mutationsWithOneSample++;
             }
             // Step 1: Add mutation node and create edges to existing nodes.
-            NodeIDList addedNodes =
-                greedyAddMutation(grg, sampleCounts, unmapped.mutation, mutSamples, stats, shapeNodeIdMax);
+            NodeIDList addedNodes = greedyAddMutation(
+                grg, sampleCounts, unmapped.mutation, mutSamples, stats, shapeNodeIdMax, currentMissing);
 
             // Step 2: Add the new mutation node to the sample counts.
             sampleCounts.resize(sampleCounts.size() + addedNodes.size());
@@ -379,7 +395,10 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
             }
         } else {
             stats.emptyMutations++;
-            grg->addMutation(unmapped.mutation, INVALID_NODE_ID);
+            const NodeID missingnessNode =
+                (currentMissing.first == unmapped.mutation.getPosition()) ? currentMissing.second : INVALID_NODE_ID;
+            grg->addMutation(unmapped.mutation, INVALID_NODE_ID, missingnessNode);
+            api_exc_check(!unmapped.mutation.isMissing(), "Missing data rows cannot have no samples");
         }
         completed++;
         const size_t percentCompleted = (completed / onePercent);
