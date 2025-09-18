@@ -1,9 +1,11 @@
 #ifndef PICOVCF_HPP
 #define PICOVCF_HPP
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cctype>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -28,6 +30,8 @@
 #include <zlib.h>
 #endif
 
+#define PICOVCF_DEPRECATED __attribute__((deprecated))
+
 namespace picovcf {
 
 // With these type sizes, we support up to 4 billion samples, and trillions of
@@ -41,6 +45,9 @@ static constexpr SampleT SAMPLE_INDEX_NOT_SET = std::numeric_limits<SampleT>::ma
 /** Represents the index of a variant. */
 using VariantT = uint64_t;
 
+/** Represents the index of an allele. */
+using AlleleT = uint32_t;
+
 /** Pair of integers that define a range */
 using RangePair = std::pair<VariantT, VariantT>;
 
@@ -51,15 +58,20 @@ using MutationPair = std::pair<VariantT, VariantT>;
 
 /** When processing pairs of alleles, this is used for the second item for
  * haploids */
-static constexpr VariantT NOT_DIPLOID = std::numeric_limits<VariantT>::max();
+static constexpr AlleleT NOT_DIPLOID = std::numeric_limits<AlleleT>::max();
+static constexpr AlleleT MIXED_PLOIDY = NOT_DIPLOID;
 
 /** Represents a missing allele value (e.g., "." in VCF nomenclature) */
-static constexpr VariantT MISSING_VALUE = std::numeric_limits<VariantT>::max() - 1;
+static constexpr AlleleT MISSING_VALUE = std::numeric_limits<AlleleT>::max() - 1;
 
 static constexpr size_t INTERNAL_VALUE_NOT_SET = std::numeric_limits<size_t>::max();
 
 /** IGD can only store up to ploidy = 8 */
-static constexpr size_t MAX_PLOIDY = 8;
+static constexpr size_t MAX_IGD_PLOIDY = 8;
+
+/** The maximum base-pair position supported. */
+static constexpr size_t INVALID_POSITION = std::numeric_limits<size_t>::max();
+static constexpr size_t MAX_SUPPORTED_POSITION = std::numeric_limits<size_t>::max() - 1;
 
 /**
  * Exception thrown when there is a problem reading the underlying file.
@@ -256,12 +268,25 @@ public:
         : m_file(std::fopen(filename.c_str(), "rb")),
           m_capacity(bufferedByteCt),
           m_position(0) {
+        if (m_file == nullptr) {
+            PICOVCF_THROW_ERROR(FileReadError, "Failed to read input file: " << filename);
+        }
 #if HAVE_POSIX_FADVISE
         posix_fadvise(fileno(m_file), 0, 0, POSIX_FADV_SEQUENTIAL);
 #endif
     }
 
     virtual ~BufferedReader() { fclose(m_file); }
+
+    virtual void seek_block(const FileOffset& offset) {
+        std::fseek(m_file, offset.first, SEEK_SET);
+        readBuffered();
+        m_position = offset.second;
+        while (m_position >= m_buffer.size()) {
+            m_position -= m_buffer.size();
+            readBuffered();
+        }
+    }
 
     virtual void seek(const FileOffset& offset) {
         std::fseek(m_file, offset.first, SEEK_SET);
@@ -278,7 +303,7 @@ public:
             buffer.resize(0);
             return 0;
         }
-        assert(m_position < m_buffer.size());
+        PICOVCF_RELEASE_ASSERT(m_position < m_buffer.size());
         bool found = false;
         size_t lineBytes = 0;
         while (!found) {
@@ -306,7 +331,7 @@ public:
                     found = true; // EOF
                 }
             } else {
-                assert(m_position < m_buffer.size());
+                PICOVCF_RELEASE_ASSERT(m_position < m_buffer.size());
                 found = true;
             }
         }
@@ -317,6 +342,41 @@ public:
         }
         buffer.resize(lineBytes);
         return lineBytes;
+    }
+
+    size_t read(char* buffer, size_t numBytes) {
+        if (m_buffer.empty()) {
+            readBuffered();
+        }
+        if (m_buffer.empty()) {
+            return 0;
+        }
+        PICOVCF_RELEASE_ASSERT(m_position < m_buffer.size());
+        size_t bytesRemaining = numBytes;
+        size_t bytesCopied = 0;
+        while (bytesRemaining > 0) {
+            const uint8_t* bufPtr = &m_buffer.data()[m_position];
+            const size_t bufAvail = m_buffer.size() - m_position;
+            if (bytesRemaining <= bufAvail) {
+                std::memcpy(&buffer[bytesCopied], bufPtr, bytesRemaining);
+                m_position += bytesRemaining;
+                bytesCopied += bytesRemaining;
+                bytesRemaining = 0;
+            } else {
+                std::memcpy(&buffer[bytesCopied], bufPtr, bufAvail);
+                m_position += bufAvail;
+                bytesCopied += bufAvail;
+                bytesRemaining -= bufAvail;
+            }
+            if (m_position == m_buffer.size()) {
+                if (!readBuffered()) {
+                    break; // EOF / read failure
+                }
+            } else {
+                PICOVCF_RELEASE_ASSERT(m_position < m_buffer.size());
+            }
+        }
+        return bytesCopied;
     }
 
     virtual bool eof() {
@@ -388,10 +448,21 @@ public:
 
     void resetStream() { PICOVCF_RELEASE_ASSERT(Z_OK == inflateReset(&m_zlibStream)); }
 
+    void seek_block(const FileOffset& offset) override {
+        std::fseek(m_file, offset.first, SEEK_SET);
+        resetStream();
+        readBuffered();
+        m_position = offset.second;
+        while (m_position >= m_buffer.size()) {
+            m_position -= m_buffer.size();
+            readBuffered();
+        }
+    }
+
     // Seek is not a constant operation in .gz files. We could do something like
     // the zran.c example from zlib, but I'd like to avoid that complexity unless
     // we really need it. Generally, seeking around a VCF file is going to be
-    // slow, so avoid it!
+    // slow, so avoid it, unless you have a Tabix index!
     void seek(const FileOffset& offset) override {
         PICOVCF_RELEASE_ASSERT(offset.first % m_compressed.size() == 0);
         std::fseek(m_file, 0, SEEK_SET);
@@ -401,6 +472,7 @@ public:
         }
         PICOVCF_RELEASE_ASSERT(m_lastFileRead == offset.first);
         m_position = offset.second;
+        PICOVCF_RELEASE_ASSERT(m_position < m_buffer.size());
     }
 
     FileOffset tell() override {
@@ -494,6 +566,225 @@ private:
     std::vector<uint8_t> m_compressed;
     size_t m_lastFileRead;
     z_stream m_zlibStream;
+};
+#endif
+
+// The paper, format PDF, etc., are all very vague about this. They say "16kb" per index, which is
+// related to base-pairs, but in reality it is 2^14, which is 16384. Props to the authors of libStatGen
+// where I finally found some very clear code showing the linear index divisor.
+static constexpr size_t TABIX_LINDEX_SHIFT = 14;
+
+#if VCF_GZ_SUPPORT
+struct TabixHeader {
+    char magic[4];
+    int32_t numSequences;
+    int32_t format;
+    int32_t colSeq;
+    int32_t colBeg;
+    int32_t colEnd;
+    int32_t meta; // Leading character for comment lines (always #)
+    int32_t skip; // Number of lines to skip at the beginning
+    int32_t nameLengths;
+};
+
+/**
+ * Tabix organizes the index by "sequence" (contig in the VCF file). This represents a single
+ * contig and all relate indices.
+ */
+class TabixIndexSequence {
+public:
+    using VirtualRange = std::pair<uint64_t, uint64_t>;
+    using Chunks = std::vector<VirtualRange>;
+
+    TabixIndexSequence(std::string name)
+        : m_name(name) {}
+
+    /**
+     * Split a virtual offset into it's two parts: the offset of the compressed block within the file,
+     * and the offset of the data within that block (after decompression).
+     *
+     * @param[in] virtualOffset The 64-bit tabix virtual offset.
+     * @return A pair of integers, where .first is the offset to the block, and .second is the offset
+     *      within the block.
+     */
+    static FileOffset splitVirt(uint64_t virtualOffset) { return {virtualOffset >> 16, virtualOffset & 0xFFFFU}; }
+
+    /**
+     * Initialize the sequence contents by parsing the bin information from the Tabix file, as
+     * represented by the ZBufferedReader.
+     *
+     * @param[in] reader The ZBufferedReader that is reading the tabix file.
+     */
+    void parseBins(ZBufferedReader& reader) {
+        int32_t numBins = readOrDie<int32_t>(reader);
+        for (size_t j = 0; j < numBins; j++) {
+            const uint32_t binNum = readOrDie<uint32_t>(reader);
+            const int32_t chunks = readOrDie<int32_t>(reader);
+            // The chunks are contiguous regions of the vcf.gz file that are assigned to this bin.
+            Chunks chunkList;
+            for (size_t k = 0; k < chunks; k++) {
+                chunkList.emplace_back(readOrDie<uint64_t>(reader), readOrDie<uint64_t>(reader));
+            }
+            m_bins.emplace(binNum, std::move(chunkList));
+        }
+        // The linear index
+        const int32_t numIntervals = readOrDie<int32_t>(reader);
+        for (size_t j = 0; j < numIntervals; j++) {
+            m_linear.emplace_back(readOrDie<uint64_t>(reader));
+        }
+    }
+
+    /**
+     * Get the list of potential Chunks that overlap the given range.
+     *
+     * @param[in] rangeBegin Inclusive range start (base-pair position).
+     * @param[in] rangeEnd Exclusive range end (base-pair position).
+     * @return A std::vector of Chunks, each of which is a std::vector of VirtualRange
+     *      objects (std::pair) where .first is the beginning of the range and .end is the
+     *      end of the range (virtual offsets).
+     */
+    std::vector<Chunks> lookupByBin(int32_t rangeBegin, int32_t rangeEnd) const {
+        std::vector<Chunks> result;
+        auto addBin = [&](int32_t bin) {
+            const auto findIt = m_bins.find(bin);
+            if (m_bins.end() != findIt) {
+                result.emplace_back(findIt->second);
+            }
+        };
+
+        addBin(0);
+        int32_t k;
+        --rangeEnd;
+        for (k = 1 + (rangeBegin >> 26); k <= 1 + (rangeEnd >> 26); ++k) {
+            addBin(k);
+        }
+        for (k = 9 + (rangeBegin >> 23); k <= 9 + (rangeEnd >> 23); ++k) {
+            addBin(k);
+        }
+        for (k = 73 + (rangeBegin >> 20); k <= 73 + (rangeEnd >> 20); ++k) {
+            addBin(k);
+        }
+        for (k = 585 + (rangeBegin >> 17); k <= 585 + (rangeEnd >> 17); ++k) {
+            addBin(k);
+        }
+        for (k = 4681 + (rangeBegin >> 14); k <= 4681 + (rangeEnd >> 14); ++k) {
+            addBin(k);
+        }
+        return std::move(result);
+    }
+
+    /**
+     * Get a reference to the linear index, which is just an ordered list of virtual offsets
+     * to every block in the BGZF file.
+     *
+     * @return A std::vector of offsets.
+     */
+    const std::vector<uint64_t>& linear() const { return m_linear; }
+
+    /**
+     * Get the virtual offset for the last block in the linear index.
+     *
+     * @return The last virtual offset.
+     */
+    uint64_t getLastVOffset() const { return m_linear.back(); }
+
+    /**
+     * Get the number of bins present in the index.
+     *
+     * @return Number of bins.
+     */
+    size_t numBins() const { return m_bins.size(); }
+
+    /**
+     * Get the sequence (contig) name.
+     */
+    const std::string& name() const { return m_name; }
+
+private:
+    template <typename T> T readOrDie(ZBufferedReader& reader) {
+        T value = 0;
+        size_t readAmt = reader.read(reinterpret_cast<char*>(&value), sizeof(value));
+        PICOVCF_ASSERT_OR_MALFORMED(sizeof(value) == readAmt, "Failed to read value of size " << sizeof(value));
+        return value;
+    }
+
+    std::unordered_map<size_t, Chunks> m_bins;
+    std::vector<uint64_t> m_linear;
+    std::string m_name;
+};
+
+/**
+ * A tabix index file for a BGZF-based VCF file.
+ */
+class TabixIndex {
+public:
+    static constexpr size_t COMPRESSED_BUFFER_SIZE = 1024;
+
+    /**
+     * Read the tabix index from disk.
+     *
+     * @param[in] filename The tabix file path.
+     */
+    TabixIndex(const std::string& filename)
+        : m_reader(filename, COMPRESSED_BUFFER_SIZE) {
+        TabixHeader header;
+        size_t readAmt = m_reader.read(reinterpret_cast<char*>(&header), sizeof(header));
+        PICOVCF_ASSERT_OR_MALFORMED(readAmt == sizeof(header), "Could not read tabix header");
+        header.magic[3] = 0;
+        PICOVCF_ASSERT_OR_MALFORMED(std::string(header.magic) == "TBI", "Bad magic in tabix file");
+        const bool isBEDIndexing = (header.format & 0x10000);
+        PICOVCF_ASSERT_OR_MALFORMED(!isBEDIndexing, "Unsupported BED-style indexing");
+        PICOVCF_ASSERT_OR_MALFORMED((header.format & 0xFFFF) == 2, "Tabix index is not for a VCF file");
+        PICOVCF_ASSERT_OR_MALFORMED(header.meta == '#', "Tabix index is not for a VCF file (meta character is not #)");
+
+        // Read sequence names.
+        std::vector<char> namesv(header.nameLengths, 0);
+        readAmt = m_reader.read(const_cast<char*>(namesv.data()), namesv.size());
+        PICOVCF_ASSERT_OR_MALFORMED(readAmt == namesv.size(), "Could not read tabix sequence names");
+        std::stringstream ss;
+        for (size_t i = 0; i < namesv.size(); i++) {
+            if (namesv[i] == 0) {
+                m_sequences.push_back(ss.str());
+                ss.str("");
+            } else {
+                ss << namesv[i];
+            }
+        }
+        PICOVCF_ASSERT_OR_MALFORMED(
+            m_sequences.size() == header.numSequences,
+            "Tabix file: number of sequence names does not match number of sequences in header");
+
+        // Parse all the sequences.
+        for (size_t i = 0; i < m_sequences.size(); i++) {
+            m_sequences[i].parseBins(m_reader);
+        }
+    }
+
+    /**
+     * Return the number of sequences (contigs) that are indexed in this tabix index.
+     */
+    size_t numSequences() const { return m_sequences.size(); }
+
+    /**
+     * Get a reference to the list of sequences.
+     */
+    const std::vector<TabixIndexSequence>& sequences() const { return m_sequences; }
+
+    /**
+     * Retrieve a sequence (contig) by name.
+     */
+    const TabixIndexSequence& getSequence(const std::string& name) const {
+        for (const auto& seq : m_sequences) {
+            if (seq.name() == name) {
+                return seq;
+            }
+        }
+        throw ApiMisuse("Sequence with the given name not found.");
+    }
+
+private:
+    ZBufferedReader m_reader;
+    std::vector<TabixIndexSequence> m_sequences;
 };
 #endif
 
@@ -647,6 +938,13 @@ struct VCFVariantInfo {
     std::vector<std::string> format;
 };
 
+enum VCFPhasedness {
+    PVCFP_UNKNOWN = 0,  /** Unknown phasedness */
+    PVCFP_PHASED = 1,   /** All samples are phased */
+    PVCFP_UNPHASED = 2, /** All samples are unphased */
+    PVCFP_MIXED = 3,    /** Samples are a mixture of phased/unphased */
+};
+
 /**
  * A class that lazily interprets the data for a single variant.
  *
@@ -683,6 +981,24 @@ public:
     }
 
     /**
+     * Return a vector of size numIndividuals, where each value is true if that individual is
+     * phased for the current variant, and false otherwise.
+     */
+    const std::vector<bool>& getIsPhased() const { return m_phased; }
+
+    /**
+     * Return an enum indicating the overall phasedness of the variant. Can be PVCFP_PHASED,
+     * PVCFP_UNPHASED, or PVCFP_MIXED. Useful for not having to check the phased of every individual
+     * on every variant, if you expect a certain kind of data.
+     */
+    VCFPhasedness getPhasedness() const { return m_phasedness; }
+
+    /**
+     * The maximum ploidy seen for any individual in this variant.
+     */
+    AlleleT getMaxPloidy() const { return m_maxPloidy; }
+
+    /**
      * Get the chromosome identifier.
      * @returns String of the chromosome identifier.
      */
@@ -697,10 +1013,11 @@ public:
         assert(posSize > 0);
         std::string posStr = m_currentLine.substr(m_nonGTPositions[POS_CHROM_END] + 1, posSize - 1);
         char* endPtr = nullptr;
-        const auto result = static_cast<size_t>(strtoull(posStr.c_str(), &endPtr, 10));
+        const size_t result = static_cast<size_t>(strtoull(posStr.c_str(), &endPtr, 10));
         if (endPtr != (posStr.c_str() + posStr.size())) {
             PICOVCF_THROW_ERROR(MalformedFile, "Invalid position (cannot parse): " << posStr);
         }
+        PICOVCF_ASSERT_OR_MALFORMED(result <= MAX_SUPPORTED_POSITION, "Variant position too large");
         return result;
     }
 
@@ -733,7 +1050,7 @@ public:
         }
         std::vector<std::string> result;
         picovcf_split(alleleStr, ',', result);
-        return result;
+        return std::move(result);
     }
 
     /**
@@ -751,28 +1068,28 @@ public:
         if (endPtr != (qualString.c_str() + qualString.size())) {
             PICOVCF_THROW_ERROR(MalformedFile, "Invalid quality number (cannot parse): " << qualString);
         }
-        return result;
+        return std::move(result);
     }
 
     /**
      * Get the filter value.
      * @returns The string value for the filter.
      */
-    std::string getFilter() const { return stringForPosition(POS_FILTER_END); }
+    std::string getFilter() const { return std::move(stringForPosition(POS_FILTER_END)); }
 
     /**
      * Get the info key/value pairs.
      * @returns The information as a map from key to value.
      */
     std::unordered_map<std::string, std::string> getInfo() const {
-        std::string infoString = stringForPosition(POS_INFO_END);
+        const std::string infoString = stringForPosition(POS_INFO_END);
         std::vector<std::string> infoPairs;
         picovcf_split(infoString, ';', infoPairs);
         std::unordered_map<std::string, std::string> result;
         for (auto pair : infoPairs) {
             result.emplace(picovcf_getKey(pair, 0), picovcf_getValue(pair, 0));
         }
-        return result;
+        return std::move(result);
     }
 
     /**
@@ -797,14 +1114,121 @@ public:
             if (formatString != FORMAT_GT) {
                 PICOVCF_THROW_ERROR(MalformedFile, "The first item in FORMAT _must_ be " << FORMAT_GT);
             }
-            return {formatString};
+            return {std::move(formatString)};
         }
         std::vector<std::string> result;
         picovcf_split(formatString, ':', result);
         if (result.empty() || result[0] != FORMAT_GT) {
             PICOVCF_THROW_ERROR(MalformedFile, "The first item in FORMAT _must_ be " << FORMAT_GT);
         }
-        return result;
+        return std::move(result);
+    }
+
+    /**
+     * Get an array (std::vector) of allele values per haploid, where the alleles for an individual
+     * are grouped together (consecutive) based on maxPloidy. The maxPloidy can be retrieved via
+     * getMaxPloidy(), and can differ for each Variant, but is the same within a variant. When an
+     * individual has missing data for an allele, the value is picovcf::MISSING_DATA, and when their
+     * ploidy is less than maxPloidy, the remaining alleles are filled in with picovcf::MIXED_PLOIDY.
+     *
+     * @return A std::vector of allele values. Size will always be maxPloidy * numIndividuals.
+     */
+    std::vector<AlleleT> getGenotypeArray() {
+        m_phased.clear();
+        m_phased.resize(m_numIndividuals, true); // Phased until proven otherwise
+
+        // This stores alleles in strides of N individuals. So:
+        // hap0: 1, 2, ..., N
+        // hap1: 1, 2, ..., N
+        // ...
+        // hapP: 1, 2, ..., N
+        //
+        // Where P is the maximum ploidy.
+        std::vector<AlleleT> values(m_numIndividuals, MIXED_PLOIDY);
+        m_phasedness = PVCFP_UNKNOWN;
+        m_maxPloidy = 0;
+        size_t currentPloidy = 1;
+        AlleleT currentValue = 0;
+        SampleT currentIndiv = 0;
+
+        auto processAllele = [&]() {
+            PICOVCF_ASSERT_OR_MALFORMED(currentIndiv < m_numIndividuals, "Too many genotypes");
+            const size_t offset = ((currentPloidy - 1) * m_numIndividuals) + currentIndiv;
+            if (offset >= values.size()) {
+                values.resize(currentPloidy * m_numIndividuals, MIXED_PLOIDY);
+                PICOVCF_RELEASE_ASSERT(offset < values.size());
+            }
+            values.at(offset) = currentValue;
+            currentValue = MIXED_PLOIDY;
+        };
+
+        bool nonGTData = false;
+#define GT_ONLY_OP(stmt)                                                                                               \
+    do {                                                                                                               \
+        if (!nonGTData) {                                                                                              \
+            stmt;                                                                                                      \
+        }                                                                                                              \
+    } while (0)
+
+        for (size_t i = m_nonGTPositions[POS_FORMAT_END] + 1; i < m_currentLine.size(); i++) {
+            switch (m_currentLine[i]) {
+            case '\t':
+            case '\r': {
+                processAllele();
+                currentPloidy = 1;
+                currentIndiv++;
+                nonGTData = false;
+            } break;
+            case '0': GT_ONLY_OP(currentValue = (currentValue == MIXED_PLOIDY) ? 0 : (currentValue * 10)); break;
+            case '1': GT_ONLY_OP(currentValue = (currentValue == MIXED_PLOIDY) ? 1 : ((currentValue * 10) + 1)); break;
+            case '2': GT_ONLY_OP(currentValue = (currentValue == MIXED_PLOIDY) ? 2 : ((currentValue * 10) + 2)); break;
+            case '3': GT_ONLY_OP(currentValue = (currentValue == MIXED_PLOIDY) ? 3 : ((currentValue * 10) + 3)); break;
+            case '4': GT_ONLY_OP(currentValue = (currentValue == MIXED_PLOIDY) ? 4 : ((currentValue * 10) + 4)); break;
+            case '5': GT_ONLY_OP(currentValue = (currentValue == MIXED_PLOIDY) ? 5 : ((currentValue * 10) + 5)); break;
+            case '6': GT_ONLY_OP(currentValue = (currentValue == MIXED_PLOIDY) ? 6 : ((currentValue * 10) + 6)); break;
+            case '7': GT_ONLY_OP(currentValue = (currentValue == MIXED_PLOIDY) ? 7 : ((currentValue * 10) + 7)); break;
+            case '8': GT_ONLY_OP(currentValue = (currentValue == MIXED_PLOIDY) ? 8 : ((currentValue * 10) + 8)); break;
+            case '9': GT_ONLY_OP(currentValue = (currentValue == MIXED_PLOIDY) ? 9 : ((currentValue * 10) + 9)); break;
+            case '.': GT_ONLY_OP(currentValue = MISSING_VALUE); break;
+            case ':': nonGTData = true; break;
+            case '|':
+                if (m_phasedness == PVCFP_UNKNOWN) {
+                    m_phasedness = PVCFP_PHASED;
+                } else if (m_phasedness != PVCFP_PHASED) {
+                    m_phasedness = PVCFP_MIXED;
+                }
+                processAllele();
+                currentPloidy++;
+                break;
+            case '/': {
+                if (m_phasedness == PVCFP_UNKNOWN) {
+                    m_phasedness = PVCFP_UNPHASED;
+                } else if (m_phasedness != PVCFP_UNPHASED) {
+                    m_phasedness = PVCFP_MIXED;
+                }
+                m_phased.at(currentIndiv) = false;
+                processAllele();
+                currentPloidy++;
+            } break;
+            }
+        }
+#undef GT_ONLY_OP
+        if (currentValue != MIXED_PLOIDY) {
+            processAllele();
+        }
+
+        // Change data layout.
+        m_maxPloidy = values.size() / m_numIndividuals;
+        std::vector<AlleleT> result(m_numIndividuals * m_maxPloidy);
+        for (size_t i = 0; i < m_maxPloidy; i++) {
+            for (size_t j = 0; j < m_numIndividuals; j++) {
+                result.at((j * m_maxPloidy) + i) = values.at((i * m_numIndividuals) + j);
+            }
+        }
+        if (m_maxPloidy == 1) {
+            m_phasedness = PVCFP_PHASED;
+        }
+        return std::move(result);
     }
 
     /**
@@ -812,15 +1236,23 @@ public:
      * @returns An IndividualIteratorGT for efficiently accessing the genotype
      * data.
      */
-    IndividualIteratorGT getIndividualIterator() const {
+    IndividualIteratorGT getIndividualIterator() const PICOVCF_DEPRECATED {
         if (!hasGenotypeData()) {
             PICOVCF_THROW_ERROR(ApiMisuse, "Cannot iterate individuals when there is no genotype data");
         }
         return IndividualIteratorGT(m_currentLine, m_nonGTPositions[POS_FORMAT_END] + 1);
     }
 
-    // TODO we should have another (more general) iterator that can be used for
-    // non-GT data.
+    // INTERNAL METHOD
+    void initialize(size_t numIndividuals) { m_numIndividuals = numIndividuals; }
+
+    // INTERNAL METHOD
+    void reset() { parseNonGenotypePositions(); }
+
+    // INTERNAL CONSTRUCTOR
+    VCFVariantView(const std::string& currentLine)
+        : m_currentLine(currentLine) {}
+
 private:
     enum {
         POS_CHROM_END = 0,
@@ -859,19 +1291,32 @@ private:
         }
     }
 
-    explicit VCFVariantView(const std::string& currentLine)
-        : m_currentLine(currentLine) {}
-
-    void reset() { parseNonGenotypePositions(); }
-
     // FORMAT and genotype data is not required.
     static constexpr size_t REQUIRED_FIELDS = 8;
 
     const std::string& m_currentLine;
     std::array<size_t, 9> m_nonGTPositions;
 
+    size_t m_numIndividuals{};
+
+    // Bit for each individual, true when phased.
+    std::vector<bool> m_phased;
+    // The overall phasedness of the last variant parsed.
+    VCFPhasedness m_phasedness{};
+    // The maximum ploidy of the last variant parsed.
+    AlleleT m_maxPloidy;
+
     friend class VCFFile;
 };
+
+// String constants in a header-only library are tricky with C++11, so use preprocessor.
+
+/** Traverse all contigs */
+#define PVCF_VCFFILE_CONTIG_ALL "picovcf_all_contigs"
+/** Traverse only the first contig that contains at least one variant */
+#define PVCF_VCFFILE_CONTIG_FIRST "picovcf_first_nonempty"
+/** Throw an error if the file contains more than one contig with at least one variant */
+#define PVCF_VCFFILE_CONTIG_REQUIRE_ONE "picovcf_require_one"
 
 /**
  * A lazy parser for VCF files.
@@ -890,9 +1335,10 @@ public:
     // 1MB buffer for reading uncompressed data. Larger is faster, to a point.
     static constexpr size_t UNCOMPRESSED_BUFFER_SIZE = 1024 * 1024;
 
-    explicit VCFFile(const std::string& filename)
+    explicit VCFFile(const std::string& filename, std::string contig = PVCF_VCFFILE_CONTIG_ALL, bool verbose = true)
         : m_variants(INTERNAL_VALUE_NOT_SET),
           m_genomeRange({INTERNAL_VALUE_NOT_SET, INTERNAL_VALUE_NOT_SET}),
+          m_verbose(verbose),
           m_posVariants({INTERNAL_VALUE_NOT_SET, INTERNAL_VALUE_NOT_SET}),
           m_currentVariant(m_currentLine) {
         if (filename.size() > 3 && filename.substr(filename.size() - 3) == ".gz") {
@@ -906,6 +1352,18 @@ public:
         }
         parseHeader();
 
+#if VCF_GZ_SUPPORT
+        try {
+            std::stringstream indexFilename;
+            indexFilename << filename << ".tbi";
+            m_index = std::unique_ptr<TabixIndex>(new TabixIndex(indexFilename.str()));
+        } catch (FileReadError& error) {
+        }
+#endif
+
+        m_currentVariant.initialize(numIndividuals());
+        initContigs(contig);
+
         std::string version = getMetaInfo(VCFFile::META_FILE_FORMAT);
         if (version.substr(0, 5) == SUPPORTED_PREFIX) {
             if (version.size() > 6 && !(version[6] != '0' || version[6] == '1' || version[6] == '2')) {
@@ -916,24 +1374,140 @@ public:
         }
     }
 
+    void initContigs(std::string contig) {
+        std::string ignore;
+        size_t length = 0;
+        if (contig == PVCF_VCFFILE_CONTIG_ALL) {
+            m_contigHandling = PVCH_ALL;
+            PICOVCF_RELEASE_ASSERT(m_contig.empty());
+        } else if (contig == PVCF_VCFFILE_CONTIG_FIRST || contig == PVCF_VCFFILE_CONTIG_REQUIRE_ONE) {
+            PICOVCF_RELEASE_ASSERT(m_contig.empty());
+            VCFVariantView& first = getFirstVariantUnfiltered();
+            m_contig = first.getChrom();
+            if (contig == PVCF_VCFFILE_CONTIG_REQUIRE_ONE) {
+                m_contigHandling = PVCH_ONE;
+            } else {
+                m_contigHandling = PVCH_SPECIFIC;
+            }
+        } else {
+            if (!getContig(contig, length, ignore)) {
+                PICOVCF_THROW_ERROR(ApiMisuse, "Could not find contig with ID " << contig);
+            }
+            PICOVCF_ASSERT_OR_MALFORMED(length > 0, "0-length contig in header");
+            m_contigHandling = PVCH_SPECIFIC;
+            m_contig = contig;
+        }
+        if (!m_contig.empty() && getContig(m_contig, length, ignore)) {
+            m_genomeRange.first = 0;
+            m_genomeRange.second = length;
+        }
+    }
+
+    /**
+     * Is this VCF file using an index for fast random access?
+     *
+     * @return true if an index is being used.
+     */
+    bool isUsingIndex() const {
+#if VCF_GZ_SUPPORT
+        return (bool)m_index;
+#else
+        return false;
+#endif
+    }
+
+    /**
+     * Seek to the first variant greater than or equal to the given position.
+     * Slow if using a non-indexed VCF(.GZ), fast if you have a tabix index.
+     *
+     * The Tabix index uses only the linear index, not the binning index. The
+     * latter is more complex, and we're not interested in ranges so much as
+     * we are interested in a single position.
+     */
+    bool lowerBoundPosition(size_t position) {
+#if VCF_GZ_SUPPORT
+        if (!isUsingIndex()) {
+#endif
+            this->seekBeforeVariants();
+#if VCF_GZ_SUPPORT
+        } else {
+            // TODO: add contig support!
+            const auto& seq = m_index->sequences().front();
+            size_t blockIndex = static_cast<size_t>(position >> TABIX_LINDEX_SHIFT);
+            blockIndex = std::min<size_t>(blockIndex, seq.linear().size() - 1);
+            seekVirt(seq.linear().at(blockIndex));
+        }
+#endif
+        bool found = false;
+        while ((found = nextVariant())) {
+            if (currentVariant().getPosition() >= position) {
+                break;
+            }
+        }
+        return found;
+    }
+
+    /**
+     * Get information for the contig with the given name.
+     *
+     * @param[in] contig The contig name, as found in the VCF header.
+     * @param[out] length Returns the length found in the VCF header, if the function return value
+     *      was true.
+     * @param[out] assembly Returns the assembly name found in the VCF header, if the function return
+     *      value was true.
+     * @return true if the contig was found, false otherwise.
+     */
+    bool getContig(const std::string& contig, size_t& length, std::string& assembly) {
+        bool found = false;
+        for (const auto& metaString : getAllMetaInfo("contig")) {
+            std::map<std::string, std::string> kv = picovcf::picovcf_parse_structured_meta(metaString);
+            auto findIt = kv.find("ID");
+            PICOVCF_ASSERT_OR_MALFORMED(findIt != kv.end(), "contig metadata is missing ID field");
+            const std::string& ident = findIt->second;
+            if (ident == contig) {
+                findIt = kv.find("assembly");
+                if (findIt != kv.end()) {
+                    assembly = findIt->second;
+                } else {
+                    assembly = "";
+                }
+                findIt = kv.find("length");
+                if (findIt != kv.end()) {
+                    const std::string& lenStr = findIt->second;
+                    char* endPtr = nullptr;
+                    length = static_cast<size_t>(std::strtoull(lenStr.c_str(), &endPtr, 10));
+                    if (endPtr != (lenStr.c_str() + lenStr.size())) {
+                        PICOVCF_THROW_ERROR(MalformedFile, "Invalid contig length: " << lenStr);
+                    }
+                } else {
+                    length = 0;
+                }
+                found = true;
+                break;
+            }
+        }
+        return found;
+    }
+
     /**
      * Compute the number of variants in the file: expensive!
      * This is not a constant time operation, it involves scanning the entire
-     * file.
+     * file. It is faster for indexed files, as only the index is scanned.
      *
      * @return The number of variants.
      */
     size_t numVariants() {
         if (m_variants == INTERNAL_VALUE_NOT_SET) {
-            scanVariants();
+            scanVariants(/*countVariants=*/true);
         }
         return m_variants;
     }
 
     /**
      * Compute the range of positions for variants in the file.
-     * This is not a constant time operation, it involves scanning the entire
-     * file.
+     * If the VCF metadata does not contain contigs then this is not a constant time operation,
+     * it involves scanning the entire file. Otherwise the sequence length in the contig header
+     * is used.
      *
      * @return A pair of the minimum and maximum variant positions present in the
      * file.
@@ -1011,21 +1585,29 @@ public:
     }
 
     /**
-     * Is there a variant at the current file position?
+     * DEPRECATED: just use nextVariant() which returns a boolean telling you whether there was another
+     * variant to retrieve.
+     *
      * @returns true if calling nextVariant() will place us at a valid variant.
      */
-    bool hasNextVariant() { return !picovcf_peek_eof(m_infile.get()); }
+    bool hasNextVariant() PICOVCF_DEPRECATED { return !picovcf_peek_eof(m_infile.get()); }
 
     /**
      * Read the variant at the current file position and move the file position to
      * the following variant.
+     *
+     * @returns true if there was another variant, false otherwise.
      */
-    void nextVariant() {
-        if (picovcf_peek_eof(m_infile.get())) {
-            PICOVCF_THROW_ERROR(ApiMisuse, "Tried to move to next variant when there aren't any");
+    bool nextVariant() {
+        bool more = false;
+        while (m_infile->readline(m_currentLine) > 0) {
+            m_currentVariant.reset();
+            if (useVariant(m_currentVariant)) {
+                more = true;
+                break;
+            }
         }
-        m_infile->readline(m_currentLine);
-        m_currentVariant.reset();
+        return more;
     }
 
     /**
@@ -1036,6 +1618,42 @@ public:
     VCFVariantView& currentVariant() { return m_currentVariant; }
 
 private:
+#if VCF_GZ_SUPPORT
+    void seekVirt(const uint64_t virtOffset) {
+        const auto virt = TabixIndexSequence::splitVirt(virtOffset);
+        m_infile->seek_block({virt.first, virt.second});
+    }
+#endif
+
+    // Predicate that filters variants based on the contig and our current contig settings.
+    inline bool useVariant(const VCFVariantView& variant) const {
+        switch (m_contigHandling) {
+        case PVCH_ONE:
+            if (m_contig != variant.getChrom()) {
+                PICOVCF_THROW_ERROR(ApiMisuse,
+                                    "User specified file should contain a single contig, but it contained at least 2");
+            }
+            return true;
+        case PVCH_SPECIFIC: return (m_contig == variant.getChrom());
+        case PVCH_ALL:
+        default: return true;
+        }
+    }
+
+    // Get the first variant, ignoring any contig-related filters.
+    VCFVariantView& getFirstVariantUnfiltered() {
+        const FileOffset saved = getFilePosition();
+        seekBeforeVariants();
+        const size_t amountRead = m_infile->readline(m_currentLine);
+        if (amountRead == 0) {
+            PICOVCF_THROW_ERROR(ApiMisuse, "VCF file has no variants");
+        }
+        m_currentVariant.reset();
+        auto& result = currentVariant();
+        setFilePosition(saved);
+        return result;
+    }
+
     void parseHeader() {
         FileOffset prevPosition = {0, 0};
         std::string lineBuffer;
@@ -1083,14 +1701,24 @@ private:
         PICOVCF_ASSERT_OR_MALFORMED(sawHeader, "No header line (column names) found.");
     }
 
-    void scanVariants() {
-        m_variants = 0;
+    /**
+     * Scan all the variants to collect information. If countVariants is false, this can be done
+     * very quickly on an indexed VCF. Otherwise, it is pretty slow.
+     */
+    void scanVariants(bool countVariants = false) {
+        countVariants = countVariants || !isUsingIndex();
+        if (countVariants) {
+            m_variants = 0;
+        }
         const auto originalPosition = getFilePosition();
         this->seekBeforeVariants();
+        bool skipToEnd = !countVariants;
         m_genomeRange.second = 0;
-        while (this->hasNextVariant()) {
-            this->nextVariant();
-            VCFVariantView variant = this->currentVariant();
+        while (this->nextVariant()) {
+            const VCFVariantView& variant = currentVariant();
+            if (!useVariant(variant)) {
+                continue;
+            }
             const double position = variant.getPosition();
             if (m_genomeRange.first == INTERNAL_VALUE_NOT_SET) {
                 m_genomeRange.first = position;
@@ -1098,26 +1726,50 @@ private:
             PICOVCF_ASSERT_OR_MALFORMED(m_genomeRange.second <= position,
                                         "VCF rows must be in ascending genome position");
             m_genomeRange.second = position;
-            m_variants++;
+            if (countVariants) {
+                m_variants++;
+            }
+#if VCF_GZ_SUPPORT
+            if (skipToEnd && isUsingIndex()) {
+                seekVirt(m_index->sequences().front().getLastVOffset());
+                skipToEnd = false;
+            }
+#endif
         }
         setFilePosition(originalPosition);
     }
 
+    enum ContigHandling {
+        PVCH_ALL = 0,
+        PVCH_ONE = 1,
+        PVCH_SPECIFIC = 2,
+    };
+
     std::unique_ptr<BufferedReader> m_infile;
-    // The number of variants represented
+    // The number of variants in the file.
     size_t m_variants;
     // The min/max genome range
     RangePair m_genomeRange;
     // Starting position (offset) in the file for the variants information
     FileOffset m_posVariants;
+#if VCF_GZ_SUPPORT
+    // The (optional) Tabix index.
+    std::unique_ptr<TabixIndex> m_index;
+#endif
+
     // Metadata dictionary
     std::multimap<std::string, std::string> m_metaInformation;
     // Labels for individuals
     std::vector<std::string> m_individualLabels;
-
-    // These three members represent the current variant we're looking at.
+    // These two members represent the current variant we're looking at.
     VCFVariantView m_currentVariant;
     std::string m_currentLine;
+
+    // Describe what contig(s) the VCFFile will traverse.
+    ContigHandling m_contigHandling;
+    std::string m_contig;
+
+    bool m_verbose;
 };
 
 template <typename T> static inline T readScalar(std::istream& inStream) {
@@ -1141,11 +1793,6 @@ static inline std::string readString(const uint64_t version, std::istream& inStr
     inStream.read(const_cast<char*>(strValue.c_str()), strLength);
     return std::move(strValue);
 }
-
-enum PloidyHandling {
-    PH_STRICT = 0,        /*!< Strict ploidy handling: retain ploidy, only allow a single ploidy for all data. */
-    PH_FORCE_DIPLOID = 1, /*!< Force all variants to diploid, making both alleles identical for haploid input. */
-};
 
 /** Vector of sample indexes (IDs) */
 using IGDSampleList = std::vector<SampleT>;
@@ -1524,11 +2171,10 @@ public:
             const SampleT readAmount = picovcf_div_ceiling<SampleT, 8>(numSamples);
             PICOVCF_RELEASE_ASSERT(readAmount > 0);
             std::unique_ptr<uint8_t[]> buffer(new uint8_t[readAmount]);
-            if (buffer) {
-                m_infile.read(reinterpret_cast<char*>(buffer.get()), readAmount);
-                PICOVCF_GOOD_OR_API_MISUSE(m_infile);
-                return ::picovcf::getSamplesWithAlt((const uint8_t*)buffer.get(), numSamples);
-            }
+            PICOVCF_RELEASE_ASSERT(buffer != nullptr);
+            m_infile.read(reinterpret_cast<char*>(buffer.get()), readAmount);
+            PICOVCF_GOOD_OR_API_MISUSE(m_infile);
+            return ::picovcf::getSamplesWithAlt((const uint8_t*)buffer.get(), numSamples);
         }
         return {};
     }
@@ -1552,6 +2198,11 @@ public:
         }
         return std::move(result);
     }
+
+    /**
+     * @return true if this file has identifiers for variants.
+     */
+    bool hasVariantIds() const { return 0 != m_header.filePosVariantIds; }
 
     /**
      * Read the (optional) list of variant identifiers from the file.
@@ -1617,9 +2268,9 @@ private:
         m_beforeFirstVariant = m_infile.tellg();
         PICOVCF_ASSERT_OR_MALFORMED(m_header.filePosVariants >= m_beforeFirstVariant,
                                     "Invalid variant info position " << m_header.filePosVariants);
-        PICOVCF_ASSERT_OR_MALFORMED(m_header.ploidy <= MAX_PLOIDY,
+        PICOVCF_ASSERT_OR_MALFORMED(m_header.ploidy <= MAX_IGD_PLOIDY,
                                     "Invalid ploidy " << m_header.ploidy << " is greater than maximum of "
-                                                      << MAX_PLOIDY);
+                                                      << MAX_IGD_PLOIDY);
         PICOVCF_ASSERT_OR_MALFORMED(m_header.numIndividuals <= MAX_SAMPLES / m_header.ploidy,
                                     "Too many individuals to store: " << m_header.numIndividuals);
     }
@@ -1664,6 +2315,9 @@ private:
     std::vector<IGDAllele> m_alternateAlleles;
     // Separate vector for storing the "long" alleles (larger than 4 nucleotides)
     std::vector<std::string> m_longAlleles;
+
+    friend void
+    mergeIGDs(std::ostream& outputStream, const std::vector<std::string>& inputFilenames, std::string description);
 };
 
 template <typename T> static inline void writeScalar(T intValue, std::ostream& outStream) {
@@ -1712,7 +2366,7 @@ public:
               0,
               0,
           }) {
-        PICOVCF_ASSERT_OR_MALFORMED(ploidy <= MAX_PLOIDY, "Ploidy exceeded maximum supported");
+        PICOVCF_ASSERT_OR_MALFORMED(ploidy <= MAX_IGD_PLOIDY, "Ploidy exceeded maximum supported");
     }
 
     /**
@@ -1899,7 +2553,212 @@ private:
     std::vector<std::string> m_referenceAlleles;
     std::vector<std::string> m_alternateAlleles;
     std::vector<IGDData::IndexEntry> m_index;
+
+    friend void
+    mergeIGDs(std::ostream& outputStream, const std::vector<std::string>& inputFilenames, std::string description);
 };
+
+// Copy byteSize bytes from inStream to outStream, using the provided buffer. The buffer size
+// will dictate the maximum amount copied at one time.
+static inline void
+copyBytes(std::istream& inStream, std::ostream& outStream, std::vector<uint8_t>& buffer, size_t byteSize) {
+    size_t written = 0;
+    while (written < byteSize) {
+        const size_t toRead = std::min<size_t>(byteSize - written, buffer.size());
+        inStream.read(reinterpret_cast<char*>(buffer.data()), toRead);
+        const size_t amountRead = inStream.gcount();
+        outStream.write(reinterpret_cast<char*>(buffer.data()), amountRead);
+        written += amountRead;
+        PICOVCF_RELEASE_ASSERT(outStream.good());
+        if (!inStream.good()) {
+            break;
+        }
+    }
+    PICOVCF_RELEASE_ASSERT(written == byteSize);
+}
+
+/**
+ * Merge the IGD files given by a list of IGDReader into a single output stream. The
+ * input files must be _mutually exclusive_ by genome range, such that if one
+ * input covers variants over the range (R1, R2) and another covers (R3, R4) then either
+ * R1 >= R4 or R3 >= R2. The samples described by the inputs must also be identical.
+ *
+ * If only some input IGDs have variant IDs, the remaining variants will get the empty string
+ * for their identifiers.
+ * The individual IDs will be used from the first (ascending order genetic position) input IGD
+ * and will not be checked against other IGD files individual IDs.
+
+ * @param out_file: The filename to write the output IGD to.
+ * @param in_readers: List of IGDReader objects for the input IGDs to be merged.
+ * @param force_overwrite: Optional. Set to True to always write the output file, even if it
+ *      already exists.
+ * @param description: Optional. Description to write to the IGD header. If not specified (None)
+ *      then the description of the first input IGD will be used.
+ */
+inline void
+mergeIGDs(std::ostream& outputStream, const std::vector<std::string>& inputFilenames, std::string description = {}) {
+    if (inputFilenames.size() < 2) {
+        PICOVCF_THROW_ERROR(ApiMisuse, "No point in merging fewer than 2 IGD files");
+    }
+
+    std::vector<IGDData> readers;
+    for (const auto& filename : inputFilenames) {
+        readers.emplace_back(filename);
+    }
+
+    // Sanity check that properties of inputs are consistent.
+    const size_t ploidy = readers.front().getPloidy();
+    const size_t numIndiv = readers.front().numIndividuals();
+    const bool phased = readers.front().isPhased();
+    std::string source = readers.front().getSource();
+    const std::string& useDesc = description.empty() ? readers.front().getDescription() : description;
+    bool writeVarIds = false;
+    {
+        std::vector<IGDData> useReaders;
+        for (auto& reader : readers) {
+            if (reader.getPloidy() != ploidy) {
+                PICOVCF_THROW_ERROR(ApiMisuse, "Multiple ploidy values in input IGDs");
+            }
+            if (reader.numIndividuals() != numIndiv) {
+                PICOVCF_THROW_ERROR(ApiMisuse, "Different sample set sizes in input IGDs");
+            }
+            if (reader.isPhased() != phased) {
+                PICOVCF_THROW_ERROR(ApiMisuse, "Different phasedness in input IGDs");
+            }
+            if (reader.hasVariantIds()) {
+                writeVarIds = true;
+            }
+            if (reader.numVariants() > 0) {
+                useReaders.push_back(std::move(reader));
+            }
+        }
+        readers = std::move(useReaders);
+    }
+    if (readers.empty()) {
+        PICOVCF_THROW_ERROR(ApiMisuse, "No IGD files had variants, cannot merge");
+    }
+
+    // Now sort the input readers according to their first variant, and then ensure no overlap.
+    auto positionOrder = [&](IGDData& first, IGDData& second) { return first.getPosition(0) < second.getPosition(0); };
+    std::sort(readers.begin(), readers.end(), positionOrder);
+    for (size_t i = 1; i < readers.size(); i++) {
+        auto& prev = readers[i - 1];
+        auto& curr = readers[i];
+        if (prev.getPosition(prev.numVariants() - 1) > curr.getPosition(curr.numVariants() - 1)) {
+            PICOVCF_THROW_ERROR(ApiMisuse, "Overlapping input IGDs");
+        }
+    }
+
+    // Given an IGD input and a variant index, get the associated file offset and encoded genomic position
+    auto getOffsetForVariant = [&](IGDData& reader, size_t index) {
+        bool endOffset = false;
+        if (index == reader.numVariants()) {
+            index = reader.numVariants() - 1;
+            endOffset = true;
+        }
+        reader.m_infile.seekg(reader.getVariantIndexOffset(index));
+        PICOVCF_GOOD_OR_API_MISUSE(reader.m_infile);
+        IGDData::IndexEntry indexDatum;
+        reader.m_infile.read(reinterpret_cast<char*>(&indexDatum), sizeof(indexDatum));
+        if (endOffset) {
+            const bool isSparse = (bool)(indexDatum.bpPosition & IGDData::BP_POS_FLAGS_SPARSE);
+            size_t byteCount = 0;
+            if (isSparse) {
+                reader.m_infile.seekg(indexDatum.filePosDataRow);
+                byteCount = (readScalar<SampleT>(reader.m_infile) * sizeof(SampleT)) + sizeof(SampleT);
+            } else {
+                byteCount = picovcf_div_ceiling<SampleT, 8>(reader.numSamples());
+            }
+            return std::pair<uint64_t, uint64_t>{indexDatum.filePosDataRow + byteCount, indexDatum.bpPosition};
+        }
+        return std::pair<uint64_t, uint64_t>{indexDatum.filePosDataRow, indexDatum.bpPosition};
+    };
+
+    auto writer = IGDWriter(ploidy, numIndiv, phased);
+    // We interpret as little as possible from the input IGDs, to speed up the merging.
+    // The order of the resulting file looks like this:
+    //   HEADER
+    writer.writeHeader(outputStream, source, useDesc);
+
+    //   SAMPLE LISTS (input 1)   <-- offset1
+    //   ...
+    //   SAMPLE LISTS (input N)   <-- offsetN
+    std::vector<size_t> oldOffsets;
+    std::vector<size_t> newOffsets;
+    {
+        // Copy up to 64MB at a time.
+        std::vector<uint8_t> copyBuffer(1024 * 1024 * 64);
+        for (auto& reader : readers) {
+            const auto startPair = getOffsetForVariant(reader, 0);
+            const auto endPair = getOffsetForVariant(reader, reader.numVariants());
+            PICOVCF_RELEASE_ASSERT(endPair.first > startPair.first);
+            const size_t byteSize = endPair.first - startPair.first;
+            reader.m_infile.seekg(startPair.first);
+            oldOffsets.emplace_back(startPair.first);
+            newOffsets.emplace_back(outputStream.tellp());
+            copyBytes(reader.m_infile, outputStream, copyBuffer, byteSize);
+            writer.m_header.numVariants += reader.numVariants();
+        }
+    }
+
+    //   INDEX + offset1 (input1)
+    //   ...
+    //   INDEX + offsetN (inputN)
+    writer.m_header.filePosIndex = outputStream.tellp();
+    PICOVCF_RELEASE_ASSERT(readers.size() == oldOffsets.size());
+    PICOVCF_RELEASE_ASSERT(readers.size() == newOffsets.size());
+    for (size_t i = 0; i < readers.size(); i++) {
+        auto& reader = readers[i];
+        const size_t oldOffset = oldOffsets[i];
+        const size_t newOffset = newOffsets[i];
+        for (size_t j = 0; j < reader.numVariants(); j++) {
+            const auto inputPair = getOffsetForVariant(reader, j);
+            writeScalar<uint64_t>(inputPair.second, outputStream);
+            writeScalar<uint64_t>((inputPair.first - oldOffset) + newOffset, outputStream);
+        }
+    }
+
+    //   VARIANT INFO (input1)
+    //   ...
+    //   VARIANT INFO (inputN)
+    writer.m_header.filePosVariants = outputStream.tellp();
+    for (auto& reader : readers) {
+        reader.m_infile.seekg(reader.m_header.filePosVariants);
+        for (size_t i = 0; i < reader.numVariants(); i++) {
+            const auto ref = readString(reader.m_header.version, reader.m_infile);
+            const auto alt = readString(reader.m_header.version, reader.m_infile);
+            writeString(ref, outputStream);
+            writeString(alt, outputStream);
+        }
+    }
+
+    //   INDIVIDUAL IDS (input1) -- optional
+    {
+        const auto& indivIds = readers.front().getIndividualIds();
+        writer.writeIndividualIds(outputStream, indivIds);
+    }
+
+    //   VARIANT IDS (input1)
+    //   ...
+    //   VARIANT IDS (inputN)
+    if (writeVarIds) {
+        writer.m_header.filePosVariantIds = outputStream.tellp();
+        writeScalar<uint64_t>(writer.m_header.numVariants, outputStream);
+        for (auto& reader : readers) {
+            auto vids = reader.getVariantIds();
+            if (vids.size() < reader.numVariants()) {
+                PICOVCF_ASSERT_OR_MALFORMED(vids.empty(), "IGD input file has unexpected number of variant IDs");
+                vids.resize(reader.numVariants(), "");
+            }
+            for (const auto& identifier : vids) {
+                writeString(identifier, outputStream);
+            }
+        }
+    }
+
+    outputStream.seekp(0);
+    writer.writeHeader(outputStream, source, useDesc);
+}
 
 /**
  * Using minimal memory, convert the given VCF file (can be gzipped) to an IGD
@@ -1922,6 +2781,14 @@ private:
  * (see callbackContext).
  * @param[in] callbackContext [Optional] Pointer to an object that will be passed to
  * variantCallback.
+ * @param[in] contig [Optional] Select which contig(s) to use when converting from VCF
+ * to IGD. IGD does not support contigs, so everything will be "merged" into a single
+ * contig in the IGD file. Use PVCF_VCFFILE_CONTIG_REQUIRE_ONE if you only want to convert
+ * VCF files that have a single CONTIG. See also PVCF_VCFFILE_CONTIG_ALL (default) and
+ * PVCF_VCFFILE_CONTIG_FIRST. Otherwise, takes a free-form string value that should match
+ * the contig to be converted.
+ * @param[in] region [Optional] Only convert variants found within this range, which is
+ * a pair (start, end) where each position is inclusive.
  */
 inline void vcfToIGD(const std::string& vcfFilename,
                      const std::string& outFilename,
@@ -1930,100 +2797,137 @@ inline void vcfToIGD(const std::string& vcfFilename,
                      bool emitIndividualIds = false,
                      bool emitVariantIds = false,
                      bool forceUnphased = false,
-                     const PloidyHandling handlePloidy = PH_STRICT,
+                     const size_t forceToPloidy = 0,
                      bool dropUnphased = false,
-                     void (*variantCallback)(const VCFFile&, const VCFVariantView&, void*) = nullptr,
-                     void* callbackContext = nullptr) {
-    VCFFile vcf(vcfFilename);
+                     void (*variantCallback)(const VCFFile&, VCFVariantView&, void*) = nullptr,
+                     void* callbackContext = nullptr,
+                     std::string contig = PVCF_VCFFILE_CONTIG_ALL,
+                     const std::pair<size_t, size_t> region = {INVALID_POSITION, INVALID_POSITION}) {
+    VCFFile vcf(vcfFilename, contig);
     vcf.seekBeforeVariants();
-    PICOVCF_ASSERT_OR_MALFORMED(vcf.hasNextVariant(), "VCF file has no variants");
-    vcf.nextVariant();
+    PICOVCF_ASSERT_OR_MALFORMED(vcf.nextVariant(), "VCF file has no variants");
     VCFVariantView& variant1 = vcf.currentVariant();
     PICOVCF_ASSERT_OR_MALFORMED(variant1.hasGenotypeData(), "VCF file has no genotype data");
 
-    IndividualIteratorGT firstIndividual = variant1.getIndividualIterator();
-    PICOVCF_ASSERT_OR_MALFORMED(firstIndividual.hasNext(), "VCF file has no genotype data");
-    VariantT allele1 = 0;
-    VariantT allele2 = 0;
-    const bool isPhased =
-        !forceUnphased && (dropUnphased || firstIndividual.getAlleles(allele1, allele2, /*moveNext=*/false));
-    const uint64_t ploidy = (handlePloidy == PH_STRICT ? ((allele2 == NOT_DIPLOID) ? 1 : 2) : 2);
-    PICOVCF_RELEASE_ASSERT(handlePloidy != PH_FORCE_DIPLOID || ploidy == 2);
+    std::vector<AlleleT> firstGT = variant1.getGenotypeArray();
+    PICOVCF_ASSERT_OR_MALFORMED(!firstGT.empty(), "VCF file has no genotype data");
+    const VCFPhasedness phasedness = variant1.getPhasedness();
+    PICOVCF_RELEASE_ASSERT(phasedness != PVCFP_UNKNOWN);
+    if (phasedness == PVCFP_MIXED) {
+        if (!forceUnphased || !dropUnphased) {
+            throw ApiMisuse(
+                "VCF has mixed phasedness, which is only supported when dropUnphased=True or forceUnphased=True");
+        }
+    }
+    const bool isPhased = !forceUnphased && (dropUnphased || phasedness == PVCFP_PHASED);
+    const uint64_t ploidy = (forceToPloidy == 0) ? variant1.getMaxPloidy() : forceToPloidy;
 
     std::vector<std::string> variantIds;
     std::ofstream outFile(outFilename, std::ios::binary);
     IGDWriter writer(ploidy, vcf.numIndividuals(), isPhased);
     writer.writeHeader(outFile, vcfFilename, description);
-    vcf.seekBeforeVariants();
-    while (vcf.hasNextVariant()) {
-        vcf.nextVariant();
-        const VCFVariantView& variant = vcf.currentVariant();
-        IndividualIteratorGT individualIt = variant.getIndividualIterator();
+
+    bool alreadyHave = false;
+    if (region.first == INVALID_POSITION) {
+        vcf.seekBeforeVariants();
+    } else {
+        alreadyHave = vcf.lowerBoundPosition(region.first);
+    }
+    while (alreadyHave || vcf.nextVariant()) {
+        alreadyHave = false;
+        VCFVariantView& variant = vcf.currentVariant();
+        const auto position = variant.getPosition();
+        if (position > region.second) {
+            break;
+        }
+        std::vector<AlleleT> genotypes = variant.getGenotypeArray();
         auto altAlleles = variant.getAltAlleles();
         IGDSampleList missingData;
         const size_t numSampleLists = isPhased ? altAlleles.size() : (altAlleles.size() * ploidy);
         std::vector<IGDSampleList> variantGtData(numSampleLists);
         SampleT sampleIndex = 0;
-        const auto position = variant.getPosition();
-        bool skipVariant = false;
-        while (individualIt.hasNext()) {
-            const bool isPhasedI = individualIt.getAlleles(allele1, allele2);
-            PICOVCF_ASSERT_OR_MALFORMED(forceUnphased || dropUnphased || isPhasedI == isPhased,
-                                        "Cannot convert VCF with mixed phasedness, unless forceUnphased or "
-                                        "dropUnphased is set, at variant position "
-                                            << position);
-            if (dropUnphased && !isPhasedI) {
-                skipVariant = true;
-                break;
-            }
-            const uint64_t ploidyI = (allele2 == NOT_DIPLOID) ? 1 : 2;
-            if (handlePloidy == PH_STRICT) {
-                PICOVCF_ASSERT_OR_MALFORMED(
-                    ploidyI == ploidy,
-                    "Will not convert VCF with mixed ploidy with PH_STRICT, see PloidyHandling options");
-            } else if (handlePloidy == PH_FORCE_DIPLOID) {
-                if (ploidyI != 2) {
-                    allele2 = allele1;
-                }
-            }
-            if (isPhased) {
-                if (allele1 == MISSING_VALUE) {
-                    missingData.push_back(sampleIndex);
-                } else if (allele1 > 0) {
-                    variantGtData.at(allele1 - 1).push_back(sampleIndex);
-                }
-                sampleIndex++;
-                if (ploidy == 2) {
-                    if (allele2 == MISSING_VALUE) {
-                        missingData.push_back(sampleIndex);
-                    } else if (allele2 > 0) {
-                        variantGtData.at(allele2 - 1).push_back(sampleIndex);
-                    }
-                    sampleIndex++;
-                }
-                // sampleIndex refers to _haploid samples_ for unphased data.
-            } else {
-                if (allele1 == MISSING_VALUE || allele2 == MISSING_VALUE) {
-                    missingData.push_back(sampleIndex);
-                } else if (allele1 == allele2 && allele1 > 0) {
-                    // This corresponds to a "2" (numCopies)
-                    variantGtData.at((allele1 - 1) + altAlleles.size()).push_back(sampleIndex);
-                } else {
-                    // These correspond to a "1" (numCopies). We can have two "1"s in the case where the
-                    // alt alleles are different. It is up to the downstream use-case how to handle this
-                    // (e.g., filter the lower frequency one out, adjust the calculation to handle it, etc.)
-                    if (allele1 > 0) {
-                        variantGtData.at(allele1 - 1).push_back(sampleIndex);
-                    }
-                    if (allele2 > 0) {
-                        variantGtData.at(allele2 - 1).push_back(sampleIndex);
-                    }
-                }
-                sampleIndex++; // sampleIndex refers to _individuals_ for unphased data.
-            }
-        }
-        if (skipVariant) {
+        const VCFPhasedness iPhasedness = variant1.getPhasedness();
+        PICOVCF_RELEASE_ASSERT(iPhasedness != PVCFP_UNKNOWN);
+        PICOVCF_ASSERT_OR_MALFORMED(forceUnphased || dropUnphased || phasedness == iPhasedness,
+                                    "Cannot convert VCF with mixed phasedness, unless forceUnphased or "
+                                    "dropUnphased is set, at variant position "
+                                        << position);
+        if (dropUnphased && (iPhasedness != PVCFP_PHASED)) {
             continue;
+        }
+        const AlleleT iPloidy = variant.getMaxPloidy();
+        PICOVCF_RELEASE_ASSERT(genotypes.size() % iPloidy == 0);
+        const AlleleT usePloidy = (forceToPloidy > 0) ? forceToPloidy : iPloidy;
+        for (SampleT indivIndex = 0; indivIndex < genotypes.size() / iPloidy; indivIndex++) {
+            if (isPhased) {
+                for (size_t i = 0; i < iPloidy; i++) {
+                    if (forceToPloidy > 0 && i >= forceToPloidy) {
+                        continue;
+                    }
+                    const SampleT gtIndex = (indivIndex * iPloidy) + i;
+                    const AlleleT allele = genotypes[gtIndex];
+                    const SampleT sampleIndex = (indivIndex * usePloidy) + i;
+                    if (allele == MISSING_VALUE) {
+                        missingData.push_back(sampleIndex);
+                    } else if (allele == MIXED_PLOIDY) {
+                        if (forceToPloidy == 0) {
+                            throw ApiMisuse("Will not convert VCF with mixed ploidy unless forceToPloidy is used");
+                        } else {
+                            PICOVCF_ASSERT_OR_MALFORMED(gtIndex % iPloidy != 0,
+                                                        "Ploidy=0 individual found at variant @ pos = " << position);
+                            // This option just replaces all "not found ploidy" alleles with a copy of the first allele
+                            // from the individual.
+                            const AlleleT firstAllele = genotypes.at(indivIndex * iPloidy);
+                            if (firstAllele > 0) {
+                                variantGtData.at(firstAllele - 1).push_back(sampleIndex);
+                            }
+                        }
+                    } else if (allele > 0) {
+                        variantGtData.at(allele - 1).push_back(sampleIndex);
+                    }
+                }
+                for (size_t i = iPloidy; i < forceToPloidy; i++) {
+                    const SampleT sampleIndex = (indivIndex * usePloidy) + i;
+                    const AlleleT firstAllele = genotypes.at(indivIndex * iPloidy);
+                    if (firstAllele > 0) {
+                        variantGtData.at(firstAllele - 1).push_back(sampleIndex);
+                    }
+                }
+            } else {
+                if (iPloidy > 2) {
+                    throw ApiMisuse("VCF to IGD (unphased) only supports ploidy up to 2 currently.");
+                }
+                if (forceToPloidy > 0) {
+                    throw ApiMisuse(
+                        "Will not convert VCF with mixed ploidy for unphased data, even with forceToPloidy");
+                }
+                bool isMissing = false;
+                std::vector<size_t> counts(altAlleles.size());
+                for (size_t i = 0; i < iPloidy; i++) {
+                    const AlleleT allele = genotypes.at((indivIndex * iPloidy) + i);
+                    switch (allele) {
+                    case MISSING_VALUE: isMissing = true; break;
+                    case MIXED_PLOIDY:
+                        throw ApiMisuse("Will not convert VCF with mixed ploidy for unphased data");
+                        break;
+                    case 0: break;
+                    default:
+                        PICOVCF_RELEASE_ASSERT(allele > 0 && allele <= counts.size());
+                        counts[allele - 1]++;
+                        break;
+                    }
+                }
+                if (isMissing) {
+                    missingData.push_back(indivIndex);
+                }
+                for (size_t i = 0; i < counts.size(); i++) {
+                    if (counts[i] == 2) {
+                        variantGtData.at(i + altAlleles.size()).push_back(indivIndex);
+                    } else if (counts[i] == 1) {
+                        variantGtData.at(i).push_back(indivIndex);
+                    }
+                }
+            }
         }
         std::string currentVariantId;
         if (emitVariantIds) {

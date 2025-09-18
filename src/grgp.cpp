@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
 
     if (alleleFrequency) {
         START_TIMING_OPERATION();
-        emitAlleleFrequency(theGRG, std::cout, bpRange, onlySamples);
+        emitAlleleCounts(theGRG, std::cout, bpRange, onlySamples);
         EMIT_TIMING_MESSAGE("Allele frequency calculation took");
     }
 

@@ -132,7 +132,7 @@ windowByCM(std::pair<BpPosition, BpPosition> bpRange, const std::string& mapFile
 
 std::vector<std::pair<MutationId, NodeID>> mutationNodePairsForWindow(const GRGPtr& grg, const Window& window) {
     std::vector<std::pair<MutationId, NodeID>> result;
-    for (const auto& nodeAndMutId : grg->getNodeMutationPairs()) {
+    for (const auto& nodeAndMutId : grg->getNodesAndMutations()) {
         const auto& mutation = grg->getMutationById(nodeAndMutId.second);
         if (mutation.getPosition() >= window.begin && mutation.getPosition() < window.end) {
             result.emplace_back(nodeAndMutId.second, nodeAndMutId.first);

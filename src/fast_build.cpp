@@ -258,11 +258,11 @@ void getHapSegments(MutationIterator& mutIterator,
     size_t windex = 0;
 
     // If the threshold is <1.0, it is a frequency.
-    size_t dropBelowCount = 0;
+    size_t directMapBelowCt = 0;
     if (dropBelowThreshold < 1.0) {
-        dropBelowCount = (size_t)((double)numSamples * dropBelowThreshold);
+        directMapBelowCt = (size_t)((double)numSamples * dropBelowThreshold);
     } else {
-        dropBelowCount = (size_t)dropBelowThreshold;
+        directMapBelowCt = (size_t)dropBelowThreshold;
     }
 
     hapContext.sampleHapVects.resize(numSamples);
@@ -277,6 +277,10 @@ void getHapSegments(MutationIterator& mutIterator,
     bool done = false;
     size_t _ignore = 0;
     MutationAndSamples mutAndSamples;
+    // The missing data Mutations always come first, so this tells us if the position of any _non-missing-data_
+    // Mutation also has missing data.
+    size_t lastPositionWithMissing = std::numeric_limits<size_t>::max();
+
     while (!done && mutIterator.next(mutAndSamples, _ignore)) {
         // Stopping when we reach a certain mutation threshold.
         if (stopAfterIsMutCount) {
@@ -285,7 +289,15 @@ void getHapSegments(MutationIterator& mutIterator,
                 done = true;
             }
         }
-        if (mutAndSamples.samples.size() < dropBelowCount) {
+
+        const size_t position = mutAndSamples.mutation.getPosition();
+        if (mutAndSamples.mutation.isMissing()) {
+            lastPositionWithMissing = position;
+        }
+
+        // We will only direct map mutations if there is no missing data at the site. Otherwise, tracking
+        // the missingness NodeIDs across regular and direct mapping is a nightmare.
+        if (mutAndSamples.samples.size() < directMapBelowCt && lastPositionWithMissing != position) {
             hapContext.directMap.emplace_back(std::move(mutAndSamples));
             continue;
         }
@@ -677,15 +689,26 @@ MutableGRGPtr buildTree(HapWindowContext& context,
         // Now create the mutation nodes and connect them. TODO: in the future we might want to call
         // MapMutations with non-sample nodes as the seeds and let it do the work here, which might
         // give us much better hierarchy.
+        std::pair<BpPosition, NodeID> currentMissing = {INVALID_POSITION, INVALID_NODE_ID};
+        BpPosition currentPosition = INVALID_POSITION;
         for (size_t mutIdx = 0; mutIdx < mutIndexToNodes.size(); mutIdx++) {
-            const NodeID mutNode = result->makeNode();
+            const NodeID newNode = result->makeNode();
             const Mutation& mut = context.allMutations.at(mutIdx);
-            result->addMutation(mut, mutNode);
-            DEBUG_PRINT("Adding mutation " << mut.getPosition() << ", " << mut.getAllele() << " to ");
+            const auto pos = mut.getPosition();
+            if (mut.isMissing()) {
+                // Any missing Mutation must be the _first_ Mutation at the given bp position.
+                release_assert(currentPosition != pos);
+                currentMissing = {pos, newNode};
+                DEBUG_PRINT("Adding missingness node " << mut.getPosition() << " to ");
+            } else {
+                const NodeID missNode = (currentMissing.first == pos) ? currentMissing.second : INVALID_NODE_ID;
+                result->addMutation(mut, newNode, missNode);
+                DEBUG_PRINT("Adding mutation " << mut.getPosition() << ", " << mut.getAllele() << " to ");
+            }
             const auto& nodeList = mutIndexToNodes[mutIdx];
             for (const NodeID childNode : nodeList) {
                 DEBUG_PRINT(childNode << ", ");
-                result->connect(mutNode, childNode);
+                result->connect(newNode, childNode);
             }
             DEBUG_PRINT("\n");
 
@@ -694,8 +717,9 @@ MutableGRGPtr buildTree(HapWindowContext& context,
                 std::unordered_set<NodeIDSizeT> uncoalescedIndividuals;
                 NodeIDSizeT mutNodeCoals =
                     getCoalsForParent(result, nodeToIndivs, nodeList, uncoalescedIndividuals, false);
-                result->setNumIndividualCoalsGrow(mutNode, mutNodeCoals);
+                result->setNumIndividualCoalsGrow(newNode, mutNodeCoals);
             }
+            currentPosition = mut.getPosition();
         }
     }
     return result;
@@ -834,7 +858,7 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
     // Read in the haplotypes for the first tree, and then estimate the number of trees by looking at
     // the span (in number of variants) that the first tree covered vs. the total range we need all trees
     // to cover.
-    if (treeCount == 0) {
+    if (treeCount == 0 && remainingMuts > 0) {
         const double hapSumMultiplier =
             hasBSFlag(buildFlags, GBF_TREES_FASTER1) ? 0.75 : (hasBSFlag(buildFlags, GBF_TREES_FASTER2) ? 0.5 : 1.0);
         const size_t targetHapSegSum = static_cast<size_t>(getOptimalHapSegSum(numSamples, hapSumMultiplier));
@@ -867,7 +891,8 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
     }
     release_assert(treeCount != 0 || remainingMuts == 0);
 
-    const size_t mutsPerTree = roundUpToMultiple<size_t>(remainingMuts, treeCount) / treeCount;
+    const size_t mutsPerTree =
+        (remainingMuts == 0) ? 0 : roundUpToMultiple<size_t>(remainingMuts, treeCount) / treeCount;
     for (size_t i = 1; i <= treeCount; i++) {
         HapWindowContext hapContext;
         getHapSegments(*mutIterator,
@@ -903,11 +928,15 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
 #endif
 
     MutableGRGPtr result;
-    if (treeFiles.size() == 1) {
-        result = loadMutableGRG(treeFiles.front());
-    } else {
+    if (treeFiles.empty()) {
         result = std::make_shared<MutableGRG>(numSamples, ploidy, isPhased);
-        result->merge(treeFiles, true, false);
+    } else {
+        result = loadMutableGRG(treeFiles.front());
+    }
+    if (treeFiles.size() > 1) {
+        std::list<std::string> toMerge = treeFiles;
+        toMerge.pop_front();
+        result->merge(toMerge, true, false);
     }
     for (const auto& filename : treeFiles) {
         deleteFile(filename);

@@ -78,9 +78,14 @@ static inline size_t getNaiveEdgeCount(const GRGPtr& grg) {
     grg->visitDfs(countVisitor, TraversalDirection::DIRECTION_DOWN, grg->getRootNodes());
     const std::vector<NodeIDSizeT>& sampleCounts = countVisitor.m_sampleCounts;
     size_t edgeCount = 0;
-    for (const auto& pair : grg->getNodeMutationPairs()) {
-        if (pair.first != INVALID_NODE_ID) {
-            edgeCount += sampleCounts.at(pair.first);
+    for (const auto& tuple : grg->getNodesAndMutations<GRG::NodeMutMiss>()) {
+        const NodeID& node = std::get<0>(tuple);
+        if (node != INVALID_NODE_ID) {
+            edgeCount += sampleCounts.at(node);
+        }
+        const NodeID& missingnessNode = std::get<2>(tuple);
+        if (missingnessNode != INVALID_NODE_ID) {
+            edgeCount += sampleCounts.at(missingnessNode);
         }
     }
     return edgeCount;
@@ -104,7 +109,7 @@ static inline void dumpStats(const GRGPtr& grg, const bool calculateNaiveEdges =
     std::cout << "======================" << std::endl;
 }
 
-static inline MutableGRGPtr loadMutableGRG(const std::string& filename) {
+static inline MutableGRGPtr loadMutableGRG(const std::string& filename, const bool loadUpEdges = true) {
     MutableGRGPtr result;
     IFSPointer inStream = std::make_shared<std::ifstream>(filename, std::ios::binary);
     if (!inStream->good()) {
@@ -112,7 +117,7 @@ static inline MutableGRGPtr loadMutableGRG(const std::string& filename) {
         return result;
     }
     try {
-        result = readMutableGrg(inStream);
+        result = readMutableGrg(inStream, loadUpEdges);
     } catch (SerializationFailure& e) {
         std::cerr << "Failed to load GRG: " << e.what() << std::endl;
         return result;

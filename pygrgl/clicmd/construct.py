@@ -113,6 +113,11 @@ def add_options(subparser):
         action="store_true",
         help="Do not storage individual string identifiers in the GRG.",
     )
+    subparser.add_argument(
+        "--ignore-missing",
+        action="store_true",
+        help="Do not store missing data in the GRG, pretend missing alleles are the reference allele.",
+    )
     # There are 9 compression levels:
     # 1: same as 2
     # 2: single-pass, use FASTER2 to determine # of trees, direct-map muts with count less
@@ -145,6 +150,11 @@ def add_options(subparser):
         action="store_true",
         help="The slowest (most compressive) level.",
     )
+    subparser.add_argument(
+        "--force",
+        action="store_true",
+        help="Ignore any warning conditions that cause execution to stop.",
+    )
 
 
 grgl_exe = which("grgl")
@@ -158,17 +168,18 @@ def compute_parts(input_file: str, threads: int):
     if not os.path.isfile(input_file):
         raise FileNotFoundError(f"Input file not found: {input_file}")
     cmd = [grgl_exe, "--count-variants", input_file]
-    output = subprocess.check_output(cmd).decode("utf-8").split("\n")[0]
     try:
+        output = subprocess.check_output(cmd).decode("utf-8").split("\n")[0]
         num_variants = int(output)
-    except ValueError:
+        min_var_per_part = HAP_SEG_LENGTH
+        max_parts = num_variants // min_var_per_part
+    except (ValueError, subprocess.CalledProcessError):
         print(
-            f"Could not count number of variants in {input_file}. Try specifying --parts directly.",
+            f"Could not count number of variants in {input_file}. Using the default of 100 (use --parts to override).",
             file=sys.stderr,
         )
-        exit(1)
-    min_var_per_part = HAP_SEG_LENGTH
-    max_parts = num_variants // min_var_per_part
+        # 100 is obviously not optimal for small datasets, but oh well!
+        max_parts = 100
     best_parts = max(threads, round_up_to(100, threads))
     return min(max_parts, best_parts)
 
@@ -214,6 +225,10 @@ def build_shape(
         command.append("--no-indiv-ids")
     if args.verbose:
         command.extend(["--verbose", "-s"])
+    if args.ignore_missing:
+        command.append("--ignore-missing")
+    if args.force:
+        command.append("--force")
     shape_filename = out_filename(output_file, part)
     command.extend(
         [
@@ -248,6 +263,10 @@ def build_grg(
             command.append("--maf-flip")
         if args.verbose:
             command.extend(["--verbose", "-s"])
+        if args.ignore_missing:
+            command.append("--ignore-missing")
+        if args.force:
+            command.append("--force")
         command.extend(
             [
                 "-r",

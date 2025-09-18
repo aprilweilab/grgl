@@ -9,12 +9,21 @@ compressed using off-the-shelf compression. In contrast, a GRG contains Mutation
 and Sample nodes (representing haploid samples), where there is a path from a Mutation node to a Sample
 node if-and-only-if that sample contains that mutation. These paths go through internal nodes that represent
 common ancestry between multiple samples, and this can result in significant compression **(30-50x smaller than
-.vcf.gz)**. Calculations on the whole dataset can be performed very quickly on GRG, using GRGL. See our paper
-["Enabling efficient analysis of biobank-scale data with genotype representation graphs"](https://www.nature.com/articles/s43588-024-00739-9)
-for more details.
+.vcf.gz)**. Calculations on the whole dataset can be performed very quickly on GRG, using GRGL. 
 
-Since the publication of the paper, [version 2.0](https://github.com/aprilweilab/grgl/releases/tag/v2.0) has been released,
-which further reduced the GRG size (by about half) and significantly sped up graph load time (by about 20x).
+Recent releases (after v2.3) support the following improvements over the [initial paper](https://www.nature.com/articles/s43588-024-00739-9):
+1. Graphs are more than 2x smaller (in RAM and on disk)
+2. Graph construction is 10-25x faster
+3. Loading graphs from disk is 10-20x faster
+4. First-class matrix multiplication API [matmul](https://grgl.readthedocs.io/en/stable/python_api.html#pygrgl.matmul)
+5. (Prototype) unphased data is supported
+6. GWAS, GWAS with covariates, PCA, and other analyses are available with [grapp](https://github.com/aprilweilab/grapp) (`pip install grapp`)
+7. Phenotype simulation is available with [grg_pheno_sim](https://github.com/aprilweilab/grg_pheno_sim/) (`pip install grg_pheno_sim`)
+8. Construction from `.vcf.gz` now supports tabix indexes, making that input format feasible for large datasets
+9. Better support for missing data, see [the documentation](https://grgl.readthedocs.io/en/stable/)
+
+If you need to cite something, use
+["Enabling efficient analysis of biobank-scale data with genotype representation graphs"](https://www.nature.com/articles/s43588-024-00739-9).
 
 # Genotype Representation Graph Library (GRGL)
 
@@ -79,7 +88,7 @@ docker build . -t grgl:latest
 
 Example to run, constructing a GRG from an example VCF file:
 ```
-docker run -v $PWD:/working -it grgl:latest bash -c "cd /working && grg construct /working/test/inputs/msprime.example.vcf"
+docker run -v $PWD:/working -it grgl:latest bash -c "cd /working && grg construct --force /working/test/inputs/msprime.example.vcf"
 ```
 
 ## Usage (Command line)
@@ -97,22 +106,20 @@ Load a GRG and emit some simple statistics about the GRG itself:
 grg process stats my_arg_data.grg
 ```
 
-To construct a GRG from a VCF file, use the `grg construct` command:
+To construct a GRG from a VCF file, use the `grg construct` command. (**NOTE** raw VCF is incredibly slow for non-trivial datasets, use BGZF indexed with tabix or IGD):
 ```
-grg construct --parts 20 -j 1 path/to/foo.vcf
+grg construct -j 1 path/to/foo.vcf.gz
 ```
-
-**WARNING:** VCF access for GRG is not indexed, and in general really slow. For anything beyond toy datasets, it is recommended to convert
-VCF files to [IGD](https://github.com/aprilweilab/picovcf) first. You can use the `grg convert` tool (available as part of GRGL)
- or `igdtools` from [picovcf](https://github.com/aprilweilab/picovcf).
 
 To convert a VCF(.gz) to an IGD and then build a GRG:
 ```
-grg convert path/to/foo.vcf foo.igd
-grg construct --parts 20 -j 1 foo.igd
+pip install igdtools
+igdtools path/to/foo.vcf -o foo.igd
+grg construct -j 1 foo.igd
 ```
 
-Construction for small datasets (such as those included as tests in this repository) should be very fast, a few minutes at most. Really large datasets (such as Biobank-scale) can take on the order of a day when using lots of threads (e.g., 70).
+Increase `-j` to the number of threads you have.
+Construction for small datasets (such as those included as tests in this repository) should be very fast, on the order of seconds. Really large datasets (such as Biobank-scale whole genome sequences) can take on the order of hours when using lots of threads (e.g., 70). 1,000 Genomes Project chromosomes usually take on the order of a few minutes.
 
 ## Usage (Python API)
 

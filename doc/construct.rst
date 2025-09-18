@@ -3,81 +3,88 @@
 Constructing GRGs from raw data
 -------------------------------
 
-GRGs can be constructed from phased VCF, VCF.GZ, or IGD files. Phased BGEN is also supported,
-but only on Linux and it requires installing GRGL from source (see the 
-`installation instructions <installation.html>`_).
+GRGs are generally constructed from phased VCF, VCF.GZ, or IGD files. Unphased inputs of the same types
+can also be used. While GRG is not yet optimized for unphased data, it still typically stores the data
+in less space than most other techniques (though constructing the GRG will be slower than if the data
+is phased).
 
 IGD is the most efficient input format to use. When constructing GRGs from any non-trivial
-dataset, use IGD instead of VCF(.GZ).
+dataset, avoid the use of unindexed VCF files.
 
 Convert VCF to IGD
 ~~~~~~~~~~~~~~~~~~
 
-A VCF (compressed or uncompressed) file can be converted to IGD using the ``grg convert``
-command:
+A VCF (compressed or uncompressed) file can be converted to IGD using
+`igdtools <https://picovcf.readthedocs.io/en/latest/igdtools.html>`_ (``pip install igdtools``).
+If the VCF is a BGZF file with a `Tabix <https://www.htslib.org/doc/tabix.html>`_ index,
+then you can use the ``-j <threads>`` flag to significantly speedup conversion.
+
+Example1:
 
 ::
 
-	grg convert path/to/foo.vcf foo.igd
+	igdtools path/to/foo.vcf -o foo.igd
 
-If further manipulation of the IGD file is needed, you can use `igdtools
-<https://github.com/aprilweilab/picovcf>`_ or `pyigd <https://github.com/aprilweilab/pyigd>`_.
+Example2:
+
+::
+
+	igdtools -j 20 path/to/indexed.vcf.gz -o foo.igd
+
+
+If further manipulation of the IGD file is needed, you can use `picovcf
+<https://github.com/aprilweilab/picovcf>`_ (C++) or `pyigd <https://github.com/aprilweilab/pyigd>`_ (Python).
 
 
 Construct GRG from IGD 
 ~~~~~~~~~~~~~~~~~~~~~~
 
-There are three key parameters for GRG construction:
-  1. ``-p``: How many segments to split the input genome (typically a single
-  chromosome) into. If ``-p`` is too small, GRG construction will likely take
-  a long time. If ``-p`` is too large, the resulting GRG file might be large.
-  2. ``-t``: How many trees *within* each segment to create. This affects the shape
-  of the graph that Mutations are mapped to. The largest ``-t`` value we have
-  ever used is ``32``, and most datasets will want a value less than ``10``.
-  3. ``-j``: How many cores/threads to use during construction. This should be no
-  greater than the ``-p`` value.
-
-Guidance:
-- If your data is similar to the 1,000 Genomes dataset (high diversity but
-few samples) you likely want a small ``-p`` value and a large ``-t`` value: something
-like ``-p 50 -t 16``.
-- If your data is simulated, you probably want a larger ``-p`` and smaller ``-t`` value.
-We typically use something like ``-p 100 -t 5`` for data simulated with a non-trivial
-(e.g., out-of-Africa) demographic model and just ``-p 100`` or ``-p 50`` for panmictic
-data.
-- Large, real datasets typically requires a large ``-p`` and small ``-t``. Making ``-p``
-larger can improve performance when constructing GRGs, so even something as large
-as ``-p 400 -t 4`` can work well on biobank-scale dataset.
-- You can always construct a GRG for a small region of the genome to try to experimentally
-determine the best ``-p`` and ``-t`` values. See ``grg construct --range``. If you have A
-chromosome of length ``L`` (base-pairs) and theorize that ``-p P`` is a good value, then
-the region size to test is ``s = L/P``. You can use ``grg construct --range`` to create
-GRGs of size ``s``, ``s - delta`` and ``s + delta`` to see which is smallest and what
-the time-to-construct is. 
+The key parameter for GRG construction is ``-j``, how many cores/threads to use during construction.
+See ``grg construct --help`` for other parameters, though most users will not need them.
 
 Example for constructing a GRG from 1,000 Genomes chromosome 22:
 
 ::
 
-	grg construct -p 50 -j 20 -t 16 ALL.chr22.phase3_shapeit2_mvncall_integrated_v5a.20130502.genotypes.v3.igd
+	grg construct -j 6 ALL.chr22.phase3_shapeit2_mvncall_integrated_v5a.20130502.genotypes.v3.igd
+
+On a typical machine (e.g., my laptop) the above takes about 30 seconds. To give an example of a
+more large-scale dataset, constructing chromosome 22 of the phased UK Biobank dataset (200,000 individuals)
+takes about 12 minutes (using ``-j 70``).
+
+Construct GRG from indexed VCF
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If the VCF is BGZF compressed with a `Tabix <https://www.htslib.org/doc/tabix.html>`_ index,
+then GRG construction will be reasonably fast. For datasets with a small-to-medium number of
+samples (e.g., 10,000 or less) construction from indexed VCF is not much slower than from IGD.
+However, for really large sample sizes the GRG construction can be many times slower than from IGD.
+
+Example for constructing a GRG from 1,000 Genomes chromosome 22:
+
+::
+
+	grg construct -j 6 ALL.chr22.phase3_shapeit2_mvncall_integrated_v5a.20130502.genotypes.vcf.gz
 
 
-Another flag that can affect the resulting GRG size is ``--maf-flip``. By default, a GRG
-*implicitly* encodes the reference allele for each site and explicitly encodes
-each alternate allele as a :py:class:`pygrgl.Mutation` attached to a graph node. Each of these
-Mutation objects will list the reference allele. In contrast, a GRG built with 
-``--maf-flip`` will *change* the reference to be the major allele (the one with the
-highest frequency). This means the information about which allele was originally the
-reference is lost, but the graph is faster to construct and smaller in size (because the
-alleles that are explicitly represented as Mutations have fewer samples associated with
-them).
+Construct GRG from unindexed VCF
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-See ``grg construct --help`` for more options that affect GRG construction.
+THIS IS NOT RECOMMENDED! This functionality primarily exists for testing purposes, as building a GRG
+from an unindexed VCF will be absurdly slow for a large dataset. A GRG is constructed by partitioning
+a dataset along the chromosome/genome and performing many small graph constructions, which are then 
+merged into a single graph -- this cannot be done efficiently on unindexed VCF.
+
+For this case, you must specify the ``--force`` option to override warnings about the performance:
+
+::
+
+	grg construct -j 10 --force my_test.vcf
 
 
 Construct GRG via Python API
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+----------------------------
 
 A GRG can be constructed using arbitrary input data, by making use of the Python API.
 See the methods on :py:class:`pygrgl.MutableGRG` which can be used to create nodes and connect
-them, as well as merge two GRGs.
+them, as well as merge two or more GRGs.

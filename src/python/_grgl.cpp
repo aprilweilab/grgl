@@ -34,6 +34,7 @@
 namespace py = pybind11;
 
 #include <iostream>
+#include <sstream>
 
 template <typename T>
 inline py::array_t<T> dispatchDotProd(
@@ -48,13 +49,9 @@ inline py::array_t<T> dispatchDotProd(
 py::array dotProduct(grgl::GRGPtr& grg, py::handle input, grgl::TraversalDirection direction) {
     py::array arr = py::array::ensure(input, py::array::c_style | py::array::forcecast);
     py::buffer_info buffer = arr.request();
-    if (buffer.ndim != 1) {
-        throw grgl::ApiMisuseFailure("dot_product() only support one-dimensional numpy arrays as input.");
-    }
+    api_exc_check(buffer.ndim == 1, "dot_product() only support one-dimensional numpy arrays as input.");
     const size_t cols = buffer.shape.at(0);
-    if (cols == 0) {
-        throw grgl::ApiMisuseFailure("dot_product() requires non-empty array input.");
-    }
+    api_exc_check(cols != 0, "dot_product() requires non-empty array input.");
     const size_t outCols =
         (direction == grgl::TraversalDirection::DIRECTION_DOWN) ? grg->numSamples() : grg->numMutations();
     if (py::isinstance<py::array_t<double>>(input)) {
@@ -66,9 +63,7 @@ py::array dotProduct(grgl::GRGPtr& grg, py::handle input, grgl::TraversalDirecti
     } else if (py::isinstance<py::array_t<std::int32_t>>(input)) {
         return dispatchDotProd<int32_t>(grg, buffer, cols, outCols, direction);
     }
-    std::stringstream ssErr;
-    ssErr << "Unsupported numpy dtype: " << arr.dtype();
-    throw grgl::ApiMisuseFailure(ssErr.str().c_str());
+    api_exc_check(false, "Unsupported numpy dtype: " << arr.dtype());
 }
 
 template <typename IOType, typename NodeValueType, bool useBitVector>
@@ -80,7 +75,8 @@ inline py::array_t<IOType> dispatchMult(grgl::GRGPtr& grg,
                                         grgl::TraversalDirection direction,
                                         bool emitAllNodes,
                                         bool byIndividual,
-                                        py::handle init) {
+                                        py::handle init,
+                                        py::handle miss) {
     const size_t outSize = rows * outCols;
     py::array_t<IOType> result({rows, outCols});
     py::buffer_info resultBuf = result.request();
@@ -91,40 +87,46 @@ inline py::array_t<IOType> dispatchMult(grgl::GRGPtr& grg,
     if (py::isinstance<py::none>(init)) {
         ;
     } else if (py::isinstance<py::str>(init)) {
-        if (init.cast<std::string>() == "xtx") {
-            nodeInitMode = grgl::GRG::NIE_XTX;
-        } else {
-            std::stringstream ssErr;
-            ssErr << "Unexpected init value: " << init.cast<std::string>();
-            throw grgl::ApiMisuseFailure(ssErr.str().c_str());
-        }
+        const std::string& strval = init.cast<std::string>();
+        api_exc_check(strval == "xtx", "Unexpected init value: " << strval);
+        nodeInitMode = grgl::GRG::NIE_XTX;
     } else {
         py::array arr = py::array::ensure(init, py::array::c_style | py::array::forcecast);
-        if (py::isinstance<py::array_t<IOType>>(init)) {
-            initBuffer = arr.request();
-            if (initBuffer.ndim == 1) {
-                const size_t initRows = initBuffer.shape.at(0);
-                if (initRows != rows) {
-                    std::stringstream ssErr;
-                    ssErr << "If init has a single dimension, it must match the number of rows in the input matrix";
-                    throw grgl::ApiMisuseFailure(ssErr.str().c_str());
-                }
-                nodeInitMode = grgl::GRG::NIE_VECTOR;
-            }
-            if (initBuffer.ndim == 2) {
-                const size_t initRows = initBuffer.shape.at(0);
-                const size_t initCols = initBuffer.shape.at(1);
-                if (initRows != rows || initCols != grg->numNodes()) {
-                    std::stringstream ssErr;
-                    ssErr << "If init is a matrix, it must match the dimensions ROW x NODES";
-                    throw grgl::ApiMisuseFailure(ssErr.str().c_str());
-                }
-                nodeInitMode = grgl::GRG::NIE_MATRIX;
-            }
+        api_exc_check(py::isinstance<py::array_t<IOType>>(init),
+                      "The init matrix must match the dtype of the input matrix. Got: " << arr.dtype());
+        initBuffer = arr.request();
+        if (initBuffer.ndim == 1) {
+            const size_t initRows = initBuffer.shape.at(0);
+            api_exc_check(initRows == rows,
+                          "If init has a single dimension, it must match the number of rows in the input matrix");
+            nodeInitMode = grgl::GRG::NIE_VECTOR;
+        }
+        if (initBuffer.ndim == 2) {
+            const size_t initRows = initBuffer.shape.at(0);
+            const size_t initCols = initBuffer.shape.at(1);
+            api_exc_check(initRows == rows && initCols == grg->numNodes(),
+                          "If init is a matrix, it must match the dimensions ROW x NODES");
+            nodeInitMode = grgl::GRG::NIE_MATRIX;
+        }
+    }
+
+    py::buffer_info missBuffer;
+    if (!py::isinstance<py::none>(miss)) {
+        py::array arr = py::array::ensure(miss, py::array::c_style | py::array::forcecast);
+        api_exc_check(py::isinstance<py::array_t<IOType>>(miss),
+                      "The \"miss\" input must be a vector with dtype matching the input matrix. Got: " << arr.dtype());
+        missBuffer = arr.request();
+        api_exc_check(missBuffer.ndim == 1,
+                      "\"miss\" must be a single-dimension numpy array (vector). ndim=" << missBuffer.ndim);
+        const size_t missLength = missBuffer.shape.at(0);
+        if (direction == grgl::TraversalDirection::DIRECTION_DOWN) {
+            api_exc_check(
+                missLength == inCols,
+                "The \"miss\" input must have length matching the columns in the input matrix. Got: " << missLength);
         } else {
-            std::stringstream ssErr;
-            ssErr << "The init matrix must match the dtype of the input matrix. Got: " << arr.dtype();
-            throw grgl::ApiMisuseFailure(ssErr.str().c_str());
+            api_exc_check(
+                missLength == outCols,
+                "The \"miss\" input must have length matching the columns in the output matrix. Got: " << missLength);
         }
     }
 
@@ -137,7 +139,8 @@ inline py::array_t<IOType> dispatchMult(grgl::GRGPtr& grg,
                                                                    emitAllNodes,
                                                                    byIndividual,
                                                                    (const IOType*)initBuffer.ptr,
-                                                                   nodeInitMode);
+                                                                   nodeInitMode,
+                                                                   (IOType*)missBuffer.ptr);
     return std::move(result);
 }
 
@@ -146,17 +149,14 @@ py::array matMul(grgl::GRGPtr& grg,
                  grgl::TraversalDirection direction,
                  bool emitAllNodes = false,
                  bool byIndividual = false,
-                 py::handle init = nullptr) {
+                 py::handle init = nullptr,
+                 py::handle miss = nullptr) {
     py::array arr = py::array::ensure(input, py::array::c_style | py::array::forcecast);
     py::buffer_info buffer = arr.request();
-    if (buffer.ndim != 2) {
-        throw grgl::ApiMisuseFailure("matmul() only support two dimensional numpy arrays as input.");
-    }
+    api_exc_check(buffer.ndim == 2, "matmul() only support two dimensional numpy arrays as input.");
     const size_t rows = buffer.shape.at(0);
     const size_t cols = buffer.shape.at(1);
-    if (rows == 0 || cols == 0) {
-        throw grgl::ApiMisuseFailure("matmul() requires non-zero dimensions.");
-    }
+    api_exc_check(rows != 0 && cols != 0, "matmul() requires non-zero dimensions.");
     const size_t numSamples = byIndividual ? grg->numIndividuals() : grg->numSamples();
     const size_t outCols =
         (emitAllNodes ? grg->numNodes()
@@ -164,44 +164,40 @@ py::array matMul(grgl::GRGPtr& grg,
 
     if (py::isinstance<py::array_t<double>>(input)) {
         return dispatchMult<double, double, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init, miss);
     } else if (py::isinstance<py::array_t<float>>(input)) {
         return dispatchMult<float, float, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init, miss);
     } else if (py::isinstance<py::array_t<std::int64_t>>(input)) {
         return dispatchMult<int64_t, int64_t, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init, miss);
     } else if (py::isinstance<py::array_t<std::int32_t>>(input)) {
         return dispatchMult<int32_t, int32_t, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init, miss);
     } else if (py::isinstance<py::array_t<std::int16_t>>(input)) {
         return dispatchMult<int16_t, int16_t, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init, miss);
     } else if (py::isinstance<py::array_t<std::int8_t>>(input)) {
         return dispatchMult<int8_t, int8_t, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init, miss);
     } else if (py::isinstance<py::array_t<std::uint64_t>>(input)) {
         return dispatchMult<uint64_t, uint64_t, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init, miss);
     } else if (py::isinstance<py::array_t<std::uint32_t>>(input)) {
         return dispatchMult<uint32_t, uint32_t, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init, miss);
     } else if (py::isinstance<py::array_t<std::uint16_t>>(input)) {
         return dispatchMult<uint16_t, uint16_t, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init, miss);
     } else if (py::isinstance<py::array_t<std::uint8_t>>(input)) {
         return dispatchMult<uint8_t, uint8_t, false>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init, miss);
     } else if (py::isinstance<py::array_t<bool>>(input)) {
-        if (!py::isinstance<py::none>(init)) {
-            throw grgl::ApiMisuseFailure("init=... is not supported with boolean dtype");
-        }
+        api_exc_check(py::isinstance<py::none>(init), "init=... is not supported with boolean dtype");
         return dispatchMult<bool, uint8_t, true>(
-            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init);
+            grg, buffer, rows, cols, outCols, direction, emitAllNodes, byIndividual, init, miss);
     }
-    std::stringstream ssErr;
-    ssErr << "Unsupported numpy dtype: " << arr.dtype();
-    throw grgl::ApiMisuseFailure(ssErr.str().c_str());
+    api_exc_check(false, "Unsupported numpy dtype: " << arr.dtype());
 }
 
 class NodeNumberingIterator : public grgl::GRGVisitor {
@@ -264,7 +260,24 @@ std::pair<size_t, size_t> grgShape(const grgl::GRGPtr& grg) { return {grg->numIn
 
 std::pair<size_t, size_t> grgHapShape(const grgl::GRGPtr& grg) { return {grg->numSamples(), grg->numMutations()}; }
 
+using NodeMutMiss = std::tuple<grgl::NodeID, grgl::MutationId, grgl::NodeID>;
+using NodeMut = std::pair<grgl::NodeID, grgl::MutationId>;
+
 PYBIND11_MODULE(_grgl, m) {
+    py::class_<grgl::GRG::NodeAndMutIterator<NodeMutMiss>>(m, "GRG_NodeMutMissIterator")
+        .def(
+            "__iter__",
+            [](const grgl::GRG::NodeAndMutIterator<NodeMutMiss>& it) {
+                return py::make_iterator(it.begin(), it.end());
+            },
+            py::keep_alive<0, 1>() /* Essential: keep object alive while iterator exists */);
+
+    py::class_<grgl::GRG::NodeAndMutIterator<NodeMut>>(m, "GRG_NodeMutIterator")
+        .def(
+            "__iter__",
+            [](const grgl::GRG::NodeAndMutIterator<NodeMut>& it) { return py::make_iterator(it.begin(), it.end()); },
+            py::keep_alive<0, 1>() /* Essential: keep object alive while iterator exists */);
+
     py::class_<grgl::Mutation>(m, "Mutation")
         .def(py::init<double, std::string, const std::string&, double>(),
              py::arg("position"),
@@ -416,7 +429,7 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: The list of NodeIDs that are root nodes.
                 :rtype: List[int]
             )^")
-        .def("get_node_mutation_pairs", &grgl::GRG::getNodeMutationPairs, R"^(
+        .def("get_node_mutation_pairs", &grgl::GRG::getNodesAndMutations<grgl::GRG::NodeAndMut>, R"^(
                 Get a list of pairs (NodeID, MutationID). Each Mutation typically
                 is associated to a single Node, but rarely it can have more than one
                 Node, in which case it will show up in more than one pair.
@@ -425,7 +438,7 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: A list of pairs of NodeID and MutationID.
                 :rtype: List[Tuple[int, int]]
             )^")
-        .def("get_mutation_node_pairs", &grgl::GRG::getMutationsToNodeOrdered, R"^(
+        .def("get_mutation_node_pairs", &grgl::GRG::getMutationsToNodeOrdered<grgl::GRG::MutAndNode>, R"^(
                 Get a list of pairs (MutationID, NodeID). Each Mutation typically
                 is associated to a single Node, but rarely it can have more than one
                 Node, in which case it will show up in more than one pair.
@@ -434,13 +447,43 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: A list of pairs of MutationID and NodeID.
                 :rtype: List[Tuple[int, int]]
             )^")
-        .def("get_mutations_for_node", &grgl::GRG::getMutationsForNode, py::arg("node_id"), R"^(
+        .def("get_node_mutation_miss", &grgl::GRG::getNodesAndMutations<grgl::GRG::NodeMutMiss>, R"^(
+                Get a list of triples (NodeID, MutationID, "missingness" NodeID). Each 
+                Mutation typically is associated to a single Node, but rarely it can 
+                have more than one Node, in which case it will show up in more than one row.
+                Results are ordered by NodeID, ascending.
+
+                :return: A list of tuples of (NodeID, MutationID, "missingness" NodeID).
+                :rtype: List[Tuple[int, int, int]]
+            )^")
+        .def("get_mutation_node_miss", &grgl::GRG::getMutationsToNodeOrdered<grgl::GRG::MutAndNode>, R"^(
+                Get a list of triples (MutationID, NodeID, "missingness" NodeID). Each
+                Mutation typically is associated to a single Node, but rarely it can have
+                more than one Node, in which case it will show up in more than one row.
+                Results are ordered by MutationID, ascending.
+
+                :return: A list of tuples of (MutationID, NodeID, "missingness" NodeID).
+                :rtype: List[Tuple[int, int, int]]
+            )^")
+        .def("get_mutations_for_node", &grgl::GRG::getMutationsForNode<grgl::MutationId>, py::arg("node_id"), R"^(
                 Get all the (zero or more) Mutations associated with the given NodeID.
 
                 :param node_id: The NodeID to get mutations for.
                 :type node_id: int
                 :return: A list of MutationIDs.
                 :rtype: List[int]
+            )^")
+        .def("get_muts_and_miss_for_node",
+             &grgl::GRG::getMutationsForNode<std::pair<grgl::MutationId, grgl::NodeID>>,
+             py::arg("node_id"),
+             R"^(
+                Get all the (zero or more) Mutations associated with the given NodeID, and for
+                each Mutation the associated missingness node.
+
+                :param node_id: The NodeID to get mutations for.
+                :type node_id: int
+                :return: A list of pairs, (MutationID, NodeID) where the NodeID is for the missingness node.
+                :rtype: List[Tuple[int, int]]
             )^")
         .def("get_mutation_by_id", &grgl::GRG::getMutationById, py::arg("mut_id"), R"^(
                 Get the Mutation associated with the given MutationID.
@@ -484,7 +527,12 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: The population descriptions.
                 :rtype: List[str]
             )^")
-        .def("add_mutation", &grgl::GRG::addMutation, py::arg("mutation"), py::arg("node_id"), R"^(
+        .def("add_mutation",
+             &grgl::GRG::addMutation,
+             py::arg("mutation"),
+             py::arg("node_id"),
+             py::arg("miss_node_id") = grgl::INVALID_NODE_ID,
+             R"^(
                 Add a new Mutation to the GRG, and associate it with the given NodeID.
 
                 :param mutation: The Mutation object.
@@ -648,7 +696,7 @@ PYBIND11_MODULE(_grgl, m) {
             :type use_sample_sets: bool
         )^");
 
-    m.def("load_mutable_grg", &grgl::loadMutableGRG, py::arg("filename"), R"^(
+    m.def("load_mutable_grg", &grgl::loadMutableGRG, py::arg("filename"), py::arg("load_up_edges") = true, R"^(
         Load a GRG file from disk. Mutable GRGs can have nodes and edges added/removed
         from them.
 
@@ -843,6 +891,7 @@ PYBIND11_MODULE(_grgl, m) {
           py::arg("emit_all_nodes") = false,
           py::arg("by_individual") = false,
           py::arg("init") = nullptr,
+          py::arg("miss") = nullptr,
           R"^(
         Compute one of two possible matrix multiplications across the entire
         graph. The input matrix :math:`V` can be either :math:`K \times N` (:math:`N`
@@ -893,6 +942,17 @@ PYBIND11_MODULE(_grgl, m) {
             3. A two dimensional numpy array (matrix) of size KxT, where T is the total number of nodes in the
             graph (grg.num_nodes). This fully specifies every node value for the entire matrix operation.
         :type init: Union[str, numpy.array]
+        :param miss: Optional. This is an _input_ when the direction is DOWN and an _output_ when the direction
+            is up. In both cases (input or output), it is a vector (single dimensional numpy.array) of length
+            num_mutations. Each value miss[i] in the vector is the "missing data quantity" associated with the
+            mutation having MutationID "i". There exists a missingness node in the graph representing the 
+            sample set with missing data for each site `s`. When "miss" is an input then the missingness node
+            is initialized by adding to it the value miss[i] for each mutation "i" that corresponds to site "s".
+            When "miss" is an output, miss[i] gets set to the sum of all values at the missingness node; i.e.,
+            if the input matrix is a vector (:math:`1xN` matrix) then miss[i] will be exactly the value of the
+            missingness node. If there is more than one input row, miss[i] will be the sum of the missingness
+            node's values for all rows.
+        :type miss: numpy.array
         :return: The numpy 2-dimensional array of output values.
         :rtype: numpy.array
     )^");

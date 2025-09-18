@@ -18,6 +18,7 @@
 
 #include "grgl/common.h"
 #include "grgl/grgnode.h"
+#include "grgl/mutation.h"
 #include "picovcf.hpp"
 #include "util.h"
 
@@ -135,18 +136,26 @@ bool MutationIterator::next(MutationAndSamples& mutAndSamples, size_t& totalSamp
 
 VCFMutationIterator::VCFMutationIterator(const char* filename, FloatRange genomeRange, MutationIteratorFlags flags)
     : MutationIterator(genomeRange, flags),
-      m_vcf(new picovcf::VCFFile(filename)) {
+      m_vcf(new picovcf::VCFFile(filename, PVCF_VCFFILE_CONTIG_REQUIRE_ONE)) {
+    if (!m_vcf->isUsingIndex()) {
+        const char* errMsg = "WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.";
+        std::cerr << errMsg << std::endl;
+        if (!(bool)(flags & MIT_FLAG_FORCE)) {
+            throw ApiMisuseFailure(errMsg);
+        }
+    }
     // If we got a normalized range, we have to denormalize it before use.
     if (genomeRange.isNormalized()) {
         if (useVariantRange()) {
-            m_genomeRange = genomeRange.denormalized(0, m_vcf->numVariants());
-        } else {
-            const auto vcfGenomeRange = m_vcf->getGenomeRange();
-            m_genomeRange = genomeRange.denormalized(vcfGenomeRange.first, vcfGenomeRange.second);
+            const char* errMsg = "ERROR: Using variant ranges with VCF files is not supported.";
+            std::cerr << errMsg << std::endl;
+            throw ApiMisuseFailure(errMsg);
         }
+        const auto vcfGenomeRange = m_vcf->getGenomeRange();
+        m_genomeRange = genomeRange.denormalized(vcfGenomeRange.first, vcfGenomeRange.second);
     }
-    // Scan to the first variant.
-    m_vcf->seekBeforeVariants();
+    // Tell it to scan to the first variant.
+    m_needsReset = true;
 }
 
 void VCFMutationIterator::getMetadata(size_t& ploidy, size_t& numIndividuals, bool& isPhased) {
@@ -157,38 +166,30 @@ void VCFMutationIterator::getMetadata(size_t& ploidy, size_t& numIndividuals, bo
     m_vcf->seekBeforeVariants();
     // We only look at the first individual of the first variant, because subsequent code in
     // this iterator ensures that we have consistent ploidy and phasedness for all data.
-    if (m_vcf->hasNextVariant()) {
-        m_vcf->nextVariant();
-        const picovcf::VCFVariantView& variant = m_vcf->currentVariant();
-        if (variant.hasGenotypeData()) {
-            picovcf::IndividualIteratorGT individuals = variant.getIndividualIterator();
-            if (individuals.hasNext()) {
-                picovcf::VariantT sample1Allele = 0;
-                picovcf::VariantT sample2Allele = 0;
-                isPhased = individuals.getAlleles(sample1Allele, sample2Allele);
-                if (sample2Allele == picovcf::NOT_DIPLOID) {
-                    ploidy = 1;
-                } else {
-                    ploidy = 2;
-                }
-            }
-        }
+    if (m_vcf->nextVariant()) {
+        picovcf::VCFVariantView& variant = m_vcf->currentVariant();
+        api_exc_check(variant.hasGenotypeData(), "No GT data in VCF file");
+        variant.getGenotypeArray();
+        ploidy = variant.getMaxPloidy();
+        api_exc_check(variant.getPhasedness() != picovcf::PVCFP_MIXED, "Mixed phased VCF files not supported");
+        isPhased = (variant.getPhasedness() == picovcf::PVCFP_PHASED);
     }
     m_vcf->setFilePosition(originalPosition);
 }
 
 size_t VCFMutationIterator::countMutations() const {
-    size_t variantIndex = 0;
     size_t mutations = 0;
     const auto originalPosition = m_vcf->getFilePosition();
-    m_vcf->seekBeforeVariants();
-    while (m_vcf->hasNextVariant()) {
-        m_vcf->nextVariant();
-        const picovcf::VCFVariantView& variant = m_vcf->currentVariant();
-        if (inRange(variantIndex, variant.getPosition())) {
+    release_assert(!useVariantRange());
+    bool alreadyHave = m_vcf->lowerBoundPosition(m_genomeRange.start());
+    while (alreadyHave || m_vcf->nextVariant()) {
+        alreadyHave = false;
+        picovcf::VCFVariantView& variant = m_vcf->currentVariant();
+        if (m_genomeRange.contains(variant.getPosition())) {
             mutations += variant.getAltAlleles().size();
+        } else {
+            break;
         }
-        variantIndex++;
     }
     m_vcf->setFilePosition(originalPosition);
     return mutations;
@@ -200,45 +201,49 @@ std::vector<std::string> VCFMutationIterator::getIndividualIds() { return m_vcf-
 
 void VCFMutationIterator::buffer_next(size_t& totalSamples) {
     bool foundMutations = false;
-    while (!foundMutations && m_vcf->hasNextVariant() && m_alreadyLoaded.empty()) {
-        m_vcf->nextVariant();
-        const picovcf::VCFVariantView& variant = m_vcf->currentVariant();
-        if (!inRange(m_currentVariant, variant.getPosition())) {
-            m_currentVariant++;
-            continue;
+    bool alreadyHave = false;
+    if (m_needsReset) {
+        alreadyHave = m_vcf->lowerBoundPosition(m_genomeRange.start());
+        m_needsReset = false;
+    }
+    while (!foundMutations && m_alreadyLoaded.empty() && (alreadyHave || m_vcf->nextVariant())) {
+        alreadyHave = false;
+        picovcf::VCFVariantView& variant = m_vcf->currentVariant();
+        const size_t position = variant.getPosition();
+        if (!m_genomeRange.contains(position)) {
+            break;
         }
         const std::string& refAllele = variant.getRefAllele();
         const std::vector<std::string> altAlleles = variant.getAltAlleles();
         std::vector<NodeIDList> altAlleleToSamples(altAlleles.size());
         NodeIDList missingSamples;
 
-        // Collect the map from alternative allele index to sample sets.
-        picovcf::IndividualIteratorGT individuals = variant.getIndividualIterator();
-        NodeID sampleId = 0;
-        while (individuals.hasNext()) {
-            picovcf::VariantT sample1Allele = 0;
-            picovcf::VariantT sample2Allele = 0;
-            individuals.getAlleles(sample1Allele, sample2Allele);
-            if (sample1Allele != 0) {
-                if (sample1Allele != picovcf::MISSING_VALUE) {
-                    altAlleleToSamples.at(sample1Allele - 1).push_back(sampleId);
-                } else if (emitMissingData()) {
+        const std::vector<picovcf::AlleleT> gtArray = variant.getGenotypeArray();
+        const size_t variantPloidy = variant.getMaxPloidy();
+        if (m_ploidy == 0) {
+            m_ploidy = variantPloidy;
+        } else if (variantPloidy != m_ploidy) {
+            throw ApiMisuseFailure("VCF files with different ploidy values is not supported");
+        }
+        for (size_t sampleId = 0; sampleId < gtArray.size(); sampleId++) {
+            const picovcf::AlleleT& allele = gtArray[sampleId];
+            switch (allele) {
+            case picovcf::MIXED_PLOIDY:
+                throw ApiMisuseFailure("VCF files with different ploidy values is not supported");
+                break;
+            case picovcf::MISSING_VALUE:
+                if (emitMissingData()) {
                     missingSamples.push_back(sampleId);
                 }
-            }
-            sampleId++;
-            if (sample2Allele != picovcf::NOT_DIPLOID) {
-                if (sample2Allele != 0) {
-                    if (sample2Allele != picovcf::MISSING_VALUE) {
-                        altAlleleToSamples.at(sample2Allele - 1).push_back(sampleId);
-                    } else if (emitMissingData()) {
-                        missingSamples.push_back(sampleId);
-                    }
+                break;
+            default:
+                if (allele > 0) {
+                    altAlleleToSamples.at(allele - 1).push_back(sampleId);
                 }
-                sampleId++;
+                break;
             }
         }
-        totalSamples = sampleId;
+        totalSamples = m_vcf->numIndividuals() / variantPloidy;
 
         // Convert the above information into (Mutation, NodeIDSet) pairs.
         for (size_t altAllele = 0; altAllele < altAlleleToSamples.size(); altAllele++) {
@@ -247,24 +252,21 @@ void VCFMutationIterator::buffer_next(size_t& totalSamples) {
                     m_alreadyLoaded.back().samples.push_back(sampleId);
                 }
             } else {
-                m_alreadyLoaded.push_back({Mutation(variant.getPosition(),
-                                                    binaryMutations() ? Mutation::ALLELE_1 : altAlleles.at(altAllele),
-                                                    refAllele),
-                                           std::move(altAlleleToSamples[altAllele])});
+                m_alreadyLoaded.push_back(
+                    {Mutation(position, binaryMutations() ? Mutation::ALLELE_1 : altAlleles.at(altAllele), refAllele),
+                     std::move(altAlleleToSamples[altAllele])});
             }
         }
+
+        // If we have missing data, always emit it first (m_alreadyLoaded is a stack, so the end will emit first).
         if (emitMissingData() && !missingSamples.empty()) {
             m_alreadyLoaded.push_back(
-                {Mutation(variant.getPosition(), Mutation::ALLELE_MISSING, refAllele), std::move(missingSamples)});
+                {Mutation(position, Mutation::ALLELE_MISSING, refAllele), std::move(missingSamples)});
         }
-        m_currentVariant++;
     }
 }
 
-void VCFMutationIterator::reset_specific() {
-    m_vcf->seekBeforeVariants();
-    m_currentVariant = 0;
-}
+void VCFMutationIterator::reset_specific() { m_needsReset = true; }
 
 IGDMutationIterator::IGDMutationIterator(const char* filename, FloatRange genomeRange, MutationIteratorFlags flags)
     : MutationIterator(genomeRange, flags),
@@ -309,7 +311,7 @@ size_t IGDMutationIterator::countMutations() const {
     }
     size_t mutations = 0;
     for (size_t i = m_startVariant; i < m_igd->numVariants(); i++) {
-        if (m_genomeRange.contains((double)m_igd->getPosition(i))) {
+        if (m_genomeRange.contains(m_igd->getPosition(i))) {
             mutations++;
         } else {
             break;
@@ -322,6 +324,10 @@ size_t IGDMutationIterator::totalFileVariants() const { return m_igd->numVariant
 
 std::vector<std::string> IGDMutationIterator::getIndividualIds() { return std::move(m_igd->getIndividualIds()); }
 
+// Template for mutations that represent missing data.
+using AllelePair = std::pair<std::string, std::string>;
+static const AllelePair AP_FOR_MISSING = {Mutation::ALLELE_MISSING, Mutation::ALLELE_MISSING};
+
 void IGDMutationIterator::buffer_next(size_t& totalSamples) {
     static std::random_device randDevice;
     static std::mt19937 generator(randDevice());
@@ -330,7 +336,6 @@ void IGDMutationIterator::buffer_next(size_t& totalSamples) {
     release_assert(m_currentVariant >= m_startVariant);
     totalSamples = m_igd->numSamples();
 
-    using AllelePair = std::pair<std::string, std::string>;
     std::unordered_map<AllelePair, size_t> seenMap;
     // If we have an alt allele with > 50% occurrence, make it the new reference allele.
     while (m_currentVariant < m_igd->numVariants() && m_alreadyLoaded.empty()) {
@@ -338,23 +343,37 @@ void IGDMutationIterator::buffer_next(size_t& totalSamples) {
         bool isMissingDataRow = false;
         const size_t position = m_igd->getPosition(m_currentVariant, isMissingDataRow, numCopies);
         if (inRange(m_currentVariant, position)) {
+            NodeIDList missingSamples;
             while (m_currentVariant < m_igd->numVariants() &&
                    position == m_igd->getPosition(m_currentVariant, isMissingDataRow, numCopies)) {
-                if (!isMissingDataRow || emitMissingData()) {
-                    AllelePair alleles;
-                    alleles.first = m_igd->getRefAllele(m_currentVariant);
-                    alleles.second =
-                        isMissingDataRow ? Mutation::ALLELE_MISSING : m_igd->getAltAllele(m_currentVariant);
+                if (isMissingDataRow) {
+                    if (emitMissingData()) {
+                        const bool needsSort = !missingSamples.empty();
+                        auto sampleSet = m_igd->getSamplesWithAlt(m_currentVariant);
+                        for (auto sampleId : sampleSet) {
+                            if (numCopies >= 1) {
+                                const size_t firstCopy = sampleId * m_igd->getPloidy();
+                                for (size_t j = 0; j < numCopies; j++) {
+                                    missingSamples.push_back(firstCopy + j);
+                                }
+                            } else {
+                                missingSamples.push_back(sampleId);
+                            }
+                        }
+                        if (needsSort) {
+                            std::sort(missingSamples.begin(), missingSamples.end());
+                        }
+                    }
+                } else {
+                    AllelePair alleles = {m_igd->getRefAllele(m_currentVariant), m_igd->getAltAllele(m_currentVariant)};
 
                     // We collection sample sets by alleles
                     bool needsSort = false;
                     size_t loadedIndex = std::numeric_limits<size_t>::max();
-                    if (numCopies >= 1) {
-                        auto findIt = seenMap.find(alleles);
-                        if (findIt != seenMap.end()) {
-                            loadedIndex = findIt->second;
-                            needsSort = true;
-                        }
+                    auto findIt = seenMap.find(alleles);
+                    if (findIt != seenMap.end()) {
+                        loadedIndex = findIt->second;
+                        needsSort = !m_alreadyLoaded[loadedIndex].samples.empty();
                     }
                     if (loadedIndex > m_alreadyLoaded.size()) {
                         loadedIndex = m_alreadyLoaded.size();
@@ -379,6 +398,11 @@ void IGDMutationIterator::buffer_next(size_t& totalSamples) {
                     }
                 }
                 m_currentVariant++;
+            }
+            // If we have missing data, always emit it first (m_alreadyLoaded is a stack, so the end will emit first).
+            if (!missingSamples.empty()) {
+                Mutation mutForMissing = {Mutation(position, Mutation::ALLELE_MISSING, Mutation::ALLELE_MISSING)};
+                m_alreadyLoaded.push_back({std::move(mutForMissing), std::move(missingSamples)});
             }
         } else {
             m_currentVariant++;
@@ -596,10 +620,13 @@ void BGENMutationIterator::buffer_next(size_t& totalSamples) {
                      std::move(alleleToSamples[i])});
             }
         }
+
+        // If we have missing data, always emit it first (m_alreadyLoaded is a stack, so the end will emit first).
         if (emitMissingData() && !missingSamples.empty()) {
             m_alreadyLoaded.push_back(
                 {Mutation(variant->position, Mutation::ALLELE_MISSING, refAllele), std::move(missingSamples)});
         }
+
         m_currentVariant++;
     }
 }

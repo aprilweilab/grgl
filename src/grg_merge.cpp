@@ -16,6 +16,7 @@
  */
 #include "common_visitors.h"
 #include "grg_helpers.h"
+#include "grgl/common.h"
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
@@ -126,9 +127,9 @@ public:
 
     void processNode(const GRGPtr& grg, const HashDigest& digest, const NodeID nodeId) override {
         if (grg->isSample(nodeId)) {
-            for (const auto mutId : grg->getMutationsForNode(nodeId)) {
-                const auto& mutation = grg->getMutationById(mutId);
-                m_targetGrg.addMutation(mutation, nodeId);
+            for (const auto mutAndMiss : grg->getMutationsForNode<GRG::MutAndNode>(nodeId)) {
+                const auto& mutation = grg->getMutationById(mutAndMiss.first);
+                m_targetGrg.addMutation(mutation, nodeId, mutAndMiss.second);
             }
             m_mappedExactly++;
             return;
@@ -138,9 +139,9 @@ public:
         if (m_combineNodes && mappedNodeIt != m_targetHashToNodeId.end()) {
             const auto targetNodeId = mappedNodeIt->second;
             // Copy all the mutations for this node to the target one.
-            for (const auto mutId : grg->getMutationsForNode(nodeId)) {
-                const auto& mutation = grg->getMutationById(mutId);
-                m_targetGrg.addMutation(mutation, targetNodeId);
+            for (const auto mutAndMiss : grg->getMutationsForNode<GRG::MutAndNode>(nodeId)) {
+                const auto& mutation = grg->getMutationById(mutAndMiss.first);
+                m_targetGrg.addMutation(mutation, targetNodeId, mutAndMiss.second);
             }
             release_assert(nodeId < m_nodeIdToTargetNodeId.size());
             m_nodeIdToTargetNodeId[nodeId] = targetNodeId;
@@ -169,24 +170,24 @@ public:
             }
 
             // Copy all the mutations for this node to the target one.
-            for (const auto mutId : grg->getMutationsForNode(nodeId)) {
-                const auto& mutation = grg->getMutationById(mutId);
-                m_targetGrg.addMutation(mutation, targetNodeId);
+            for (const auto mutAndMiss : grg->getMutationsForNode<GRG::MutAndNode>(nodeId)) {
+                const auto& mutation = grg->getMutationById(mutAndMiss.first);
+                m_targetGrg.addMutation(mutation, targetNodeId, mutAndMiss.second);
             }
         }
     }
 
     size_t m_mappedExactly{};
+    std::vector<NodeID> m_nodeIdToTargetNodeId;
 
 private:
     MutableGRG& m_targetGrg;
-    std::vector<NodeID> m_nodeIdToTargetNodeId;
     DigestToNode& m_targetHashToNodeId;
     bool m_combineNodes;
 };
 
 /**
- * Option 2: Maps nodes using unique hashes based on the set immediate children beneath the node.
+ * Option 2: Maps nodes using unique hashes based on the set of immediate children beneath the node.
  * This is RAM/CPU efficient, maintains more hierachy, but produces 5-8% larger graphs.
  */
 class NodeMapperVisitor : public GRGVisitor {
@@ -227,15 +228,15 @@ public:
         } else {
             return true;
         }
-        // Previousl we merged based on covered samples, now we merge based on (immediate) children nodes.
+        // Previously we merged based on covered samples, now we merge based on (immediate) children nodes.
         // The difference is that we previously merged more nodes, but now we maintain more hierarchy. In
         //
         // There may be post-processing steps we can do later to "cleanup" duplication that involves hierarchy
         // under one node, and no hierarchy under the other, but both cover the same sample set.
         if (grg->isSample(nodeId)) {
-            for (const auto mutId : grg->getMutationsForNode(nodeId)) {
-                const auto& mutation = grg->getMutationById(mutId);
-                m_targetGrg.addMutation(mutation, nodeId);
+            for (const auto mutAndMiss : grg->getMutationsForNode<GRG::MutAndNode>(nodeId)) {
+                const auto& mutation = grg->getMutationById(mutAndMiss.first);
+                m_targetGrg.addMutation(mutation, nodeId, mutAndMiss.second);
             }
             m_nodeIdToTargetNodeId[nodeId] = nodeId;
             m_mappedExactly++;
@@ -253,9 +254,9 @@ public:
         if (m_combineNodes && mappedNodeIt != m_targetHashToNodeId.end()) {
             const auto targetNodeId = mappedNodeIt->second;
             // Copy all the mutations for this node to the target one.
-            for (const auto mutId : grg->getMutationsForNode(nodeId)) {
-                const auto& mutation = grg->getMutationById(mutId);
-                m_targetGrg.addMutation(mutation, targetNodeId);
+            for (const auto mutAndMiss : grg->getMutationsForNode<GRG::MutAndNode>(nodeId)) {
+                const auto& mutation = grg->getMutationById(mutAndMiss.first);
+                m_targetGrg.addMutation(mutation, targetNodeId, mutAndMiss.second);
             }
             release_assert(nodeId < m_nodeIdToTargetNodeId.size());
             m_nodeIdToTargetNodeId[nodeId] = targetNodeId;
@@ -277,19 +278,19 @@ public:
             }
 
             // Copy all the mutations for this node to the target one.
-            for (const auto mutId : grg->getMutationsForNode(nodeId)) {
-                const auto& mutation = grg->getMutationById(mutId);
-                m_targetGrg.addMutation(mutation, targetNodeId);
+            for (const auto mutAndMiss : grg->getMutationsForNode<GRG::MutAndNode>(nodeId)) {
+                const auto& mutation = grg->getMutationById(mutAndMiss.first);
+                m_targetGrg.addMutation(mutation, targetNodeId, mutAndMiss.second);
             }
         }
         return true;
     }
 
     size_t m_mappedExactly{};
+    std::vector<NodeID> m_nodeIdToTargetNodeId;
 
 private:
     MutableGRG& m_targetGrg;
-    std::vector<NodeID> m_nodeIdToTargetNodeId;
     DigestToNode& m_targetHashToNodeId;
     bool m_combineNodes;
 };
@@ -304,8 +305,9 @@ void mergeHelper(MutableGRG& grg, const std::list<std::string>& otherGrgFiles, b
     }
     DigestToNode& hashToNodeId = hashVisitor.m_hashToNodeId;
 
+    size_t seenMutations = grg.numMutations();
     for (const auto& otherGrgFile : otherGrgFiles) {
-        const auto otherGrg = loadImmutableGRG(otherGrgFile);
+        const auto otherGrg = loadImmutableGRG(otherGrgFile, /*loadUpEdges=*/false);
         if (!otherGrg) {
             std::stringstream err;
             err << "Could not load GRG from " << otherGrgFile;
@@ -316,17 +318,25 @@ void mergeHelper(MutableGRG& grg, const std::list<std::string>& otherGrgFiles, b
             err << "Sample count mismatch: " << grg.numSamples() << " vs. " << otherGrg->numSamples();
             throw ApiMisuseFailure(err.str().c_str());
         }
+        seenMutations += otherGrg->numMutations();
+
+        // We need to adjust these mutations (their missingness nodes) after we map them into the target.
+        const size_t adjustMutsAfter = grg.numMutations();
+
         // Do the actual node mapping and copy relevant nodes/mutations/edges to the target GRG.
-        NodeMapperVisitor mapperVisitor(otherGrg, grg, hashToNodeId, combineNodes);
+        Mapper mapperVisitor(otherGrg, grg, hashToNodeId, combineNodes);
         fastCompleteDFS(otherGrg, mapperVisitor);
         if (verbose) {
             std::cout << "Mapped exactly: " << mapperVisitor.m_mappedExactly << std::endl;
         }
         // Copy any left-over mutations that were not associated with nodes
-        for (const auto mutId : otherGrg->getUnmappedMutations()) {
-            const auto& mutation = otherGrg->getMutationById(mutId);
-            grg.addMutation(mutation, INVALID_NODE_ID);
+        for (const auto mutAndMiss : otherGrg->getUnmappedMutations<GRG::MutAndNode>()) {
+            const auto& mutation = otherGrg->getMutationById(mutAndMiss.first);
+            grg.addMutation(mutation, INVALID_NODE_ID, mutAndMiss.second);
         }
+        // Adjust all the missingness node ID's to use the new mapping.
+        grg.adjustMissingnessNodeIds(adjustMutsAfter, mapperVisitor.m_nodeIdToTargetNodeId);
+
         // The range has to be contiguous, even if there is a "gap" between the two merged GRGs.
         const auto& otherRange = otherGrg->getSpecifiedBPRange();
         auto myRange = grg.getSpecifiedBPRange();
@@ -338,6 +348,7 @@ void mergeHelper(MutableGRG& grg, const std::list<std::string>& otherGrgFiles, b
         }
         grg.setSpecifiedBPRange(myRange);
     }
+    release_assert(grg.numMutations() == seenMutations);
 }
 
 void MutableGRG::merge(const std::list<std::string>& otherGrgFiles,

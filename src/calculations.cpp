@@ -75,10 +75,10 @@ public:
     std::vector<grgl::NodeIDSizeT> m_samplesBeneath;
 };
 
-void emitAlleleFrequency(grgl::GRGPtr& grg,
-                         std::ostream& outStream,
-                         std::pair<uint32_t, uint32_t> bpRange,
-                         const grgl::NodeIDList& onlySamples) {
+void emitAlleleCounts(grgl::GRGPtr& grg,
+                      std::ostream& outStream,
+                      std::pair<uint32_t, uint32_t> bpRange,
+                      const grgl::NodeIDList& onlySamples) {
     static constexpr char SEP = '\t';
     AlleleFreqVisitor visitorForDfs;
     if (bpRange.first == bpRange.second && onlySamples.empty()) {
@@ -90,11 +90,16 @@ void emitAlleleFrequency(grgl::GRGPtr& grg,
         grg->visitTopo(visitorForDfs, grgl::TraversalDirection::DIRECTION_UP, onlySamples);
     } else {
         grgl::NodeIDList seeds;
-        for (const auto& pair : grg->getNodeMutationPairs()) {
-            const grgl::Mutation& mut = grg->getMutationById(pair.second);
-            if (mut.getPosition() >= bpRange.first && mut.getPosition() < bpRange.second &&
-                pair.first != INVALID_NODE_ID) {
-                seeds.push_back(pair.first);
+        for (const auto& tuple : grg->getNodesAndMutations<GRG::NodeMutMiss>()) {
+            const NodeID& node = std::get<0>(tuple);
+            const MutationId& mutId = std::get<1>(tuple);
+            const grgl::Mutation& mut = grg->getMutationById(mutId);
+            if (mut.getPosition() >= bpRange.first && mut.getPosition() < bpRange.second && node != INVALID_NODE_ID) {
+                seeds.push_back(node);
+                const NodeID& missingnessNode = std::get<2>(tuple);
+                if (missingnessNode != INVALID_NODE_ID) {
+                    seeds.push_back(missingnessNode);
+                }
             }
         }
         if (seeds.empty()) {
@@ -103,12 +108,14 @@ void emitAlleleFrequency(grgl::GRGPtr& grg,
         }
         grg->visitDfs(visitorForDfs, grgl::TraversalDirection::DIRECTION_DOWN, seeds);
     }
-    const auto& mutIdAndNodes = grg->getMutationsToNodeOrdered();
-    outStream << "POSITION" << SEP << "REF" << SEP << "ALT" << SEP << "ALT COUNT" << SEP << "TOTAL" << std::endl;
+    const auto& mutsNodesMisses = grg->getMutationsToNodeOrdered<GRG::MutNodeMiss>();
+    outStream << "POSITION" << SEP << "REF" << SEP << "ALT" << SEP << "ALT COUNT" << SEP << "MISS COUNT" << SEP
+              << "TOTAL" << std::endl;
     size_t i = 0;
-    while (i < mutIdAndNodes.size()) {
+    while (i < mutsNodesMisses.size()) {
+        size_t samplesMissing = 0;
         size_t samplesWithMut = 0;
-        const grgl::MutationId mutId = mutIdAndNodes[i].first;
+        const grgl::MutationId& mutId = std::get<0>(mutsNodesMisses[i]);
         const grgl::Mutation* mut = &grg->getMutationById(mutId);
         const grgl::BpPosition position = mut->getPosition();
         const std::string& ref = mut->getRefAllele();
@@ -119,19 +126,23 @@ void emitAlleleFrequency(grgl::GRGPtr& grg,
         }
         // Accumulate values for all Mutations capturing the same (position, alleles) values.
         do {
-            const grgl::NodeID& nodeId = mutIdAndNodes[i].second;
+            const grgl::NodeID& nodeId = std::get<1>(mutsNodesMisses[i]);
             if (nodeId != INVALID_NODE_ID) {
                 samplesWithMut += visitorForDfs.m_samplesBeneath[nodeId];
             }
+            const grgl::NodeID& missingnessNode = std::get<2>(mutsNodesMisses[i]);
+            if (missingnessNode != INVALID_NODE_ID) {
+                samplesMissing += visitorForDfs.m_samplesBeneath[missingnessNode];
+            }
             i++;
-            if (i < mutIdAndNodes.size()) {
-                const grgl::MutationId& nextMutId = mutIdAndNodes[i].first;
+            if (i < mutsNodesMisses.size()) {
+                const grgl::MutationId& nextMutId = std::get<0>(mutsNodesMisses[i]);
                 mut = &grg->getMutationById(nextMutId);
             }
-        } while (i < mutIdAndNodes.size() && position == mut->getPosition() && ref == mut->getRefAllele() &&
+        } while (i < mutsNodesMisses.size() && position == mut->getPosition() && ref == mut->getRefAllele() &&
                  alt == mut->getAllele());
-        outStream << position << SEP << ref << SEP << alt << SEP << samplesWithMut << SEP << grg->numSamples()
-                  << std::endl;
+        outStream << position << SEP << ref << SEP << alt << SEP << samplesWithMut << SEP << samplesMissing << SEP
+                  << grg->numSamples() << std::endl;
     }
 }
 
@@ -196,46 +207,53 @@ void emitZygosityInfo(grgl::GRGPtr& grg,
     ZygosityInfoVisitor visitorForDfs;
     fastCompleteDFS(grg, visitorForDfs);
     std::map<grgl::Mutation, std::pair<grgl::NodeIDSizeT, grgl::NodeIDSizeT>> counts;
-    for (const auto& pair : grg->getNodeMutationPairs()) {
-        const grgl::Mutation& mut = grg->getMutationById(pair.second);
+    for (const auto& tuple : grg->getNodesAndMutations<GRG::NodeMutMiss>()) {
+        const grgl::Mutation& mut = grg->getMutationById(std::get<1>(tuple));
         counts.insert({mut, {0, 0}});
-        if (pair.first != INVALID_NODE_ID) {
+        const NodeID& node = std::get<0>(tuple);
+        if (node != INVALID_NODE_ID) {
             auto& countPair = counts.at(mut);
-            countPair.first += visitorForDfs.m_samplesBeneath[pair.first];
-            countPair.second += visitorForDfs.m_homozygousBeneath[pair.first];
+            countPair.first += visitorForDfs.m_samplesBeneath[node];
+            countPair.second += visitorForDfs.m_homozygousBeneath[node];
         }
     }
     const size_t totalIndividuals = grg->numIndividuals();
-    const auto& mutIdAndNodes = grg->getMutationsToNodeOrdered();
-    outStream << "POSITION" << SEP << "REF" << SEP << "ALT" << SEP << "AA" << SEP << "Aa" << SEP << "aa" << std::endl;
+    const auto& mutsNodesMisses = grg->getMutationsToNodeOrdered<GRG::MutNodeMiss>();
+    outStream << "POSITION" << SEP << "REF" << SEP << "ALT" << SEP << "AA" << SEP << "Aa" << SEP << "aa" << SEP
+              << "MISS" << std::endl;
     size_t i = 0;
-    while (i < mutIdAndNodes.size()) {
+    while (i < mutsNodesMisses.size()) {
+        size_t samplesMissing = 0;
         size_t samplesWithMut = 0;
         size_t homozygWithMut = 0;
-        const grgl::MutationId mutId = mutIdAndNodes[i].first;
+        const grgl::MutationId mutId = std::get<0>(mutsNodesMisses[i]);
         const grgl::Mutation* mut = &grg->getMutationById(mutId);
         const grgl::BpPosition position = mut->getPosition();
         const std::string& ref = mut->getRefAllele();
         const std::string& alt = mut->getAllele();
         // Accumulate values for all Mutations capturing the same (position, alleles) values.
         do {
-            const grgl::NodeID& nodeId = mutIdAndNodes[i].second;
+            const grgl::NodeID& nodeId = std::get<1>(mutsNodesMisses[i]);
             if (nodeId != INVALID_NODE_ID) {
                 samplesWithMut += visitorForDfs.m_samplesBeneath[nodeId];
                 homozygWithMut += visitorForDfs.m_homozygousBeneath[nodeId];
             }
+            const grgl::NodeID& missingnessNode = std::get<2>(mutsNodesMisses[i]);
+            if (missingnessNode != INVALID_NODE_ID) {
+                samplesMissing += visitorForDfs.m_samplesBeneath[missingnessNode];
+            }
             i++;
-            if (i < mutIdAndNodes.size()) {
-                const grgl::MutationId& nextMutId = mutIdAndNodes[i].first;
+            if (i < mutsNodesMisses.size()) {
+                const grgl::MutationId& nextMutId = std::get<0>(mutsNodesMisses[i]);
                 mut = &grg->getMutationById(nextMutId);
             }
-        } while (i < mutIdAndNodes.size() && position == mut->getPosition() && ref == mut->getRefAllele() &&
+        } while (i < mutsNodesMisses.size() && position == mut->getPosition() && ref == mut->getRefAllele() &&
                  alt == mut->getAllele());
 
         const size_t heteroWithMut = samplesWithMut - (2 * homozygWithMut);
         const size_t neitherWithMut = totalIndividuals - (homozygWithMut + heteroWithMut);
         assert(neitherWithMut + heteroWithMut + homozygWithMut == totalIndividuals);
         outStream << position << SEP << ref << SEP << alt << SEP << neitherWithMut << SEP << heteroWithMut << SEP
-                  << homozygWithMut << std::endl;
+                  << homozygWithMut << SEP << samplesMissing << std::endl;
     }
 }

@@ -38,13 +38,6 @@
 
 #include "grgl/version.h"
 
-enum MissingDataHandling {
-    MDH_INVALID = 0,
-    MDH_IGNORE = 1,
-    MDH_ADD_TO_GRG = 2,
-    MDH_SEPARATE_GRG = 3,
-};
-
 inline bool supportedInputFormat(const std::string& filename) {
     return ends_with(filename, ".vcf") || ends_with(filename, ".vcf.gz") || ends_with(filename, ".igd") ||
            ends_with(filename, ".bgen");
@@ -84,12 +77,8 @@ int main(int argc, char** argv) {
     args::Flag MAFFlip(
         parser, "maf-flip", "Switch the reference allele with the major allele when they differ", {"maf-flip"});
     args::Flag showVersion(parser, "version", "Show version and exit", {"version"});
-    args::ValueFlag<std::string> missingData(
-        parser,
-        "missing-data",
-        "How to handle missing data: \"ignore\" (default), \"add\" (add to GRG), \"separate\""
-        " (emit separate GRG for missing data)",
-        {'d', "missing-data"});
+    args::Flag ignoreMissing(
+        parser, "ignore-missing", "Ignore missing data (treat missing alleles as REF)", {"ignore-missing"});
     args::ValueFlag<std::string> windowedSplit(
         parser,
         "windowedSplit",
@@ -126,6 +115,7 @@ int main(int argc, char** argv) {
         " in the region) or a string value of 'optimal' (best for compression), 'faster1' (less optimal), "
         "'faster2' (even less optimal).",
         {"trees"});
+    args::Flag force(parser, "force", "Ignore any warnings that normally terminate execution.", {"force"});
 
     ///// Tree-sequence related arguments /////
     args::Flag tsNodeTimes(parser,
@@ -171,26 +161,18 @@ int main(int argc, char** argv) {
     std::cout << std::fixed << std::setprecision(4);
 
     // Default values for parameters.
-    MissingDataHandling missingDataHandling =
-        missingData ? (*missingData == "ignore"
-                           ? MDH_IGNORE
-                           : (*missingData == "add" ? MDH_ADD_TO_GRG
-                                                    : (*missingData == "separate" ? MDH_SEPARATE_GRG : MDH_INVALID)))
-                    : MDH_IGNORE;
-    if (missingDataHandling == MDH_INVALID) {
-        std::cerr << "Invalid missing-data handling: " << *missingData << std::endl;
-        return 1;
-    }
-
     grgl::MutationIteratorFlags itFlags = grgl::MIT_FLAG_EMPTY;
     if (binaryMutations) {
         itFlags |= grgl::MIT_FLAG_BINARY_MUTATIONS;
     }
-    if (missingDataHandling == MDH_ADD_TO_GRG) {
+    if (!ignoreMissing) {
         itFlags |= grgl::MIT_FLAG_EMIT_MISSING_DATA;
     }
     if (MAFFlip) {
         itFlags |= grgl::MIT_FLAG_FLIP_REF_MAJOR;
+    }
+    if (force) {
+        itFlags |= grgl::MIT_FLAG_FORCE;
     }
 
     grgl::FloatRange restrictRange;
@@ -268,6 +250,10 @@ int main(int argc, char** argv) {
         }
     } else if (supportedInputFormat(*infile)) {
         if (countVariants) {
+            if (ends_with(*infile, ".vcf") || ends_with(*infile, ".vcf.gz")) {
+                std::cerr << "Will not count variants in VCF files (too slow)" << std::endl;
+                return 1;
+            }
             std::shared_ptr<grgl::MutationIterator> mutIt = makeMutationIterator(*infile, restrictRange, itFlags);
             if (!mutIt) {
                 std::cerr << "Could not load input file " << *infile << std::endl;

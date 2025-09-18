@@ -113,7 +113,7 @@ TEST(Serialization, VByteDispatcher) {
 
 TEST(Serialization, SimpleRoundTrip) {
     const bool allowSimplify = false;
-    Mutation testMut = {999, "ACCC", "T", 19.1};
+    Mutation testMut = {999, "ACCC", "T", 19};
     const char * const testFile = "test.serialize.roundtrip.grg";
     std::ofstream outStream(testFile);
     MutableGRGPtr grg = depth3BinTree();
@@ -169,7 +169,7 @@ TEST(Serialization, ReadFailure) {
 
 TEST(Serialization, LongAllele) {
     const bool allowSimplify = true;
-    Mutation testMut = {1, "this is a really long allele", "and so is this!", 19.1};
+    Mutation testMut = {1, "this is a really long allele", "and so is this!", 19};
     const char * const testFile = "test.serialize.longallele.grg";
     std::ofstream outStream(testFile);
     MutableGRGPtr grg = depth3BinTree();
@@ -193,8 +193,8 @@ TEST(Serialization, LongAllele) {
 
 TEST(Serialization, SubsetMuts) {
     const bool allowSimplify = false;
-    Mutation mut1 = {999, "ACCC", "T", 19.1};
-    Mutation mut2 = {10001, "C", "A", 20.0};
+    Mutation mut1 = {999, "ACCC", "T", 19};
+    Mutation mut2 = {10001, "C", "A", 20};
     const char * const testFile = "test.serialize.subsetmuts.grg";
     std::ofstream outStream(testFile);
     MutableGRGPtr grg = depth3BinTree();
@@ -221,7 +221,7 @@ TEST(Serialization, SubsetMuts) {
     ASSERT_EQ(grg2->numMutations(), 1);
     Mutation loadedMut = grg2->getMutationById(0);
     ASSERT_EQ(loadedMut.getPosition(), 999);
-    for (const auto& nodeMuts : grg2->getNodeMutationPairs()) {
+    for (const auto& nodeMuts : grg2->getNodesAndMutations()) {
         auto children = grg2->getDownEdges(nodeMuts.first);
         ASSERT_EQ(children.size(), 2);
         NodeIDList expected = {0, 1};
@@ -232,8 +232,8 @@ TEST(Serialization, SubsetMuts) {
 
 TEST(Serialization, SubsetSamples) {
     const bool allowSimplify = false;
-    Mutation mut1 = {999, "ACCC", "T", 19.1};
-    Mutation mut2 = {10001, "C", "A", 20.0};
+    Mutation mut1 = {999, "ACCC", "T", 19};
+    Mutation mut2 = {10001, "C", "A", 20};
     const char * const testFile = "test.serialize.subsetsamples.grg";
     std::ofstream outStream(testFile);
     MutableGRGPtr grg = depth3BinTree();
@@ -263,7 +263,7 @@ TEST(Serialization, SubsetSamples) {
     ASSERT_EQ(loadedMut.getPosition(), 999);
     loadedMut = grg2->getMutationById(1);
     ASSERT_EQ(loadedMut.getPosition(), 10001);
-    for (const auto& nodeMuts : grg2->getNodeMutationPairs()) {
+    for (const auto& nodeMuts : grg2->getNodesAndMutations()) {
         if (nodeMuts.second == 0) {
             ASSERT_EQ(nodeMuts.first, INVALID_NODE_ID);
         } else {
@@ -277,8 +277,8 @@ TEST(Serialization, SubsetSamples) {
 
 TEST(Serialization, SubsetSamples2) {
     const bool allowSimplify = false;
-    Mutation mut1 = {999, "ACCC", "T", 19.1};
-    Mutation mut2 = {10001, "C", "A", 20.0};
+    Mutation mut1 = {999, "ACCC", "T", 19};
+    Mutation mut2 = {10001, "C", "A", 20};
     const char * const testFile = "test.serialize.subsetsamples.grg";
     std::ofstream outStream(testFile);
     MutableGRGPtr grg = depth3BinTree();
@@ -308,7 +308,7 @@ TEST(Serialization, SubsetSamples2) {
     ASSERT_EQ(loadedMut.getPosition(), 999);
     loadedMut = grg2->getMutationById(1);
     ASSERT_EQ(loadedMut.getPosition(), 10001);
-    for (const auto& nodeMuts : grg2->getNodeMutationPairs()) {
+    for (const auto& nodeMuts : grg2->getNodesAndMutations()) {
         ASSERT_NE(nodeMuts.first, INVALID_NODE_ID);
         auto children = grg2->getDownEdges(nodeMuts.first);
         if (nodeMuts.second == 1) {

@@ -60,7 +60,7 @@ std::pair<NodeIDSizeT, EdgeSizeT> simplifyAndSerialize(const GRGPtr& grg,
  *
  * @param[in] inStream The (binary) input stream.
  */
-MutableGRGPtr readMutableGrg(IFSPointer& inStream);
+MutableGRGPtr readMutableGrg(IFSPointer& inStream, bool loadUpEdges = true);
 GRGPtr readImmutableGrg(IFSPointer& inStream, bool loadUpEdges = true);
 
 }; // namespace grgl

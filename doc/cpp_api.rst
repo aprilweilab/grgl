@@ -27,6 +27,11 @@ Main GRG Classes
 .. doxygenclass:: grgl::Mutation
     :members:
 
+.. doxygenclass:: grgl::GRG::NodeAndMut
+.. doxygenclass:: grgl::GRG::NodeMutMiss
+.. doxygenclass:: grgl::GRG::MutAndNode
+.. doxygenclass:: grgl::GRG::MutNodeMiss
+
 
 Serialization and Conversion
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

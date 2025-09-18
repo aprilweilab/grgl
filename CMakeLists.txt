@@ -94,6 +94,7 @@ set(GRGL_TEST_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_map_muts.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_mult.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_mutation.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_mut_iterator.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_serialize.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_util.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_visitor.cpp
@@ -115,6 +116,7 @@ set(GRGL_CORE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/grg_merge.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/map_mutations.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/mut_iterator.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/mutation.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/serialize.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/ts2grg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/windowing.cpp
@@ -161,7 +163,7 @@ add_executable(grgl_tool
                ${CMAKE_CURRENT_LIST_DIR}/src/grgl.cpp
                )
 set_target_properties(grgl_tool PROPERTIES OUTPUT_NAME "grgl")
-target_link_libraries(grgl_tool tskit grgl ${BGEN_LIBS} z vbyte ${GRGL_EXTRA_LIBS})
+target_link_libraries(grgl_tool tskit grgl ${BGEN_LIBS} z vbyte pthread ${GRGL_EXTRA_LIBS})
 
 # Tool for processing GRG files (stats, etc).
 add_executable(grgp_tool
@@ -183,15 +185,9 @@ target_link_libraries(grgl_merge grgl vbyte)
 add_executable(gconverter
                ${CMAKE_CURRENT_LIST_DIR}/src/gconverter.cpp
                ${CMAKE_CURRENT_LIST_DIR}/src/mut_iterator.cpp
+               ${CMAKE_CURRENT_LIST_DIR}/src/mutation.cpp
                )
 target_link_libraries(gconverter ${BGEN_LIBS} z)
-
-# Tool for converting file formats.
-add_executable(gtime
-               ${CMAKE_CURRENT_LIST_DIR}/extra/gtime.cpp
-               ${CMAKE_CURRENT_LIST_DIR}/src/mut_iterator.cpp
-               )
-target_link_libraries(gtime ${BGEN_LIBS} z)
 
 # Tool for indexing input files.
 add_executable(gindexer
@@ -199,13 +195,7 @@ add_executable(gindexer
                )
 target_link_libraries(gindexer ${BGEN_LIBS} z)
 
-# Tool for timing VCF scanning.
-add_executable(vcftime
-               ${CMAKE_CURRENT_LIST_DIR}/extra/vcftime.cpp
-               )
-target_link_libraries(vcftime ${BGEN_LIBS} z)
-
-install(TARGETS grgl_tool grgl_merge gconverter gindexer vcftime)
+install(TARGETS grgl_tool grgl_merge gconverter gindexer)
 
 # Build Python support as "_grgl"
 if(PYTHON_SUPPORT)

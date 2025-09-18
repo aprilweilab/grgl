@@ -23,6 +23,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <sstream>
 #include <string>
 
 namespace grgl {
@@ -37,29 +38,38 @@ using BpPosition = uint64_t;
 constexpr BpPosition INVALID_POSITION = std::numeric_limits<BpPosition>::max();
 constexpr BpPosition MAX_POSITION = INVALID_POSITION - 1;
 
+// Mutation time can be in any units, but probably "generations" or "years". We steal the top
+// two bits of this value, which means that the maximum mutation time is just over 1 billion.
+using MutTime = uint32_t;
+constexpr MutTime MUT_TIME_NOT_SET = 0x3FFFFFFFU;
+constexpr MutTime MAX_MUT_TIME = MUT_TIME_NOT_SET - 1;
+
+// We use a 16-bit value to determine where the REF ends and the ALT begins.
+constexpr size_t MAX_REF_STRLEN = std::numeric_limits<uint16_t>::max();
+
 /**
  * A mutation in the GRG.
  */
 class Mutation {
 public:
-    static constexpr char const* ALLELE_A = "A";
-    static constexpr char const* ALLELE_C = "C";
-    static constexpr char const* ALLELE_T = "T";
-    static constexpr char const* ALLELE_G = "G";
-    static constexpr char const* ALLELE_MISSING = ".";
-    static constexpr char const* ALLELE_0 = "0";
-    static constexpr char const* ALLELE_1 = "1";
+    static const char* const ALLELE_A;
+    static const char* const ALLELE_C;
+    static const char* const ALLELE_T;
+    static const char* const ALLELE_G;
+    static const char* const ALLELE_MISSING;
+    static const char* const ALLELE_0;
+    static const char* const ALLELE_1;
 
     Mutation()
         : m_alleleStorage({}),
           m_position(INVALID_POSITION),
-          m_time(-1.0),
+          m_time(MUT_TIME_NOT_SET),
           m_altIndex(0) {}
 
     Mutation(BpPosition position, std::string allele)
         : m_alleleStorage({}),
           m_position(position),
-          m_time(-1.0),
+          m_time(MUT_TIME_NOT_SET),
           m_altIndex(0) {
         if (allele.size() > std::numeric_limits<uint16_t>::max()) {
             throw ApiMisuseFailure("Allele length cannot exceed (2^16)-1");
@@ -67,14 +77,11 @@ public:
         setAlleleValues(std::move(allele), "");
     }
 
-    Mutation(BpPosition position, std::string allele, const std::string& refAllele, float time = -1.0)
+    Mutation(BpPosition position, std::string allele, const std::string& refAllele, uint32_t time = MUT_TIME_NOT_SET)
         : m_alleleStorage({}),
           m_position(position),
           m_time(time),
           m_altIndex(0) {
-        if (allele.size() > std::numeric_limits<uint16_t>::max()) {
-            throw ApiMisuseFailure("Allele length cannot exceed (2^16)-1");
-        }
         setAlleleValues(std::move(allele), refAllele);
     }
 
@@ -128,11 +135,13 @@ public:
 
     bool isEmpty() const { return m_position == INVALID_POSITION; }
 
+    bool isMissing() const { return getAllele() == ALLELE_MISSING; }
+
     BpPosition getPosition() const { return m_position; }
 
-    float getTime() const { return m_time; }
+    uint32_t getTime() const { return m_time; }
 
-    void setTime(float time) { m_time = time; }
+    void setTime(uint32_t time) { m_time = time; }
 
     std::string getAllele() const {
         std::string storage = alleleStorageString();
@@ -215,6 +224,7 @@ public:
 
 protected:
     void setAlleleValues(std::string altAllele, std::string refAllele) {
+        api_exc_check(refAllele.size() <= MAX_REF_STRLEN, "REF allele length exceeded maximum of " << MAX_REF_STRLEN);
         const size_t totalBytes = altAllele.size() + refAllele.size();
         m_altIndex = refAllele.size();
         if (totalBytes > 7) {
@@ -244,7 +254,7 @@ protected:
     } m_alleleStorage; // 8
     static_assert(sizeof(m_alleleStorage) == 8, "Allele storage size changed");
     BpPosition m_position; // 8
-    float m_time;          // 4
+    uint32_t m_time;       // 4
     uint16_t m_altIndex;   // 2
     uint16_t unused{};     // 2
 };

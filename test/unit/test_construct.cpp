@@ -25,7 +25,7 @@ inline std::string randomVcfLine(size_t position, size_t numIndivs) {
 }
 
 TEST(Construct, WithPopIds) {
-    std::string vcfHeaderString = 
+    std::string vcfHeaderString =
         "##fileformat=VCFv4.2\n"
         "##source=TEST\n"
         "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
@@ -48,7 +48,7 @@ TEST(Construct, WithPopIds) {
     // Test1: Incomplete individual -> population map
     indivIdToPop.emplace("Z1", "Population2");
     indivIdToPop.emplace("X1", "Population4");
-    EXPECT_THROW(fastGRGFromSamples("test_1", filename, fullRange, GBF_EMPTY, MIT_FLAG_EMPTY, 
+    EXPECT_THROW(fastGRGFromSamples("test_1", filename, fullRange, GBF_EMPTY, MIT_FLAG_FORCE,
         1, 0.0, indivIdToPop), std::runtime_error);
 
     // Test2: Complete individual -> population map
@@ -57,7 +57,7 @@ TEST(Construct, WithPopIds) {
     indivIdToPop.emplace("B4", "Population3");
     indivIdToPop.emplace("A1", "Population1");
     indivIdToPop.emplace("X3", "Population4");
-    auto grg = fastGRGFromSamples("test_2", filename, fullRange, GBF_EMPTY, MIT_FLAG_EMPTY, 
+    auto grg = fastGRGFromSamples("test_2", filename, fullRange, GBF_EMPTY, MIT_FLAG_FORCE,
         1, 0.0, indivIdToPop);
     ASSERT_EQ(grg->numSamples(), numIndividuals*2);
     auto popDescriptions = grg->getPopulations();

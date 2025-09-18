@@ -13,6 +13,7 @@ def construct_grg(
     cmd = [
         "grg",
         "construct",
+        "--force",  # Ignore that we don't have tabix-indexed files
         "-p",
         "10",
         "-j",

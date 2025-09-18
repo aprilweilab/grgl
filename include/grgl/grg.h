@@ -78,9 +78,27 @@ using CSRStringTable = CSRStorageImm<EagerFileVector, uint8_t, false, false>;
  */
 class GRG : public std::enable_shared_from_this<GRG> {
 public:
-    enum {
-        DEFAULT_NODE_CAPACITY = 1024,
-    };
+    static constexpr size_t DEFAULT_NODE_CAPACITY = 1024;
+
+    /**
+     * A node and a mutation attached to that node.
+     */
+    using NodeAndMut = std::pair<NodeID, MutationId>;
+
+    /**
+     * A node and a mutation attached to that node, and the missingness node associated with the mutation.
+     */
+    using NodeMutMiss = std::tuple<NodeID, MutationId, NodeID>;
+
+    /**
+     * A mutation and node, where the mutation comes first.
+     */
+    using MutAndNode = std::pair<MutationId, NodeID>;
+
+    /**
+     * A mutation, node, and missingness node, where the mutation comes first.
+     */
+    using MutNodeMiss = std::tuple<MutationId, NodeID, NodeID>;
 
     explicit GRG(size_t numSamples, uint16_t ploidy, const bool phased = true)
         : m_numSamples(numSamples),
@@ -257,29 +275,154 @@ public:
 
     size_t numMutations() const { return m_mutations.size(); }
 
-    const std::vector<std::pair<NodeID, MutationId>>& getNodeMutationPairs() {
+    /**
+     * Does this GRG have Mutations which have missing data represented?
+     */
+    bool hasMissingData() const { return !m_mutIdsByNodeIdAndMiss.empty(); }
+
+    /**
+     * Iterator for traversing the NodeID<-->MutationID mapping, along with the (sometimes present) NodeID
+     * for the missingness node associated with the Mutation.
+     *
+     * Each Mutation can have two different "kinds" of nodes associated with it:
+     * 1. The Mutation Node, which defines the mapping between a Mutation and all of the samples that have
+     *    that Mutation.
+     * 2. The Missingness Node, which defines the mapping between a Mutation and all of the samples that
+     *    are missing an allele at the site associated with the Mutation.
+     */
+    template <typename T> class NodeAndMutIterator {
+    public:
+        class VectIter3 {
+        public:
+            VectIter3(const std::vector<NodeAndMut>* pair, size_t pos)
+                : m_pair(pair),
+                  m_position(pos) {}
+            VectIter3(const std::vector<NodeMutMiss>* triple, size_t pos)
+                : m_triple(triple),
+                  m_position(pos) {}
+            VectIter3& operator++() {
+                m_position++;
+                return *this;
+            }
+            VectIter3 operator++(int) {
+                VectIter3 retval = *this;
+                ++(*this);
+                return retval;
+            }
+            bool operator==(VectIter3 other) const {
+                return m_pair == other.m_pair && m_triple == other.m_triple && m_position == other.m_position;
+            }
+            bool operator!=(VectIter3 other) const { return !(*this == other); }
+            T operator*();
+            size_t size() const { return (nullptr != m_pair) ? m_pair->size() : m_triple->size(); }
+
+            using difference_type = size_t;
+            using value_type = T;
+            using pointer = T*;
+            using reference = const T&;
+            using iterator_category = std::forward_iterator_tag;
+
+        private:
+            const std::vector<NodeAndMut>* m_pair{};
+            const std::vector<NodeMutMiss>* m_triple{};
+            size_t m_position{};
+        };
+
+        explicit NodeAndMutIterator(const std::vector<NodeAndMut>* pair)
+            : m_begin(pair, 0),
+              m_end(pair, pair->size()) {}
+
+        explicit NodeAndMutIterator(const std::vector<NodeMutMiss>* triple)
+            : m_begin(triple, 0),
+              m_end(triple, triple->size()) {}
+
+        /**
+         * The number of items in the vector underlying the iterator.
+         */
+        size_t size() const { return m_begin.size(); }
+
+        /**
+         * The beginning of the vector.
+         */
+        VectIter3 begin() const { return m_begin; }
+        /**
+         * The end of the vector.
+         */
+        VectIter3 end() const { return m_end; }
+
+    private:
+        VectIter3 m_begin;
+        VectIter3 m_end;
+    };
+
+    // DEPRECATED! Use getNodesAndMutations() instead.
+    NodeAndMutIterator<NodeAndMut> getNodeMutationPairs() GRGL_DEPRECATED { return getNodesAndMutations<NodeAndMut>(); }
+
+    /**
+     * Get the list of all corresponding nodes and mutations, for iterating over the mapping
+     * between graph nodes and Mutations. By default, just returns the (NodeID, MutationID) pairs,
+     * but using the template argument of GRG::NodeMutMiss will return a tuple (NodeID, MutationID, NodeID)
+     * where the additional NodeID is the missingness node (or INVALID_NODE_ID) associated with this
+     * Mutation.
+     *
+     * @return An iterator over (NodeID, MutationId) pairs or (NodeID, MutationId, NodeID) tuples,
+     *      depending on the function template argument.
+     */
+    template <typename T = NodeAndMut> NodeAndMutIterator<T> getNodesAndMutations() {
         if (!m_mutIdsByNodeIdSorted) {
             sortMutIdsByNodeID();
         }
-        return m_mutIdsByNodeId;
+        if (!m_mutIdsByNodeId.empty()) {
+            return NodeAndMutIterator<T>(&m_mutIdsByNodeId);
+        }
+        return NodeAndMutIterator<T>(&m_mutIdsByNodeIdAndMiss);
     }
 
     const Mutation& getMutationById(MutationId mutId) { return m_mutations.cref(mutId); }
 
     void setMutationById(MutationId mutId, Mutation mutation) { m_mutations.atRef(mutId) = std::move(mutation); }
 
-    std::vector<MutationId> getUnmappedMutations() { return getMutationsForNode(INVALID_NODE_ID); }
+    /**
+     * Get the mutations associated with no nodes. By default, the template argument is MutationId,
+     * so only the vector of mutations is returned. If you set the template argument to
+     * GRG::MutAndNode then the mutation and it's corresponding missingness node will be returned.
+     *
+     * @return A vector of either MutationId or GRG::MutAndNode (a std::pair), depending on the template
+     *      parameter.
+     */
 
-    std::vector<MutationId> getMutationsForNode(const NodeID nodeId) {
+    template <typename T = MutationId> std::vector<T> getUnmappedMutations() {
+        return getMutationsForNode<T>(INVALID_NODE_ID);
+    }
+
+    /**
+     * Get the mutations associated with the node. By default, the template argument is MutationId,
+     * so only the vector of mutations is returned. If you set the template argument to
+     * GRG::MutAndNode then the mutation and it's corresponding missingness node will be returned.
+     *
+     * @param[in] nodeId The node to lookup.
+     * @return A vector of either MutationId or GRG::MutAndNode (a std::pair), depending on the template
+     *      parameter.
+     */
+    template <typename T = MutationId> std::vector<T> getMutationsForNode(const NodeID nodeId) {
         if (!m_mutIdsByNodeIdSorted) {
             sortMutIdsByNodeID();
         }
-        std::vector<MutationId> result;
-        std::pair<NodeID, MutationId> query = {nodeId, 0};
-        auto mutIdIt = std::lower_bound(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end(), query);
-        while (mutIdIt != m_mutIdsByNodeId.end() && mutIdIt->first == nodeId) {
-            result.push_back(mutIdIt->second);
-            mutIdIt++;
+        std::vector<T> result;
+        if (!m_mutIdsByNodeId.empty()) {
+            const NodeAndMut query = {nodeId, 0};
+            auto mutIdIt = std::lower_bound(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end(), query);
+            while (mutIdIt != m_mutIdsByNodeId.end() && mutIdIt->first == nodeId) {
+                result.push_back(std::move(nodeAndMutToType<T>(*mutIdIt)));
+                mutIdIt++;
+            }
+        } else {
+            const NodeMutMiss query = {nodeId, 0, 0};
+            auto mutIdIt = std::lower_bound(m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end(), query);
+            while (mutIdIt != m_mutIdsByNodeIdAndMiss.end() && std::get<0>(*mutIdIt) == nodeId) {
+                result.push_back(nodeAndMutAndMissToType<T>(*mutIdIt));
+                mutIdIt++;
+            }
         }
         return std::move(result);
     }
@@ -288,17 +431,39 @@ public:
         if (!m_mutIdsByNodeIdSorted) {
             sortMutIdsByNodeID();
         }
-        std::pair<NodeID, MutationId> query = {nodeId, 0};
-        auto mutIdIt = std::lower_bound(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end(), query);
-        return mutIdIt != m_mutIdsByNodeId.end() && (mutIdIt->first == nodeId);
+        if (!m_mutIdsByNodeId.empty()) {
+            const std::pair<NodeID, MutationId> query = {nodeId, 0};
+            const auto mutIdIt = std::lower_bound(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end(), query);
+            return mutIdIt != m_mutIdsByNodeId.end() && (mutIdIt->first == nodeId);
+        }
+        const std::tuple<NodeID, MutationId, NodeID> query = {nodeId, 0, 0};
+        const auto mutIdIt = std::lower_bound(m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end(), query);
+        return mutIdIt != m_mutIdsByNodeIdAndMiss.end() && std::get<0>(*mutIdIt) == nodeId;
     }
 
     /**
-     * Get pairs of mutation IDs and node IDs, ordered by the mutation position + allele (ascending).
+     * Get corresponding mutation IDs and node IDs, ordered by the mutation position + allele (ascending).
+     * By default, a MutAndNode is returned (std::pair). If you set the template argument to MutIdNodeMiss
+     * (std::tuple) then the third item in the returned tuple will be the missingness node associated with
+     * the Mutation.
      *
-     * @return A vector of pairs, MutationID and NodeID (in that order).
+     * @return A vector of pairs, MutationID and NodeID (in that order), or a vector of tuples of
+     *      (MutationID, NodeID, NodeID), depending on function template argument.
      */
-    std::vector<std::pair<MutationId, NodeID>> getMutationsToNodeOrdered();
+    template <typename T = MutAndNode> std::vector<T> getMutationsToNodeOrdered() {
+        std::vector<T> result;
+        if (!m_mutIdsByNodeId.empty()) {
+            for (const auto& nodeAndMutId : m_mutIdsByNodeId) {
+                result.emplace_back(std::move(nodeAndMutToRevType<T>(nodeAndMutId)));
+            }
+        } else {
+            for (const auto& triple : m_mutIdsByNodeIdAndMiss) {
+                result.emplace_back(nodeAndMutAndMissToRevType<T>(triple));
+            }
+        }
+        sortByMutation(result);
+        return std::move(result);
+    }
 
     /**
      * Visit nodes breadth-first, starting at the given nodes and following up or
@@ -361,9 +526,10 @@ public:
      *
      * @param[in] mutation The Mutation to add.
      * @param[in] nodeId The nodeId to associated it with, or INVALID_NODE_ID.
+     * @param[in] missNodeId The nodeId for the missingness node of this Mutation, or INVALID_NODE_ID if none.
      * @return The MutationId for the newly added Mutation.
      */
-    MutationId addMutation(const Mutation& mutation, NodeID nodeId);
+    MutationId addMutation(const Mutation& mutation, NodeID nodeId, NodeID missNodeId = INVALID_NODE_ID);
 
     // Internal enum used for determining the node value initialization behavior of matrix multiplication.
     enum NodeInitEnum {
@@ -386,7 +552,8 @@ public:
                               bool emitAllNodes = false,
                               bool byIndividual = false,
                               const IOType* initMatrix = nullptr,
-                              NodeInitEnum nodeInit = NIE_ZERO);
+                              NodeInitEnum nodeInit = NIE_ZERO,
+                              IOType* missMatrix = nullptr);
 
     /**
      * Compute one of two possible matrix multiplications across the entire
@@ -538,6 +705,19 @@ public:
         return {reinterpret_cast<const char*>(characters.data()), characters.size()};
     }
 
+    // When nodeIds change (e.g., during merging) we need to make a post-processing
+    // pass over the missinginess nodes to adjust their IDs.
+    void adjustMissingnessNodeIds(const size_t afterIndex, const std::vector<NodeID>& replaceMap) {
+        if (!m_mutIdsByNodeIdAndMiss.empty()) {
+            for (size_t i = afterIndex; i < m_mutIdsByNodeIdAndMiss.size(); i++) {
+                NodeID& missingnessNode = std::get<2>(m_mutIdsByNodeIdAndMiss[i]);
+                if (missingnessNode != INVALID_NODE_ID) {
+                    missingnessNode = replaceMap.at(missingnessNode);
+                }
+            }
+        }
+    }
+
 protected:
     void visitTopoNodeOrderedDense(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
     void visitTopoNodeOrderedSparse(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
@@ -546,14 +726,30 @@ protected:
     // function. We rarely need to lookup Mutations by NodeID while modifying a GRG, so this ends
     // up being about 3x smaller than the previous multimap<> and many times faster.
     void sortMutIdsByNodeID() {
-        std::sort(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end());
+        if (!m_mutIdsByNodeId.empty()) {
+            release_assert(m_mutIdsByNodeIdAndMiss.empty());
+            std::sort(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end());
+        } else {
+            std::sort(m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end());
+        }
         m_mutIdsByNodeIdSorted = true;
     }
 
+    // Templated helpers for transparently handling the cases where we do or don't have
+    // missing data nodes.
+    template <typename T> T nodeAndMutToType(const NodeAndMut& pair);
+    template <typename T> T nodeAndMutAndMissToType(const NodeMutMiss& triple);
+    template <typename T> void sortByMutation(std::vector<T>&);
+    template <typename T> T nodeAndMutToRevType(const GRG::NodeAndMut& pair);
+    template <typename T> T nodeAndMutAndMissToRevType(const GRG::NodeMutMiss& triple);
+
     // The position is the mutation ID for both of these vectors.
     EagerFileVector<Mutation> m_mutations;
-    // This vector is MutationIDs ordered by their associated NodeID, ascending.
+    // These two vectors are equivalent, except one has more info (missingness). Only one of these will
+    // be non-empty. The first two items are MutationIDs ordered by their associated NodeID, ascending.
+    // The optional third item is the missingness node for the mutation.
     std::vector<std::pair<NodeID, MutationId>> m_mutIdsByNodeId;
+    std::vector<std::tuple<NodeID, MutationId, NodeID>> m_mutIdsByNodeIdAndMiss;
     bool m_mutIdsByNodeIdSorted{false};
 
     // (Optional) list of population descriptions. The position corresponds to the population
@@ -585,11 +781,47 @@ protected:
     FRIEND_TEST(GRG, TestFrontier);
 };
 
+template <> inline MutationId GRG::nodeAndMutToType<MutationId>(const NodeAndMut& pair) { return pair.second; }
+
+template <> inline GRG::MutAndNode GRG::nodeAndMutToType<GRG::MutAndNode>(const NodeAndMut& pair) {
+    return {pair.second, INVALID_NODE_ID};
+}
+
+template <> inline MutationId GRG::nodeAndMutAndMissToType<MutationId>(const NodeMutMiss& triple) {
+    return std::get<1>(triple);
+}
+
+template <> inline GRG::MutAndNode GRG::nodeAndMutAndMissToType<GRG::MutAndNode>(const NodeMutMiss& triple) {
+    return {std::get<1>(triple), std::get<2>(triple)};
+}
+
 using GRGPtr = std::shared_ptr<GRG>;
 using ConstGRGPtr = std::shared_ptr<const GRG>;
 using MutableGRGPtr = std::shared_ptr<MutableGRG>;
 using ConstMutableGRGPtr = std::shared_ptr<const MutableGRG>;
 
+template <>
+inline std::tuple<NodeID, MutationId, NodeID>
+GRG::NodeAndMutIterator<std::tuple<NodeID, MutationId, NodeID>>::VectIter3::operator*() {
+    if (nullptr != m_pair) {
+        const auto& item = (*m_pair).at(m_position);
+        return {item.first, item.second, INVALID_NODE_ID};
+    }
+    return (*m_triple).at(m_position);
+}
+
+template <>
+inline std::pair<NodeID, MutationId> GRG::NodeAndMutIterator<std::pair<NodeID, MutationId>>::VectIter3::operator*() {
+    if (nullptr != m_triple) {
+        const auto& item = (*m_triple).at(m_position);
+        return {std::get<0>(item), std::get<1>(item)};
+    }
+    return (*m_pair).at(m_position);
+}
+
+/**
+ * A MutableGRG can be changed by adding/removing nodes and edges.
+ */
 class MutableGRG : public GRG {
 public:
     /**
@@ -602,8 +834,10 @@ public:
     explicit MutableGRG(size_t numSamples,
                         uint16_t ploidy,
                         bool phased = true,
-                        size_t initialNodeCapacity = DEFAULT_NODE_CAPACITY)
-        : GRG(numSamples, ploidy, phased) {
+                        size_t initialNodeCapacity = DEFAULT_NODE_CAPACITY,
+                        bool useUpEdges = true)
+        : GRG(numSamples, ploidy, phased),
+          m_hasUpEdges(useUpEdges) {
         if (initialNodeCapacity < numSamples) {
             initialNodeCapacity = numSamples * 2;
         }
@@ -625,13 +859,22 @@ public:
 
     size_t numDownEdges(NodeID nodeId) override { return m_nodes.at(nodeId)->getDownEdges().size(); }
 
-    size_t numUpEdges(NodeID nodeId) override { return m_nodes.at(nodeId)->getUpEdges().size(); }
+    size_t numUpEdges(NodeID nodeId) override {
+        if (!m_hasUpEdges) {
+            release_assert(m_nodes.at(nodeId)->getUpEdges().empty());
+            return NO_UP_EDGES;
+        }
+        return m_nodes.at(nodeId)->getUpEdges().size();
+    }
 
     NodeIDList getDownEdges(NodeID nodeId) override { return m_nodes.at(nodeId)->getDownEdges(); }
 
-    NodeIDList getUpEdges(NodeID nodeId) override { return m_nodes.at(nodeId)->getUpEdges(); }
+    NodeIDList getUpEdges(NodeID nodeId) override {
+        api_exc_check(m_hasUpEdges, "No up edges were loaded/enabled");
+        return m_nodes.at(nodeId)->getUpEdges();
+    }
 
-    bool hasUpEdges() const override { return true; }
+    bool hasUpEdges() const override { return m_hasUpEdges; }
 
     bool edgesAreOrdered() const override { return false; }
 
@@ -742,10 +985,12 @@ private:
     // The list of nodes. The node's position in this vector must match its ID.
     std::vector<GRGNodePtr> m_nodes;
 
-    friend MutableGRGPtr readMutableGrg(IFSPointer& inStream);
+    friend MutableGRGPtr readMutableGrg(IFSPointer&, bool);
 
     // True if the nodeId order matches the bottom-up topological order.
     bool m_nodesAreOrdered{true};
+    // True if we are tracking up edges -- not all analyses need them.
+    bool m_hasUpEdges;
 };
 
 // Eager CSR sorted 32-bit edges, encoded.
@@ -815,6 +1060,11 @@ using ConstCSRGRGPtr = std::shared_ptr<const CSRGRG>;
 // functions/classes that are needed by matrix multiplication.
 #include "internal_mult.h"
 
+// Notes on parameter constraints/assumptions (_CALLERS_ must ensure these):
+// * initMatrix and nodeInit match -- the dimensions of the former are defined by the latter
+// * missMatrix, if provided, must be a vector of length inputCols (C). Unlike inputMatrix which
+//   is (k x C), missMatrix is (1 x C). I.e., you can't provide different missing values for each
+//   row (it is assumed to be constant).
 template <typename IOType, typename NodeValueType, bool useBitVector>
 void GRG::matrixMultiplication(const IOType* inputMatrix,
                                size_t inputCols,
@@ -825,7 +1075,8 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
                                bool emitAllNodes,
                                bool byIndividual,
                                const IOType* initMatrix,
-                               NodeInitEnum nodeInit) {
+                               NodeInitEnum nodeInit,
+                               IOType* missMatrix) {
     release_assert(inputCols > 0);
     release_assert(inputRows > 0);
     const size_t outputCols = outputSize / inputRows;
@@ -873,10 +1124,12 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
     default: break;
     }
 
+    // Downward, we are calculating "how do the mutations impact the samples?"
     if (direction == DIRECTION_DOWN) {
-        for (const auto& nodeIdAndMutId : this->getNodeMutationPairs()) {
-            const NodeID& nodeId = nodeIdAndMutId.first;
-            const MutationId& mutId = nodeIdAndMutId.second;
+        for (const auto& tuple : this->getNodesAndMutations<GRG::NodeMutMiss>()) {
+            const NodeID& nodeId = std::get<0>(tuple);
+            const MutationId& mutId = std::get<1>(tuple);
+            const NodeID& missingnessNode = std::get<2>(tuple);
             assert(mutId < inputCols);
             if (nodeId != INVALID_NODE_ID) {
                 const size_t base = nodeId * effectiveInputRows;
@@ -885,6 +1138,13 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
                     matmulPerformIOAddition<NodeValueType, IOType, useBitVector>(
                         nodeValues.data(), base + row, inputMatrix, rowStart + mutId);
                 }
+            }
+            if (missMatrix != nullptr && missingnessNode != INVALID_NODE_ID) {
+                const size_t base = missingnessNode * effectiveInputRows;
+                // Apply the single missing-data value for this mutation to all the node values
+                // associated with the missingness node.
+                matmulPerformIOAddition<NodeValueType, IOType, useBitVector>(
+                    nodeValues.data(), base, missMatrix[mutId], inputRows);
             }
         }
         if (this->nodesAreOrdered()) {
@@ -913,6 +1173,7 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
                 }
             }
         }
+        // Upward, we are calculating "how do the samples impact the mutations?"
     } else {
         for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
             assert(sampleId < inputCols);
@@ -940,14 +1201,22 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
         if (!emitAllNodes) {
             for (size_t row = 0; row < inputRows; row++) {
                 const size_t rowStart = row * outputCols;
-                for (const auto& nodeIdAndMutId : this->getNodeMutationPairs()) {
-                    const NodeID& nodeId = nodeIdAndMutId.first;
-                    const MutationId& mutId = nodeIdAndMutId.second;
+                for (const auto& triple : this->getNodesAndMutations<GRG::MutNodeMiss>()) {
+                    const NodeID& nodeId = std::get<0>(triple);
+                    const MutationId& mutId = std::get<1>(triple);
                     assert(rowStart + mutId < outputSize);
                     if (nodeId != INVALID_NODE_ID) {
                         const size_t base = nodeId * effectiveInputRows;
                         matmulPerformIOAddition<IOType, NodeValueType, useBitVector>(
                             outputMatrix, rowStart + mutId, nodeValues.data(), base + row);
+                    }
+                    const NodeID& missingnessNode = std::get<2>(triple);
+                    if (missMatrix != nullptr && missingnessNode != INVALID_NODE_ID) {
+                        const size_t base = missingnessNode * effectiveInputRows;
+                        // Add the missing-data value for this mutation to the output vector position
+                        // associated with the mutation.
+                        matmulPerformIOAddition<IOType, NodeValueType, useBitVector>(
+                            missMatrix[mutId], nodeValues.data(), base, inputRows);
                     }
                 }
             }

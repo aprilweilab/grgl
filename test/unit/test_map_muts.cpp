@@ -65,10 +65,10 @@ TEST(MapMutations, Basic) {
     MutableGRGPtr grg = sample8Grg();
     TestMutationIterator testIt(
         {
-            {1, "A", "G", 0.0},
-            {2, "G", "C", 0.0},
-            {3, "G", "A", 0.0},
-            {4, "A", "T", 0.0},
+            {1, "A", "G", 0},
+            {2, "G", "C", 0},
+            {3, "G", "A", 0},
+            {4, "A", "T", 0},
         },
         {
             {0, 1, 3, 7},
