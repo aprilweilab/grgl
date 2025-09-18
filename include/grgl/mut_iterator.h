@@ -145,8 +145,10 @@ protected:
  * Iterate the mutations in a VCF file.
  *
  * NOTES:
- * 1. This does not support fast random access to VCF, thus can be extremely slow for generating a GRG.
+ * 1. Supports fast random access to BGZF-compressed/Tabix-indexed VCF.
+ *     (can be extremely slow for generating a GRG with unindexed VCF!)
  * 2. This only supports VCFs that have all alleles on the same row, not one allele per row.
+ *     (you can still use these VCFs, but it's better to normalize them first -- you'll get strange results)
  */
 class VCFMutationIterator : public MutationIterator {
 public:

@@ -28,6 +28,8 @@ A GRG can be created from phased data (`IGD <https://github.com/aprilweilab/pico
 `VCF <https://samtools.github.io/>`_, or `BGEN <https://www.chg.ox.ac.uk/~gav/bgen_format/spec/latest.html>`_)
 or by converting an Ancestral Recombination Graph (in `tskit format <https://tskit.dev/tskit/docs/stable/introduction.html>`_) to a GRG.
 
+Unphased data is also supported, but the resulting graph is much less optimal than for phased data. 
+
 The "down edges" in a GRG go from mutations to samples, and are what is stored on disk. When requested,
 the "up edges" are created during GRG load from disk, and allow bottom-up traversal of the graph in
 arbitrary ways.
@@ -87,3 +89,37 @@ Mutation Time
 
 Mutations can optionally have a time associated with them, indicating how old the mutation is. Units are unspecified,
 and depend on the use-case.
+
+Missing Data
+------------
+
+Missing data is represented as a node-to-samples relationship, just like Mutations are. However, there is no Mutation
+object directly associated with the missing data. Instead, each Mutation is mapped to two (optional) ``NodeID``s: the
+mutation's node, and the missingness node associated with the site (genetic position) of the Mutation.
+
+Obtaining the Missingness Node
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can obtain the missingness node for a Mutation the same way you obtain it's "regular" node: by iterating over all
+Mutations. In C++, this is via :cpp:func:`GRG::getNodesAndMutations` (ordered by Mutation node) or 
+:cpp:func:`GRG::getMutationsToNodeOrdered` (ordered by Mutation position/allele). In Python, this is via
+:py:meth:`get_node_mutation_miss` and :py:meth:`get_mutation_node_miss`.
+
+Given a node, you can also lookup the Mutations and their missingness nodes via :cpp:func:`GRG::getMutationsForNode` (C++)
+or :py:meth:`get_muts_and_miss_for_node`.
+
+Missing Data in Matrix Multiplication
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+GRG matrix multiplication handles missing data by an input/output vector (of length ``num_mutations``) for the value of
+each missingness node associated with each Mutation. For multi-allelic sites, multiple Mutations will share a missingness
+node, in which case the values provided for each such Mutation will be added together when applied to the missingness node.
+
+Unphased Data
+-------------
+
+Unphased data is supported by GRG, though GRG construction is not yet optimized for unphased data. An unphased GRG is
+identical to a phased GRG: all data is stored at the haploid level, and all samples represent haplotype samples. The
+only difference is that :cpp:func:`GRG::isPhased` (:py:attr:`GRG.is_phased`) returns false. It is up to the client code
+to ensure that all calculations are performed at the *individual* level (e.g., with the ``by_individual`` flag to
+:py:meth:`matmul`).

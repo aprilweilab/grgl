@@ -189,14 +189,6 @@ add_executable(gconverter
                )
 target_link_libraries(gconverter ${BGEN_LIBS} z)
 
-# Tool for converting file formats.
-add_executable(gtime
-               ${CMAKE_CURRENT_LIST_DIR}/extra/gtime.cpp
-               ${CMAKE_CURRENT_LIST_DIR}/src/mut_iterator.cpp
-               ${CMAKE_CURRENT_LIST_DIR}/src/mutation.cpp
-               )
-target_link_libraries(gtime ${BGEN_LIBS} z)
-
 # Tool for indexing input files.
 add_executable(gindexer
                ${CMAKE_CURRENT_LIST_DIR}/src/gindexer.cpp

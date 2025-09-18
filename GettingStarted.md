@@ -39,7 +39,7 @@ pip install --force-reinstall dist/*.whl
 
 Construct a GRG for one of the test inputs. From within the virtual environment, run:
 ```
-grg construct test/endtoend/input/test-200-samples.vcf.gz
+grg construct --force test/endtoend/input/test-200-samples.vcf.gz
 ```
 
 This will create the GRG `test-200-samples.vcf.gz.final.grg` in the directory you ran the command from.
@@ -64,6 +64,8 @@ for node_id, mutation_id in g.get_node_mutation_pairs():
         print(f"Mutation({mutation_id}): ({mutation.position}, {mutation.allele}) has sample count {count}")
 ```
 
+Note that this isn't a very efficient way to compute the allele counts in Python, for that you would use `matmul()`.
+
 This code is also in the included Jupyter Notebook in `grgl/jupyter/01.Intro.ipynb`. To run that notebook, do the following in
 your `grgl` directory, in the virtual environment:
 ```
@@ -78,17 +80,17 @@ cells in the notebook one at a time.
 
 When working with anything but the smallest datasets, you'll want to convert your data to
 [IGD](https://github.com/aprilweilab/picovcf/blob/main/README.md#indexable-genotype-data-igd)
-before generating a GRG. This can be done with the `grg convert` command, which can convert
-any of `.vcf`, `.vcf.gz`, or `.bgen` to `.igd`.
+before generating a GRG, or use a BGZF-compressed VCF with tabix index. 
 
 ### Converting data to IGD
 
 ```
-grg convert <.vcf/.vcf.gz/.bgen file> <.igd output filename>
+pip install igdtools
+igdtools <.vcf/.vcf.gz file> -o <.igd output filename>
 ```
 Then GRG can be constructed from IGD.
 ```
-grg construct <.igd filename>
+grg construct -j <threads> <.igd filename>
 ```
 
 ### Converting Tree-Sequence to GRG
@@ -110,3 +112,7 @@ grg process freq <.grg input filename>
 grg process stats <.grg input filename>
 ```
 
+### More applications
+
+Install [grapp](https://github.com/aprilweilab/grapp) for more applications, particularly integration
+with [scipy's sparse linear algebra library](https://docs.scipy.org/doc/scipy/reference/sparse.linalg.html#module-scipy.sparse.linalg).

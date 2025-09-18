@@ -752,10 +752,6 @@ protected:
     std::vector<std::tuple<NodeID, MutationId, NodeID>> m_mutIdsByNodeIdAndMiss;
     bool m_mutIdsByNodeIdSorted{false};
 
-    // As sample size increases, the number of Mutations and Nodes roughly converge (or at least, you
-    // can assume |Nodes| <= 2*|Mutations|). Therefore, storing things by Node is fine as long as it
-    // is efficient.
-
     // (Optional) list of population descriptions. The position corresponds to the population
     // ID, which can be used to tag nodes.
     std::vector<std::string> m_populations;
