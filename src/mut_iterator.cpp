@@ -280,11 +280,12 @@ IGDMutationIterator::IGDMutationIterator(const char* filename, FloatRange genome
             m_genomeRange = genomeRange.denormalized(range.first, range.second);
         }
     }
+    // Ick. This is a bit complex. Because of the way IGD stores variants (one
+    // row per allele), we want to always start on a new position boundary. The
+    // code in buffer_next() always ends on a position boundary.
     if (useVariantRange()) {
         m_startVariant = m_genomeRange.start();
         release_assert(inRange(m_startVariant, 0));
-        // Because of the way IGD stores variants (one row per allele), we want to always start
-        // on a new position boundary. The code in buffer_next() always ends on a position boundary.
         if (m_startVariant > 0) {
             const size_t previousPosition = m_igd->getPosition(m_startVariant - 1);
             size_t position = m_igd->getPosition(m_startVariant);
@@ -292,6 +293,16 @@ IGDMutationIterator::IGDMutationIterator(const char* filename, FloatRange genome
                 position = m_igd->getPosition(++m_startVariant);
             }
         }
+        size_t endVariant = m_genomeRange.end();
+        if (endVariant < m_igd->numVariants()) {
+            release_assert(endVariant > m_startVariant);
+            const size_t origPosition = m_igd->getPosition(endVariant - 1);
+            while (endVariant < m_igd->numVariants() && m_igd->getPosition(endVariant) == origPosition) {
+                endVariant++;
+            }
+        }
+        // Update the range.
+        m_genomeRange = IntRange(m_startVariant, endVariant);
     } else {
         m_startVariant = m_igd->lowerBoundPosition(m_genomeRange.start());
         release_assert(inRange(m_startVariant, m_igd->getPosition(m_startVariant)));
@@ -307,7 +318,7 @@ void IGDMutationIterator::getMetadata(size_t& ploidy, size_t& numIndividuals, bo
 
 size_t IGDMutationIterator::countMutations() const {
     if (useVariantRange()) {
-        return m_genomeRange.end() - m_genomeRange.start();
+        return m_genomeRange.span();
     }
     size_t mutations = 0;
     for (size_t i = m_startVariant; i < m_igd->numVariants(); i++) {
