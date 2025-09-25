@@ -78,6 +78,8 @@ public:
 
     size_t end() const { return m_end; }
 
+    size_t span() const { return m_end - m_start; }
+
     bool contains(size_t position) const { return position >= m_start && position < m_end; }
 
 private:
