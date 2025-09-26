@@ -936,7 +936,10 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
     if (treeFiles.size() > 1) {
         std::list<std::string> toMerge = treeFiles;
         toMerge.pop_front();
-        result->merge(toMerge, true, false);
+        // We ignore range violations because the way we build trees above may overlap at the first/last
+        // mutation of each tree.
+        result->merge(
+            toMerge, /*combineNodes=*/true, /*useSampleSets=*/false, /*verbose=*/false, /*ignoreRangeViolations=*/true);
     }
     for (const auto& filename : treeFiles) {
         deleteFile(filename);

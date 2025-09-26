@@ -952,11 +952,16 @@ public:
      *      The default algorithm just uses the (mapped) children to determine if two nodes can be
      *      combined, which combines fewer nodes overall, but also retains more hierarchy in the final
      *      graph.
+     * @param[in] verbose Emit more information to stdout.
+     * @param[in] ignoreRangeViolations Merge graphs that might have overlapping positions.
+     * @param[in] positionAdjust Adjust each otherGrgFiles GRG by the given basepair position. I.e.,
+     *      for each Mutation in otherGrgFiles[i], add positionAdjust[i] to its mutation position.
      */
     void merge(const std::list<std::string>& otherGrgFiles,
                bool combineNodes = true,
                bool useSampleSets = false,
                bool verbose = false,
+               bool ignoreRangeViolations = false,
                std::vector<BpPosition> positionAdjust = {});
 
     /**

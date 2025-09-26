@@ -314,12 +314,14 @@ private:
     const BpPosition m_adjust;
 };
 
+static inline bool inrange(const std::pair<BpPosition, BpPosition>& range, const BpPosition position) {
+    return (position >= range.first && position < range.second);
+}
+
 static inline bool overlap(const std::pair<BpPosition, BpPosition>& range1,
                            const std::pair<BpPosition, BpPosition>& range2) {
-    return (range1.first >= range2.first && range1.first < range2.second) ||
-           (range1.second >= range2.first && range1.second < range2.second) ||
-           (range2.first >= range1.first && range2.first < range1.second) ||
-           (range2.second >= range1.first && range2.second < range1.second);
+    return inrange(range2, range1.first) || inrange(range2, range1.second) || inrange(range1, range2.first) ||
+           inrange(range1, range2.second);
 }
 
 template <typename Hasher, typename Mapper>
@@ -327,6 +329,7 @@ void mergeHelper(MutableGRG& grg,
                  const std::list<std::string>& otherGrgFiles,
                  bool combineNodes,
                  bool verbose,
+                 bool ignoreRangeViolations,
                  const std::vector<BpPosition>& positionAdjust) {
     api_exc_check(positionAdjust.empty() || (positionAdjust.size() == otherGrgFiles.size()),
                   "Must adjust all positions (can use 0) if adjusting any position.");
@@ -360,8 +363,13 @@ void mergeHelper(MutableGRG& grg,
         // Check this range against all other seen ranges. They must overlap (after any adjustments)
         auto mutRange = otherGrg->getBPRange();
         mutRange = {mutRange.first + adjust, mutRange.second + adjust};
-        for (const auto& seen : seenRanges) {
-            api_exc_check(!overlap(seen, mutRange), "Cannot merge graphs with overlapping mutation ranges");
+        if (!ignoreRangeViolations) {
+            for (const auto& seen : seenRanges) {
+                api_exc_check(!overlap(seen, mutRange),
+                              "Cannot merge graphs with overlapping mutation ranges: ("
+                                  << seen.first << "-" << seen.second << "), (" << mutRange.first << "-"
+                                  << mutRange.second << ")");
+            }
         }
 
         seenMutations += otherGrg->numMutations();
@@ -404,12 +412,14 @@ void MutableGRG::merge(const std::list<std::string>& otherGrgFiles,
                        bool combineNodes,
                        bool useSampleSets,
                        bool verbose,
+                       bool ignoreRangeViolations,
                        std::vector<BpPosition> positionAdjust) {
     if (useSampleSets) {
         mergeHelper<SampleHasherVisitor, NodeMapperVisitorSamples>(
-            *this, otherGrgFiles, combineNodes, verbose, positionAdjust);
+            *this, otherGrgFiles, combineNodes, verbose, ignoreRangeViolations, positionAdjust);
     } else {
-        mergeHelper<NodeHasherVisitor, NodeMapperVisitor>(*this, otherGrgFiles, combineNodes, verbose, positionAdjust);
+        mergeHelper<NodeHasherVisitor, NodeMapperVisitor>(
+            *this, otherGrgFiles, combineNodes, verbose, ignoreRangeViolations, positionAdjust);
     }
 }
 
