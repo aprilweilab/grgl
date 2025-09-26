@@ -673,6 +673,8 @@ PYBIND11_MODULE(_grgl, m) {
              py::arg("combine_nodes") = true,
              py::arg("use_sample_sets") = false,
              py::arg("verbose") = false,
+             py::arg("ignore_range_violations") = false,
+             py::arg("position_adjust") = std::vector<grgl::BpPosition>(),
              R"^(
             Merge one or more GRGs into this one. Only succeeds if all GRGs have the same number of
 
@@ -694,6 +696,16 @@ PYBIND11_MODULE(_grgl, m) {
             :param use_sample_sets: False by default. Use the more expensive merging algorithm that combines
                 nodes if they have the same samples beneath. This produces a smaller graph, but loses hierarchy.
             :type use_sample_sets: bool
+            :param verbose: False by default. Set to True to get more output on stdout.
+            :type verbose: bool
+            :param ignore_range_violations: False by default. Set to True to allow merging of graphs that
+                overlap in base-pair positions.
+            :type ignore_range_violations: bool
+            :param position_adjust: Empty list by default. A list of adjustments to make to the positions of
+                the mutations in the other_grg_files. If specified, the length of the list must be the same as
+                the length of other_grg_files. Each position is an offset that is applied to all Mutation
+                positions in the corresponding GRG, before merging it in.
+            :type position_adjust: List[int]
         )^");
 
     m.def("load_mutable_grg", &grgl::loadMutableGRG, py::arg("filename"), py::arg("load_up_edges") = true, R"^(
