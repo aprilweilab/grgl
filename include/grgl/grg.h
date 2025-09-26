@@ -956,7 +956,8 @@ public:
     void merge(const std::list<std::string>& otherGrgFiles,
                bool combineNodes = true,
                bool useSampleSets = false,
-               bool verbose = false);
+               bool verbose = false,
+               std::vector<BpPosition> positionAdjust = {});
 
     /**
      * Retrieve a node by ID.
