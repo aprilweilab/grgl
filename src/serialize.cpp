@@ -191,13 +191,16 @@ public:
         return false;
     }
 
+    // TODO: unit test this function. it is complex now, and hard to test externally.
     // Set which samples we want to keep; if never called then we keep all samples.
-    NodeIDSizeT setKeepSamples(const grgl::GRGPtr& grg, grgl::NodeIDList sampleIDList) {
+    NodeIDSizeT setKeepSamples(const grgl::GRGPtr& grg, grgl::NodeIDList sampleIDList, bool warn) {
         NodeIDSizeT numSamples = 0;
         NodeID prevSampleId = INVALID_NODE_ID;
         std::sort(sampleIDList.begin(), sampleIDList.end());
         m_nodeIdMap.resize(sampleIDList.back() + 1, INVALID_NODE_ID);
         release_assert(m_revIdMap.empty());
+        const size_t ploidy = grg->getPloidy();
+        NodeIDList fullIndividuals;
         for (const auto sampleId : sampleIDList) {
             if (!grg->isSample(sampleId)) {
                 throw ApiMisuseFailure("Not a valid sampleId");
@@ -207,8 +210,44 @@ public:
                 m_nodeIdMap.at(sampleId) = newSampleId;
                 m_revIdMap.push_back(sampleId);
                 release_assert(m_revIdMap.size() == newSampleId + 1);
+
+                // Now check to see if we have this full individual. That means that nodeIdMap
+                // should have all PLOIDY consecutive haplotypes.
+                if ((sampleId % ploidy) == (ploidy - 1)) {
+                    bool fullIndividual = true;
+                    const NodeID individualId = sampleId / ploidy;
+                    const NodeID firstIndivSampleId = individualId * ploidy;
+                    for (NodeID c = 0; c < ploidy; c++) {
+                        if (m_nodeIdMap.at(firstIndivSampleId + c) == INVALID_NODE_ID) {
+                            fullIndividual = false;
+                            break;
+                        }
+                    }
+                    if (fullIndividual) {
+                        fullIndividuals.push_back(individualId);
+                    }
+                }
             }
             prevSampleId = sampleId;
+        }
+        // Drop the individual IDs and (optionally) warn the user if we have filted by anything other
+        // than individuals (e.g., selecting specific haplotypes). The IDs no longer make sense in that case.
+        if (grg->hasIndividualIds()) {
+            if ((numSamples % ploidy != 0) || (fullIndividuals.size() != numSamples / ploidy)) {
+                if (warn) {
+                    std::cerr << "GRG is being downsampled in a way that violates the haplotype-to-individual "
+                                 "relationship; individual IDs will be dropped from the resulting GRG"
+                              << std::endl;
+                }
+                m_filteredIndivIds = std::unique_ptr<CSRStringTable>(new CSRStringTable());
+            } else {
+                m_filteredIndivIds = std::unique_ptr<CSRStringTable>(new CSRStringTable(fullIndividuals.size()));
+                for (const NodeID keptIndiv : fullIndividuals) {
+                    std::vector<uint8_t> indivIdChars;
+                    grg->m_individualIds.getData(keptIndiv, indivIdChars);
+                    m_filteredIndivIds->appendData(indivIdChars.data(), indivIdChars.size());
+                }
+            }
         }
         m_nodeCounter = numSamples;
         m_newSampleCount = numSamples;
@@ -299,7 +338,7 @@ public:
                 m_newNodeData.setPopId(newNodeId, grg->getPopulationId(nodeId));
             } else {
                 // We should never visit a node more than once
-                assert(m_nodeIdMap[nodeId] == INVALID_NODE_ID);
+                release_assert(m_nodeIdMap[nodeId] == INVALID_NODE_ID);
 
                 NodeIDList children;
                 NodeIDSizeT parentCoals = grg->getNumIndividualCoals(nodeId);
@@ -352,7 +391,7 @@ public:
         if (nodeId == INVALID_NODE_ID) {
             return nodeId;
         }
-        return m_nodeIdMap[nodeId];
+        return m_nodeIdMap.at(nodeId);
     }
 
     NodeID getOldID(const NodeID nodeId) const {
@@ -375,12 +414,29 @@ public:
     EagerCSREdges32 m_edgeCSR;
     size_t m_bytesWritten{};
 
+    bool hasIndividualIds(const GRGPtr& grg) {
+        if (m_filteredIndivIds) {
+            return m_filteredIndivIds->numNodes() > 0;
+        }
+        return grg->hasIndividualIds();
+    }
+
+    CSRStringTable& getIndividualIds(const GRGPtr& grg) {
+        if (m_filteredIndivIds) {
+            m_filteredIndivIds->finalizeNodes();
+            return *m_filteredIndivIds;
+        }
+        grg->m_individualIds.finalizeNodes();
+        return grg->m_individualIds;
+    }
+
 private:
     std::ostream& m_outStream;
     // Maps old NodeID to new NodeID
     std::vector<NodeIDSizeT> m_nodeIdMap;
     NodeIDSizeT m_newSampleCount{};
     NodeIDSizeT m_nodeCounter{};
+    std::unique_ptr<CSRStringTable> m_filteredIndivIds;
     EdgeSizeT m_edgeCounter{};
     bool m_allowSimplify;
 };
@@ -424,7 +480,7 @@ simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutput
     RenumberAndWriteVisitor visitor(outStream, grg->numNodes(), allowSimplify);
     if (filter.isSpecified()) {
         if (filter.direction == TraversalDirection::DIRECTION_UP) {
-            header.sampleCount = visitor.setKeepSamples(grg, filter.seedList);
+            header.sampleCount = visitor.setKeepSamples(grg, filter.seedList, true);
             grg->visitTopo(visitor, TraversalDirection::DIRECTION_UP, filter.seedList);
         } else {
             assert(filter.direction == TraversalDirection::DIRECTION_DOWN);
@@ -502,11 +558,11 @@ simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutput
 
     // Individual IDs are optional. If we have them, they are all stored together in an unsorted,
     // unencoded, CSR table.
-    if (grg->hasIndividualIds()) {
-        grg->m_individualIds.finalizeNodes();
-        writeScalar<uint64_t>(grg->m_individualIds.numValueBytes(), outStream);
-        grg->m_individualIds.flushBuckets(outStream, /*clearData=*/false);
-        grg->m_individualIds.flushIndexes(outStream, /*clearData=*/false);
+    if (visitor.hasIndividualIds(grg)) {
+        CSRStringTable& iids = visitor.getIndividualIds(grg);
+        writeScalar<uint64_t>(iids.numValueBytes(), outStream);
+        iids.flushBuckets(outStream, /*clearData=*/false);
+        iids.flushIndexes(outStream, /*clearData=*/false);
         header.flags |= GRG_FLAG_HAS_INDIV_IDS;
     }
 
@@ -517,6 +573,7 @@ simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutput
             const MutationId& mutId = std::get<0>(item);
             if (visitor.keepMutation(mutId)) {
                 const NodeID missNodeId = visitor.getNewID(std::get<2>(item));
+                release_assert(missNodeId == INVALID_NODE_ID || missNodeId < header.nodeCount);
                 missingnessNodes.push_back(missNodeId);
             }
         }

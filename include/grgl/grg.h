@@ -775,6 +775,7 @@ protected:
     friend void readGrgCommon(const GRGFileHeader& header, const GRGPtr& grg, IFSPointer& inStream);
     friend std::pair<NodeIDSizeT, EdgeSizeT>
     simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutputFilter& filter, bool allowSimplify);
+    friend class RenumberAndWriteVisitor;
 
     // Google-test unit tests that need private/protected access.
     FRIEND_TEST(GRG, TestTopoVisit);
