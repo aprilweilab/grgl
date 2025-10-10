@@ -67,12 +67,6 @@ public:
     std::pair<BpPosition, BpPosition> bpRange;
 };
 
-// A string table is just a bunch of unencoded, unsorted characters. The CSR index lets us
-// get the i'th string efficiently. For very short strings (a few characters) this is not worth
-// the storage, because each index takes 4 bytes. For any string that is variable length and
-// expected to be more than 4 characters, this is a great representation.
-using CSRStringTable = CSRStorageImm<EagerFileVector, uint8_t, false, false>;
-
 /**
  * Abstract GRG base class.
  */
@@ -999,11 +993,6 @@ private:
     // True if we are tracking up edges -- not all analyses need them.
     bool m_hasUpEdges;
 };
-
-// Eager CSR sorted 32-bit edges, encoded.
-using EagerCSREdges32 = CSRStorageImm<EagerFileVector, uint32_t, true, true>;
-// Lazy CSR sorted 32-bit edges, encoded.
-using LazyCSREdges32 = CSRStorageImm<LazyFileVector, uint32_t, true, true>;
 
 class CSRGRG : public GRG {
 public:
