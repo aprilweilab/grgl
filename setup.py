@@ -12,11 +12,43 @@ C_MODULE_NAME = "_grgl"
 env_debug = int(os.environ.get("GRGL_DEBUG", 0))
 env_bgen = int(os.environ.get("GRGL_BGEN", 0))
 env_copy_bins = int(os.environ.get("GRGL_COPY_BINS", 0))
+env_cuda = os.environ.get("GRGL_CUDA", "auto").lower()
 
 THISDIR = os.path.realpath(os.path.dirname(__file__))
 
 
+def has_cuda():
+    """Check if CUDA is available on the system"""
+    try:
+        # Check for nvcc compiler
+        subprocess.check_output(['nvcc', '--version'], stderr=subprocess.DEVNULL)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+
+def should_enable_cuda():
+    """Determine if CUDA should be enabled based on environment and system"""
+    if env_cuda in ('1', 'true', 'on', 'yes'):
+        print("CUDA support: ENABLED (forced by GRGL_CUDA)")
+        return True
+    elif env_cuda in ('0', 'false', 'off', 'no'):
+        print("CUDA support: DISABLED (forced by GRGL_CUDA)")
+        return False
+    elif env_cuda == 'auto':
+        if has_cuda():
+            print("CUDA support: ENABLED (auto-detected)")
+            return True
+        else:
+            print("CUDA support: DISABLED (CUDA not available)")
+            return False
+    else:
+        print(f"Warning: Unknown GRGL_CUDA value '{env_cuda}', defaulting to auto-detect")
+        return has_cuda()
+
+
 copy_bins = bool(env_copy_bins)  # Copy executables to the top-level directory?
+enable_cuda = should_enable_cuda()
 extra_cmake_args = []
 build_type = "Release"
 if bool(env_debug):
@@ -75,6 +107,12 @@ class CMakeBuild(build_ext):
                 ),
                 "-DPYTHON_EXECUTABLE={}".format(sys.executable),
             ] + extra_cmake_args
+            
+            # Add CUDA support if enabled
+            if enable_cuda:
+                cmake_args.append("-DENABLE_CUDA=ON")
+            else:
+                cmake_args.append("-DENABLE_CUDA=OFF")
             pprint(cmake_args)
 
             if not os.path.exists(self.build_temp):
