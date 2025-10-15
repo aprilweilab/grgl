@@ -359,16 +359,14 @@ void IGDMutationIterator::buffer_next(size_t& totalSamples) {
                    position == m_igd->getPosition(m_currentVariant, isMissingDataRow, numCopies)) {
                 if (isMissingDataRow) {
                     if (emitMissingData()) {
+                        api_exc_check(numCopies != 1,
+                                      "Unphased IGD files do not support partial missingness at the individual level");
                         const bool needsSort = !missingSamples.empty();
                         auto sampleSet = m_igd->getSamplesWithAlt(m_currentVariant);
                         for (auto sampleId : sampleSet) {
-                            if (numCopies >= 1) {
-                                const size_t firstCopy = sampleId * m_igd->getPloidy();
-                                for (size_t j = 0; j < numCopies; j++) {
-                                    missingSamples.push_back(firstCopy + j);
-                                }
-                            } else {
-                                missingSamples.push_back(sampleId);
+                            const size_t firstCopy = sampleId * m_igd->getPloidy();
+                            for (size_t j = 0; j < m_igd->getPloidy(); j++) {
+                                missingSamples.push_back(firstCopy + j);
                             }
                         }
                         if (needsSort) {

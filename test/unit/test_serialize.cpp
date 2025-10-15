@@ -320,3 +320,51 @@ TEST(Serialization, SubsetSamples2) {
         }
     }
 }
+
+// Buffer that doesn't capture the output stream at all.
+class NoOpBuffer : public std::streambuf
+{
+public:
+  int overflow(int c) { return c; }
+};
+
+TEST(Serialization, KeepSamples) {
+    NoOpBuffer buffer;
+    std::ostream noopStream(&buffer);
+
+    // GRG with 4 diploid individuals.
+    MutableGRGPtr grg = sample8Grg();
+    ASSERT_EQ(grg->numSamples(),  8);
+    ASSERT_EQ(grg->numIndividuals(),  4);
+    grg->addIndividualId("i0");
+    grg->addIndividualId("i1");
+    grg->addIndividualId("i2");
+    grg->addIndividualId("i3");
+    ASSERT_TRUE(grg->hasIndividualIds());
+
+    {
+        RenumberAndWriteVisitor visitor(noopStream, grg->numNodes(), true);
+        ASSERT_TRUE(visitor.hasIndividualIds(grg));
+        ASSERT_EQ(visitor.getIndividualIds(grg).numNodes(), 4);
+        ASSERT_EQ(visitor.getPloidy(grg), 2);
+
+        // Restrict the visitor to only the second diploid individual.
+        visitor.setKeepSamples(grg, {2, 3}, false);
+        ASSERT_TRUE(visitor.hasIndividualIds(grg));
+        ASSERT_EQ(visitor.getIndividualIds(grg).numNodes(), 1);
+        ASSERT_EQ(visitor.getPloidy(grg), 2);
+    }
+
+    {
+        RenumberAndWriteVisitor visitor(noopStream, grg->numNodes(), true);
+        ASSERT_TRUE(visitor.hasIndividualIds(grg));
+        ASSERT_EQ(visitor.getIndividualIds(grg).numNodes(), 4);
+        ASSERT_EQ(visitor.getPloidy(grg), 2);
+
+        // Restrict the visitor to random haplotypes -- the ploidy will be downgraded to 1
+        visitor.setKeepSamples(grg, {1, 2, 7}, false);
+        ASSERT_FALSE(visitor.hasIndividualIds(grg));
+        ASSERT_EQ(visitor.getIndividualIds(grg).numNodes(), 0);
+        ASSERT_EQ(visitor.getPloidy(grg), 1);
+    }
+}
