@@ -129,10 +129,10 @@ HaplotypeWindow createWindow(const size_t firstMutationIdx,
     HapIdx nextHapIdx = 1;
 
     // The hap index 0 is always the empty vector (no mutations)
-    result.hapMap.emplace(HaplotypeVector(window[0].size()), 0);
+    result.hapMap.emplace(HaplotypeVector(window.at(0).size()), 0);
 
     for (NodeID sampleId = 0; sampleId < window.size(); sampleId++) {
-        const auto inserted = result.hapMap.emplace(window[sampleId], nextHapIdx);
+        const auto inserted = result.hapMap.emplace(window.at(sampleId), nextHapIdx);
         // If we inserted it, it is new (unique so far).
         if (inserted.second) {
             nextHapIdx++;
@@ -141,7 +141,7 @@ HaplotypeWindow createWindow(const size_t firstMutationIdx,
         sampleHapVects[sampleId].emplace_back(samplesHapIdx);
 
         // Clear out the bitvector for this sample so we can reuse it for the next window.
-        memset(window[sampleId].data(), 0, window[sampleId].size() * sizeof(HapVectorT));
+        memset(window.at(sampleId).data(), 0, window.at(sampleId).size() * sizeof(HapVectorT));
     }
 
     const size_t numHaps = result.hapMap.size();
@@ -304,7 +304,7 @@ void getHapSegments(MutationIterator& mutIterator,
 
         hapContext.allMutations.push_back(std::move(mutAndSamples.mutation));
         for (size_t i = 0; i < mutAndSamples.samples.size(); i++) {
-            setBit(window[mutAndSamples.samples[i]], windex);
+            setBit(window.at(mutAndSamples.samples[i]), windex);
         }
         windex++;
 
