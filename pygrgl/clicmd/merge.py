@@ -43,6 +43,12 @@ def add_options(subparser):
         "This reuses less hierarchy in the graph, but can produce a smaller graph. "
         "Slower and more RAM intensive.",
     )
+    subparser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Verbose output.",
+    )
 
 
 def merge_command(args):
@@ -78,7 +84,7 @@ def merge_command(args):
         input_files[1:],
         combine_nodes=not args.no_combine,
         use_sample_sets=True if args.use_samples else False,
-        verbose=False,
+        verbose=args.verbose,
         position_adjust=adjust_positions[1:],
     )
     save_grg(target, args.out_file)
