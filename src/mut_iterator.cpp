@@ -364,9 +364,13 @@ void IGDMutationIterator::buffer_next(size_t& totalSamples) {
                         const bool needsSort = !missingSamples.empty();
                         auto sampleSet = m_igd->getSamplesWithAlt(m_currentVariant);
                         for (auto sampleId : sampleSet) {
-                            const size_t firstCopy = sampleId * m_igd->getPloidy();
-                            for (size_t j = 0; j < m_igd->getPloidy(); j++) {
-                                missingSamples.push_back(firstCopy + j);
+                            if (m_igd->isPhased()) {
+                                missingSamples.emplace_back(sampleId);
+                            } else {
+                                const size_t firstCopy = sampleId * m_igd->getPloidy();
+                                for (size_t j = 0; j < m_igd->getPloidy(); j++) {
+                                    missingSamples.emplace_back(firstCopy + j);
+                                }
                             }
                         }
                         if (needsSort) {
