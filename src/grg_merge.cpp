@@ -285,7 +285,7 @@ public:
             release_assert(nodeId < m_nodeIdToTargetNodeId.size());
             m_nodeIdToTargetNodeId[nodeId] = targetNodeId;
             const auto inserted = m_targetHashToNodeId.emplace(digest, targetNodeId);
-            release_assert(inserted.second); // Every hash must be unique.
+            release_assert(!m_combineNodes || inserted.second); // Every hash must be unique.
             // Copy node data.
             m_targetGrg.setNumIndividualCoals(targetNodeId, grg->getNumIndividualCoals(nodeId));
 
