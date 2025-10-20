@@ -1117,6 +1117,11 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
                                IOType* missMatrix) {
     release_assert(inputCols > 0);
     release_assert(inputRows > 0);
+    std::cout << "Starting CPU GRG matMul with inputCols " << inputCols << ", inputRows " << inputRows
+              << ", outputSize " << outputSize << ", direction "
+              << ((direction == DIRECTION_DOWN) ? "DOWN" : "UP") << ", emitAllNodes " << emitAllNodes
+              << ", byIndividual " << byIndividual << ", nodeInit " << static_cast<int>(nodeInit)
+              << ", useBitVector " << useBitVector << std::endl;
     const size_t outputCols = outputSize / inputRows;
     validateMatMulInputs(this, inputCols, inputRows, direction, outputSize, emitAllNodes, byIndividual, outputCols);
     // When we do bitvector calculations, we must have the number of input rows be a multiple of the

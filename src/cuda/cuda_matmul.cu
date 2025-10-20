@@ -1,5 +1,6 @@
 // #define GRGL_CUDA_ENABLED
 #ifdef GRGL_CUDA_ENABLED
+#define WARMUP_GPU
 #ifndef GRGL_CUDA_MATMUL_CU
 #define GRGL_CUDA_MATMUL_CU
 
@@ -74,26 +75,97 @@ __global__ void cudaGRGTraversalDOWNSingleLevelKernel(
     }
 }
 
+template<class index_t, class data_t>
+__global__ void cudaGRGTraversalUPMultiElementSingleLevelKernel(
+        index_t* row_offsets,
+        index_t* col_indices,
+        data_t* values,
+        size_t start_row,
+        size_t end_row,
+        size_t rows_per_block,
+        index_t unit=1
+    ) {
+    index_t my_start_row = start_row + (blockIdx.x * rows_per_block);
+    index_t my_end_row = my_start_row + rows_per_block;
+    if (my_end_row > end_row) {
+        my_end_row = end_row;
+    }
+    int my_element_id = threadIdx.x % unit;
+    int my_offset = threadIdx.x / unit;
+    int stride = blockDim.x / unit;
+
+    for (index_t row = my_start_row; row < my_end_row; row++) {
+        index_t row_start = row_offsets[row];
+        index_t row_end = row_offsets[row + 1];
+        data_t sum = 0;
+        for (index_t idx = row_start + my_offset; idx < row_end; idx += stride) {
+            index_t col = col_indices[idx];
+            sum += values[col * unit + my_element_id];
+        }
+        // Use atomicAdd to update the value
+        atomicAdd(&values[row * unit + my_element_id], sum);
+        
+    }
+}
+
+// this kernel deals with the situation where each node has multiple elements, i.e. the value for a node is a vector
+// One threadblock is responsible for one row at a time.
+// Unit should be smaller or equal to the number of threads per threadblock for this kernel
+// Number of threads per threadblock should be a multiplication of unit
+template<class index_t, class data_t>
+__global__ void cudaGRGTraversalDOWNMultiElementSingleLevelKernel(
+        index_t* row_offsets,
+        index_t* col_indices,
+        data_t* values,
+        size_t start_row,
+        size_t end_row,
+        size_t rows_per_block,
+        index_t unit=1
+    ) {
+    index_t my_start_row = start_row + (blockIdx.x * rows_per_block);
+    index_t my_end_row = my_start_row + rows_per_block;
+    if (my_end_row > end_row) {
+        my_end_row = end_row;
+    }
+    int my_element_id = threadIdx.x % unit;
+    int my_offset = threadIdx.x / unit;
+    int stride = blockDim.x / unit;
+
+    for (index_t row = my_start_row; row < my_end_row; row ++) {
+        index_t row_start = row_offsets[row];
+        index_t row_end = row_offsets[row + 1];
+        data_t my_val = values[row * unit + my_element_id];
+
+        for (index_t idx = row_start + my_offset; idx < row_end; idx += stride) {
+            index_t col = col_indices[idx];
+            atomicAdd(&values[col * unit + my_element_id], my_val);
+            // printf("Thread %d adding %f to row %d. New value is %f. My id is %d\n", threadIdx.x, my_val, col, values[col], row);
+        }
+    }
+}
+
 // Reorder data on CPU
 // The i-th element in src is moved to permutation[i] in dst
 // NOT optimized for performance
 template <class index_t, class data_t>
-void reorder(data_t* dst, const data_t* src, const std::vector<index_t>& permutation, size_t st, size_t ed) {
+void reorder(data_t* dst, const data_t* src, const std::vector<index_t>& permutation, size_t st, size_t ed, size_t unit=1) {
     for (size_t i = st; i < ed; i++) {
         size_t new_idx = permutation[i];
-        dst[new_idx] = src[i];
+        for (size_t u = 0; u < unit; u++) {
+            dst[new_idx * unit + u] = src[i * unit + u];
+        }
         // std::cout << "Reorder input: old idx " << i << " to new idx " << new_idx << " with value " << src[i] << std::endl;
     }
 }
 
 template<class index_t, class data_t>
-void cudaTraverseUP(CudaCSR<index_t, data_t>& gpu_csr, data_t* h_sample_values, data_t* h_output_values) {
+void cudaTraverseUP(CudaCSR<index_t, data_t>& gpu_csr, data_t* h_sample_values, data_t* h_output_values, index_t unit=1) {
     // 1. set the initial values
     // assume the input values are reordered according to the GPU CSR format
     data_t* values;
-    cudaMalloc((void**)&values, gpu_csr.num_rows * sizeof(data_t));
-    cudaMemset(values, 0, gpu_csr.num_rows * sizeof(data_t));
-    cudaMemcpy(values, h_sample_values, gpu_csr.host_height_cutoffs[1] * sizeof(data_t), cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&values, gpu_csr.num_rows * sizeof(data_t) * unit);
+    cudaMemset(values, 0, gpu_csr.num_rows * sizeof(data_t) * unit);
+    cudaMemcpy(values, h_sample_values, gpu_csr.host_height_cutoffs[1] * sizeof(data_t) * unit, cudaMemcpyHostToDevice);
 
     // print level and level cutoffs
     std::cout << "GPU CSR max height: " << gpu_csr.max_height <<", height cutoffs: ";
@@ -106,48 +178,66 @@ void cudaTraverseUP(CudaCSR<index_t, data_t>& gpu_csr, data_t* h_sample_values, 
     auto time_start = std::chrono::high_resolution_clock::now();
     std::cout << "Starting GPU traversal..." << std::endl;
     // 2. launch the kernels level by level
+
+    // multiple iters here may not help
     for (size_t level = 1; level < gpu_csr.max_height; level++) {
         size_t start_row = gpu_csr.host_height_cutoffs[level];
         size_t end_row = gpu_csr.host_height_cutoffs[level+1];
         size_t num_rows = end_row - start_row;
 
-        constexpr int THREADS_PER_ROW = 8;
-        int block_size = 64;
-        int rows_per_block = 32;
-        int num_blocks = (num_rows + rows_per_block - 1) / rows_per_block;
-        cudaGRGTraversalUPSingleLevelKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size>>>(
-            gpu_csr.row_offsets,
-            gpu_csr.col_indices,
-            values,
-            start_row,
-            end_row,
-            rows_per_block
-        );
+        if (unit == 1) {
+            constexpr int THREADS_PER_ROW = 8;
+            int block_size = 64;
+            int rows_per_block = 32;
+            int num_blocks = (num_rows + rows_per_block - 1) / rows_per_block;
+            cudaGRGTraversalUPSingleLevelKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size>>>(
+                gpu_csr.row_offsets,
+                gpu_csr.col_indices,
+                values,
+                start_row,
+                end_row,
+                rows_per_block
+            );
+        } else {
+            constexpr int THREADS_PER_UNIT = 10;
+            int threads_per_block = unit * THREADS_PER_UNIT;
+            int rows_per_block = 32;
+            int num_blocks = (num_rows + rows_per_block - 1) / rows_per_block;
+            cudaGRGTraversalUPMultiElementSingleLevelKernel<index_t, data_t><<<num_blocks, threads_per_block>>>(
+                gpu_csr.row_offsets,
+                gpu_csr.col_indices,
+                values,
+                start_row,
+                end_row,
+                rows_per_block,
+                unit
+            );
+        }
         // std::cout << "Launched kernel for level " << level << " with start_row " << start_row << " and end_row " << end_row << std::endl;
     }
 
     cudaDeviceSynchronize();
     auto time_end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(time_end - time_start).count();
-    std::cout << "GPU traversal finished in " << duration << " ms." << std::endl;
+    std::cout << "GPU traversal finished in " << duration << " ms for " << 1 << " iteration" << std::endl;
 
     // gpu_csr.print();
     //std::vector<data_t> values_host(gpu_csr.num_rows);
     std::cout << "Finished GPU traversal." << std::endl;
     
     // copy back the result to host
-    cudaMemcpy(h_output_values, values, gpu_csr.num_rows * sizeof(data_t), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_output_values, values, gpu_csr.num_rows * sizeof(data_t) * unit, cudaMemcpyDeviceToHost);
     cudaFree(values);
 }
 
 template<class index_t, class data_t>
-void cudaTraverseDOWN(CudaCSR<index_t, data_t>& gpu_csr, data_t* h_mutation_values, data_t* h_output_values) {
+void cudaTraverseDOWN(CudaCSR<index_t, data_t>& gpu_csr, data_t* h_mutation_values, data_t* h_output_values, index_t unit=1) {
     // 1. set the initial values
     // assume the input values are reordered according to the GPU CSR format
     data_t* values;
-    cudaMalloc((void**)&values, gpu_csr.num_rows * sizeof(data_t));
-    cudaMemset(values, 0, gpu_csr.num_rows * sizeof(data_t));
-    cudaMemcpy(values, h_mutation_values, (gpu_csr.num_rows) * sizeof(data_t), cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&values, gpu_csr.num_rows * sizeof(data_t) * unit);
+    cudaMemset(values, 0, gpu_csr.num_rows * sizeof(data_t) * unit);
+    cudaMemcpy(values, h_mutation_values, (gpu_csr.num_rows) * sizeof(data_t) * unit, cudaMemcpyHostToDevice);
 
     // print level and level cutoffs
     std::cout << "GPU CSR max height: " << gpu_csr.max_height <<", height cutoffs: ";
@@ -165,18 +255,35 @@ void cudaTraverseDOWN(CudaCSR<index_t, data_t>& gpu_csr, data_t* h_mutation_valu
         size_t end_row = gpu_csr.host_height_cutoffs[level+1];
         size_t num_rows = end_row - start_row;
 
-        constexpr int THREADS_PER_ROW = 8;
-        int block_size = 64;
-        int rows_per_block = 32;
-        int num_blocks = (num_rows + rows_per_block - 1) / rows_per_block;
-        cudaGRGTraversalDOWNSingleLevelKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size>>>(
-            gpu_csr.row_offsets,
-            gpu_csr.col_indices,
-            values,
-            start_row,
-            end_row,
-            rows_per_block
-        );
+        if (unit == 1) {
+            constexpr int THREADS_PER_ROW = 8;
+            int block_size = 64;
+            int rows_per_block = 32;
+            int num_blocks = (num_rows + rows_per_block - 1) / rows_per_block;
+            cudaGRGTraversalDOWNSingleLevelKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size>>>(
+                gpu_csr.row_offsets,
+                gpu_csr.col_indices,
+                values,
+                start_row,
+                end_row,
+                rows_per_block
+            );
+        } else {
+            constexpr int THREADS_PER_UNIT = 10;
+            int threads_per_block = unit * THREADS_PER_UNIT;
+            int rows_per_block = 32;
+            int num_blocks = (num_rows + rows_per_block - 1) / rows_per_block;
+            cudaGRGTraversalDOWNMultiElementSingleLevelKernel<index_t, data_t><<<num_blocks, threads_per_block>>>(
+                gpu_csr.row_offsets,
+                gpu_csr.col_indices,
+                values,
+                start_row,
+                end_row,
+                rows_per_block,
+                unit
+            );
+            
+        }
         // std::cout << "Launched kernel for level " << level << " with start_row " << start_row << " and end_row " << end_row << std::endl;
     }
 
@@ -190,7 +297,7 @@ void cudaTraverseDOWN(CudaCSR<index_t, data_t>& gpu_csr, data_t* h_mutation_valu
     std::cout << "Finished GPU traversal." << std::endl;
     
     // copy back the result to host
-    cudaMemcpy(h_output_values, values, gpu_csr.num_rows * sizeof(data_t), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_output_values, values, gpu_csr.num_rows * sizeof(data_t) * unit, cudaMemcpyDeviceToHost);
     cudaFree(values);
 }
 
@@ -216,6 +323,9 @@ void GRG::matrixMultiplicationGPU(const IOType* inputMatrix,
 
     release_assert(inputCols > 0);
     release_assert(inputRows > 0);
+    release_assert(useBitVector == false); // Bitvector not supported on GPU yet
+    // cols are num of samples or mutations
+    // rows are num of different input vectors per sample/mutation
     const size_t outputCols = outputSize / inputRows;
     validateMatMulInputs(this, inputCols, inputRows, direction, outputSize, emitAllNodes, byIndividual, outputCols);
     // When we do bitvector calculations, we must have the number of input rows be a multiple of the
@@ -226,11 +336,11 @@ void GRG::matrixMultiplicationGPU(const IOType* inputMatrix,
     // The node value storage stores the different row values consecutively (so
     // similar to column-major order), in contrast to the input/output matrices
     // which are row-major.
-    const size_t nodesPerElem = useBitVector ? sizeof(NodeValueType) * 8 : 1;
+    const size_t nodesPerElem = 1; //useBitVector ? sizeof(NodeValueType) * 8 : 1;
     release_assert(effectiveInputRows % nodesPerElem == 0);
     std::vector<NodeValueType> nodeValues(numNodes() * effectiveInputRows / nodesPerElem);
 
-    release_assert(effectiveInputRows / nodesPerElem == 1); // only support 1 row for GPU now
+    // release_assert(effectiveInputRows / nodesPerElem == 1); // only support 1 row for GPU now
 
     switch (nodeInit) {
     case NIE_XTX:
@@ -250,7 +360,7 @@ void GRG::matrixMultiplicationGPU(const IOType* inputMatrix,
         release_assert(false); // Non-ordered nodes not supported on GPU
     }
 
-    std::vector<data_t> output_reordered(numNodes(), 0);
+    std::vector<data_t> output_reordered(numNodes() * effectiveInputRows / nodesPerElem, 0);
 
     // convert the graph to GPU CSR format
     // currently this only supports ordered nodes, and is executed every time for matrixMultiplicationGPU
@@ -270,6 +380,7 @@ void GRG::matrixMultiplicationGPU(const IOType* inputMatrix,
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(time_ed - time_st).count();
     std::cout << "Converted GRG to GPU CSR format with " << gpu_csr.num_rows << " rows and " << gpu_csr.nnz << " non-zeros." << std::endl;
     std::cout << "Time taken for conversion: " << duration << " ms" << std::endl;
+    visitor.printChildCounts();
 
     if (direction == DIRECTION_DOWN) {
         // Downward, we are calculating "how do the mutations impact the samples?"
@@ -296,15 +407,22 @@ void GRG::matrixMultiplicationGPU(const IOType* inputMatrix,
             }
         }
 
-        std::vector<data_t> input_reordered(numNodes(), 0);
+        std::vector<data_t> input_reordered(numNodes() * effectiveInputRows, 0);
 
-        std::vector<data_t> output(numNodes(), 0);
+        std::vector<data_t> output(numNodes() * effectiveInputRows, 0);
 
-        reorder<index_t, data_t>(input_reordered.data(), nodeValues.data(), visitor.getNewId(), 0, numNodes());
+        reorder<index_t, data_t>(input_reordered.data(), nodeValues.data(), visitor.getNewId(), 0, numNodes(), effectiveInputRows);
 
-        cudaTraverseDOWN<index_t, data_t>(gpu_csr, input_reordered.data(), output.data());
+#ifdef WARMUP_GPU
+        // warm up
+        for (size_t i = 0; i < 3; i++) {
+            cudaTraverseDOWN<index_t, data_t>(gpu_csr, input_reordered.data(), output.data(), effectiveInputRows);
+        }
+#endif
 
-        reorder<index_t, data_t>(output_reordered.data(), output.data(), visitor.getOldId(), 0, numNodes());
+        cudaTraverseDOWN<index_t, data_t>(gpu_csr, input_reordered.data(), output.data(), effectiveInputRows);
+
+        reorder<index_t, data_t>(output_reordered.data(), output.data(), visitor.getOldId(), 0, numNodes(), effectiveInputRows);
 
         if (!emitAllNodes) {
             for (size_t row = 0; row < inputRows; row++) {
@@ -324,6 +442,7 @@ void GRG::matrixMultiplicationGPU(const IOType* inputMatrix,
         // data_t* raw_input = new data_t[numSamples()];
         // std::vector<data_t> raw_input(numSamples() * effectiveInputRows, 0);
         // This is for initial values
+        // release_assert(effectiveInputRows == 1); // only support 1 row for GPU now
         for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
             assert(sampleId < inputCols);
             const size_t base = sampleId * effectiveInputRows;
@@ -336,14 +455,32 @@ void GRG::matrixMultiplicationGPU(const IOType* inputMatrix,
             }
         }
         // reorder the input according to the GPU CSR format
-        std::vector<data_t> values(numSamples(), 0);
-        std::vector<data_t> output(numNodes(), 0);
+        std::vector<data_t> values(numSamples() * effectiveInputRows, 0);
+        std::vector<data_t> output(numNodes() * effectiveInputRows, 0);
 
-        reorder<index_t, data_t>(values.data(), nodeValues.data(), visitor.getNewId(), 0, numSamples());
-        
-        cudaTraverseUP<index_t, data_t>(gpu_csr, values.data(), output.data());
+        reorder<index_t, data_t>(values.data(), nodeValues.data(), visitor.getNewId(), 0, numSamples(), effectiveInputRows);
 
-        reorder<index_t, data_t>(output_reordered.data(), output.data(), visitor.getOldId(), 0, numNodes());
+// #define GRGL_GPU_CONTROLLED_EXP
+#ifdef GRGL_GPU_CONTROLLED_EXP
+        auto max_height = gpu_csr.max_height;
+        for (int height = 1; height < max_height; height++) {
+            std::cout << "Processing height " << height << std::endl;
+            gpu_csr.max_height = height;
+            cudaTraverseUP<index_t, data_t>(gpu_csr, values.data(), output.data(), effectiveInputRows);
+        }   
+        gpu_csr.max_height = max_height;
+#endif
+
+#ifdef WARMUP_GPU
+        // warm up
+        for (size_t i = 0; i < 3; i++) {
+            cudaTraverseUP<index_t, data_t>(gpu_csr, values.data(), output.data(), effectiveInputRows);
+        }
+#endif
+
+        cudaTraverseUP<index_t, data_t>(gpu_csr, values.data(), output.data(), effectiveInputRows);
+
+        reorder<index_t, data_t>(output_reordered.data(), output.data(), visitor.getOldId(), 0, numNodes(), effectiveInputRows);
 
         if (!emitAllNodes) {            
             for (size_t row = 0; row < inputRows; row++) {

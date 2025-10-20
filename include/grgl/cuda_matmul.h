@@ -175,6 +175,8 @@ public:
         host_row_offsets.resize(m_num_nodes + 1, 0);
         std::vector<index_t> host_col_indices;
 
+        m_childCounts.resize(m_maxHeight, 0);
+
         index_t current_col_index = 0;
         for (int h = 0; h < m_maxHeight; h++) {
             for (size_t i = 0; i < m_oldId[h].size(); i++) {
@@ -185,6 +187,7 @@ public:
                 
                 // for each down edge, we need to find its new id
                 auto downEdges = grg->getDownEdges(old_id);
+                m_childCounts[h] += downEdges.size();
                 for (const auto& child : downEdges) {
                     release_assert(child < grg->numNodes());
                     auto child_new_id = m_newId[child];
@@ -225,11 +228,26 @@ public:
         return flat_new_id;
     }
 
+    void printChildCounts() const {
+        std::cout << "Child counts per height:" << std::endl;
+        for (size_t h = 0; h < m_childCounts.size(); h++) {
+            std::cout << "Height " << h << ": " << m_childCounts[h] << std::endl;
+        }
+    }
+
+    void printNodeCounts() const {
+        std::cout << "Node counts per height:" << std::endl;
+        for (size_t h = 0; h < m_oldId.size(); h++) {
+            std::cout << "Height " << h << ": " << m_oldId[h].size() << std::endl;
+        }
+    }
+
 private:
     index_t m_maxHeight;
     size_t m_num_nodes;
     size_t m_num_elements;
 
+    std::vector<size_t> m_childCounts; // sum of child counts for nodes of the same height
     std::vector<std::vector<index_t>> m_oldId;  // new_id -> old_id mapping
     std::vector<std::pair<index_t, index_t>> m_newId; // old_id -> new_id mapping
 
