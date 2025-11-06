@@ -42,7 +42,10 @@ inline py::array_t<T> dispatchDotProd(
     py::array_t<T> result(outCols);
     py::buffer_info resultBuf = result.request();
     memset(resultBuf.ptr, 0, outCols * sizeof(T));
-    grg->matrixMultiplication<T, T, false>((const T*)buffer.ptr, inCols, 1, direction, (T*)resultBuf.ptr, outCols);
+    {
+        py::gil_scoped_release release;
+        grg->matrixMultiplication<T, T, false>((const T*)buffer.ptr, inCols, 1, direction, (T*)resultBuf.ptr, outCols);
+    }
     return std::move(result);
 }
 
@@ -130,17 +133,21 @@ inline py::array_t<IOType> dispatchMult(grgl::GRGPtr& grg,
         }
     }
 
-    grg->matrixMultiplication<IOType, NodeValueType, useBitVector>((const IOType*)buffer.ptr,
-                                                                   inCols,
-                                                                   rows,
-                                                                   direction,
-                                                                   (IOType*)resultBuf.ptr,
-                                                                   outSize,
-                                                                   emitAllNodes,
-                                                                   byIndividual,
-                                                                   (const IOType*)initBuffer.ptr,
-                                                                   nodeInitMode,
-                                                                   (IOType*)missBuffer.ptr);
+    // We release the GIL during the actual matrix multiplication, so that threaded Python code can get speedup.
+    {
+        py::gil_scoped_release release;
+        grg->matrixMultiplication<IOType, NodeValueType, useBitVector>((const IOType*)buffer.ptr,
+                                                                       inCols,
+                                                                       rows,
+                                                                       direction,
+                                                                       (IOType*)resultBuf.ptr,
+                                                                       outSize,
+                                                                       emitAllNodes,
+                                                                       byIndividual,
+                                                                       (const IOType*)initBuffer.ptr,
+                                                                       nodeInitMode,
+                                                                       (IOType*)missBuffer.ptr);
+    }
     return std::move(result);
 }
 
