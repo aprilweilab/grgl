@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -49,6 +50,95 @@ static bool cmpNodeSamples(const NodeSamples& ns1, const NodeSamples& ns2) {
     const size_t& samplesCount2 = std::get<1>(ns2);
     return samplesCount1 < samplesCount2;
 }
+
+// What percentage of total samples must be covered before we switch to dense bitvecs
+#define USE_DENSE_COVERAGE_PERCENT (0.005f)
+
+class SampleCoverageSet {
+public:
+    /// the number of total samples
+    virtual size_t totalSamples() const = 0;
+
+    /// number of elements in the set, INCLUDING DUPLICATES from below nodes
+    virtual size_t numSamplesCovered() const = 0;
+
+    virtual void mergeSampleCoverage(const SampleCoverageSet& other) = 0;
+
+    SampleCoverageSet() = default;
+    SampleCoverageSet(SampleCoverageSet&&) = delete;
+    SampleCoverageSet(const SampleCoverageSet&) = default;
+    SampleCoverageSet& operator=(const SampleCoverageSet&) = default;
+    SampleCoverageSet& operator=(SampleCoverageSet&&) = default;
+    virtual ~SampleCoverageSet() = default;
+};
+
+class SparseCoverageSet : public SampleCoverageSet {
+public:
+    explicit SparseCoverageSet(size_t m_totalSampleCount)
+        : m_totalSampleCount(m_totalSampleCount) {}
+
+    size_t totalSamples() const override { return m_totalSampleCount; }
+    size_t numSamplesCovered() const override { return m_sampleIdxs.size(); }
+
+    /// we can't merge a bitvec coverage set into a
+    void mergeSampleCoverage(const SampleCoverageSet& other) override {
+        if (const SparseCoverageSet* other_v = dynamic_cast<const SparseCoverageSet*>(&other)) {
+            m_sampleIdxs.insert(m_sampleIdxs.end(), other_v->m_sampleIdxs.begin(), other_v->m_sampleIdxs.begin());
+        }
+    }
+    friend class BitVecCoverageSet;
+
+private:
+    NodeIDList m_sampleIdxs;
+    size_t m_totalSampleCount;
+};
+
+/// A BitVec-backed set for coverage
+class BitVecCoverageSet : public SampleCoverageSet {
+public:
+    explicit BitVecCoverageSet(size_t totalSamples)
+        : m_totalSampleCount(totalSamples),
+          m_elems(totalSamples / m_blockSize) {}
+
+    explicit BitVecCoverageSet(const SparseCoverageSet& sparseCoverageSet)
+        : BitVecCoverageSet(sparseCoverageSet.totalSamples()) {
+        mergeSampleCoverage(sparseCoverageSet);
+    }
+
+    void add(NodeID index) {
+        size_t vecIdx = index / m_blockSize;
+        size_t offset = index % m_blockSize;
+        m_elems[vecIdx] |= (1U << offset);
+    }
+
+    size_t totalSamples() const override { return m_totalSampleCount; }
+    size_t numSamplesCovered() const override { return m_numSampleCoverage; }
+
+    void mergeSampleCoverage(const SampleCoverageSet& other) override {
+        m_numSampleCoverage += numSamplesCovered();
+        release_assert(totalSamples() == other.totalSamples());
+        if (const BitVecCoverageSet* other_v = dynamic_cast<const BitVecCoverageSet*>(&other)) {
+            uint64_t* __restrict data = m_elems.data();
+            const uint64_t* __restrict otherData = other_v->m_elems.data();
+            const size_t len = m_elems.size();
+
+            for (int i = 0; i < len; i++) {
+                data[i] |= otherData[i];
+            }
+
+        } else if (const SparseCoverageSet* other_v = dynamic_cast<const SparseCoverageSet*>(&other)) {
+            for (const uint32_t& sample : other_v->m_sampleIdxs) {
+                add(sample);
+            }
+        }
+    }
+
+private:
+    constexpr static size_t m_blockSize = 64;
+    std::vector<uint64_t> m_elems;
+    size_t m_totalSampleCount;
+    size_t m_numSampleCoverage{};
+};
 
 class TopoCandidateCollectorVisitor : public grgl::GRGVisitor {
 public:
@@ -78,10 +168,31 @@ public:
         // Map from an individual to which child contained it.
         std::unordered_map<NodeIDSizeT, NodeIDSizeT> individualToChild;
         NodeIDList candidateNodes;
+
         NodeIDList samplesBeneath;
         if (isSample) {
             samplesBeneath.emplace_back(nodeId);
         }
+
+        size_t childSampleCount{};
+        std::vector<const SampleCoverageSet*> childSampleCoverage{};
+        for (const auto& childId : grg->getDownEdges(nodeId)) {
+            const auto& childSampleIt = m_sampleCoverage.find(childId);
+            if (childSampleIt != m_sampleCoverage.end()) {
+                auto& sampleCoverage = (childSampleIt->second);
+                childSampleCount += sampleCoverage->numSamplesCovered();
+                childSampleCoverage.push_back(sampleCoverage.get());
+            }
+        }
+
+        std::unique_ptr<SampleCoverageSet> samplesBeneathSet;
+        double coveragePercent = (double)childSampleCount / (double)grg->numSamples();
+        if (coveragePercent > USE_DENSE_COVERAGE_PERCENT) {
+            samplesBeneathSet = std::unique_ptr<SampleCoverageSet>(new BitVecCoverageSet(grg->numSamples()));
+        } else {
+            samplesBeneathSet = std::unique_ptr<SampleCoverageSet>(new SparseCoverageSet(grg->numSamples()));
+        }
+
 #if CLEANUP_SAMPLE_SETS_MAPPING
         m_refCounts[nodeId] = grg->numUpEdges(nodeId);
 #endif
@@ -159,6 +270,7 @@ public:
         return std::move(result);
     }
 
+    std::unordered_map<NodeID, std::unique_ptr<SampleCoverageSet>> m_sampleCoverage;
     std::vector<NodeSamples> m_collectedNodes;
     std::unordered_map<NodeID, NodeIDList> m_nodeToSamples;
 
