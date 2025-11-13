@@ -52,7 +52,32 @@ static bool cmpNodeSamples(const NodeSamples& ns1, const NodeSamples& ns2) {
 }
 
 // What percentage of total samples must be covered before we switch to dense bitvecs
-#define USE_DENSE_COVERAGE_PERCENT (0.005f)
+#define USE_DENSE_COVERAGE_PERCENT (0.05f)
+
+class BitVecCoverageSet;
+class SparseCoverageSet;
+struct CoalescenceTracker {
+    friend class BitVecCoverageSet;
+    friend class SparseCoverageSet;
+
+    CoalescenceTracker() = default;
+    CoalescenceTracker(BitVecCoverageSet* seen, size_t* individualCoalCount)
+        : m_seenSet(seen),
+          m_coalsAdded(individualCoalCount) {}
+
+    CoalescenceTracker(std::unordered_map<NodeIDSizeT, NodeIDSizeT>* individualToChild,
+                       NodeID childNode,
+                       size_t* individualCoalCount)
+        : m_individualToChild(individualToChild),
+          m_childNode(childNode),
+          m_coalsAdded(individualCoalCount) {}
+
+private:
+    BitVecCoverageSet* m_seenSet = nullptr;
+    std::unordered_map<NodeIDSizeT, NodeIDSizeT>* m_individualToChild = nullptr;
+    size_t* m_coalsAdded = nullptr;
+    NodeID m_childNode{};
+};
 
 class SampleCoverageSet {
 public:
@@ -62,7 +87,10 @@ public:
     /// number of elements in the set, INCLUDING DUPLICATES from below nodes
     virtual size_t numSamplesCovered() const = 0;
 
-    virtual void mergeSampleCoverage(const SampleCoverageSet& other) = 0;
+    virtual bool empty() const = 0;
+    virtual void addElem(NodeID sample) = 0;
+
+    virtual void mergeSampleCoverage(const SampleCoverageSet& other, CoalescenceTracker tracker = {}) = 0;
 
     SampleCoverageSet() = default;
     SampleCoverageSet(SampleCoverageSet&&) = delete;
@@ -74,18 +102,40 @@ public:
 
 class SparseCoverageSet : public SampleCoverageSet {
 public:
-    explicit SparseCoverageSet(size_t m_totalSampleCount)
-        : m_totalSampleCount(m_totalSampleCount) {}
+    explicit SparseCoverageSet(size_t m_totalSampleCount, size_t reserve_amount = 0)
+        : m_totalSampleCount(m_totalSampleCount) {
+        if (reserve_amount > 0) {
+            m_sampleIdxs.reserve(reserve_amount);
+        }
+    }
 
     size_t totalSamples() const override { return m_totalSampleCount; }
     size_t numSamplesCovered() const override { return m_sampleIdxs.size(); }
+    bool empty() const override { return m_sampleIdxs.empty(); }
+    void addElem(NodeID sample) override { m_sampleIdxs.push_back(sample); }
+    void mergeSampleCoverage(const SampleCoverageSet& other, CoalescenceTracker tracker = {}) override {
+        // we can't merge a bitvec coverage set into a non-bitvec coverage set
+        const auto* otherSparse = dynamic_cast<const SparseCoverageSet*>(&other);
+        if (otherSparse == nullptr || otherSparse->m_sampleIdxs.empty()) {
+            return;
+        }
 
-    /// we can't merge a bitvec coverage set into a
-    void mergeSampleCoverage(const SampleCoverageSet& other) override {
-        if (const SparseCoverageSet* other_v = dynamic_cast<const SparseCoverageSet*>(&other)) {
-            m_sampleIdxs.insert(m_sampleIdxs.end(), other_v->m_sampleIdxs.begin(), other_v->m_sampleIdxs.begin());
+        // quick append when coalescence isn't tracked
+        if (tracker.m_individualToChild == nullptr) {
+            m_sampleIdxs.insert(m_sampleIdxs.end(), otherSparse->m_sampleIdxs.begin(), otherSparse->m_sampleIdxs.end());
+            return;
+        }
+
+        auto& individualToChild = tracker.m_individualToChild;
+        for (const NodeID sampleId : otherSparse->m_sampleIdxs) {
+            m_sampleIdxs.emplace_back(sampleId);
+            const auto insertPair = individualToChild->emplace(sampleId / 2, tracker.m_childNode);
+            if (!insertPair.second && insertPair.first->second != tracker.m_childNode) {
+                (*tracker.m_coalsAdded)++;
+            }
         }
     }
+
     friend class BitVecCoverageSet;
 
 private:
@@ -98,39 +148,116 @@ class BitVecCoverageSet : public SampleCoverageSet {
 public:
     explicit BitVecCoverageSet(size_t totalSamples)
         : m_totalSampleCount(totalSamples),
-          m_elems(totalSamples / m_blockSize) {}
+          m_elems((totalSamples + m_blockSize - 1) / m_blockSize) {}
 
     explicit BitVecCoverageSet(const SparseCoverageSet& sparseCoverageSet)
         : BitVecCoverageSet(sparseCoverageSet.totalSamples()) {
         mergeSampleCoverage(sparseCoverageSet);
     }
 
-    void add(NodeID index) {
-        size_t vecIdx = index / m_blockSize;
-        size_t offset = index % m_blockSize;
-        m_elems[vecIdx] |= (1U << offset);
-    }
-
     size_t totalSamples() const override { return m_totalSampleCount; }
+
     size_t numSamplesCovered() const override { return m_numSampleCoverage; }
 
-    void mergeSampleCoverage(const SampleCoverageSet& other) override {
-        m_numSampleCoverage += numSamplesCovered();
+    bool empty() const override { return m_numSamplesNonOverlapping == 0; }
+
+    void addElem(NodeID sample) override {
+        size_t vecIdx = sample / m_blockSize;
+        size_t offset = sample % m_blockSize;
+        m_numSampleCoverage += 1;
+        // if this bit was zero before, increment by one
+        m_numSamplesNonOverlapping += ~(m_elems[vecIdx] >> offset) & 1ULL;
+        m_elems[vecIdx] |= (1ULL << offset);
+    }
+
+    bool contains(const NodeID sample) const {
+        size_t vecIdx = sample / m_blockSize;
+        size_t offset = sample % m_blockSize;
+        return ((m_elems[vecIdx] >> offset) & 1ULL) != 0;
+    }
+
+    // original api does not dedup sets when computing sizes.
+    size_t numSamplesNonOverlapping() const { return m_numSamplesNonOverlapping; }
+
+    void mergeSampleCoverage(const SampleCoverageSet& other, CoalescenceTracker tracker = {}) override {
+        m_numSampleCoverage += other.numSamplesCovered();
         release_assert(totalSamples() == other.totalSamples());
+        // todo: add asserts to make sure CoalescenceTracker bitvecs (if present) are sized correctly.
         if (const BitVecCoverageSet* other_v = dynamic_cast<const BitVecCoverageSet*>(&other)) {
             uint64_t* __restrict data = m_elems.data();
             const uint64_t* __restrict otherData = other_v->m_elems.data();
             const size_t len = m_elems.size();
+            if (tracker.m_seenSet == nullptr) {
+                for (int i = 0; i < len; i++) {
+                    m_numSamplesNonOverlapping += __builtin_popcountll(otherData[i] & ~data[i]);
+                    data[i] |= otherData[i];
+                }
+            } else {
+                auto* seenBV = tracker.m_seenSet;
+                uint64_t* __restrict seen_d = seenBV->m_elems.data();
 
-            for (int i = 0; i < len; i++) {
-                data[i] |= otherData[i];
+                for (size_t i = 0; i < len; ++i) {
+                    uint64_t word = otherData[i];
+                    m_numSamplesNonOverlapping += __builtin_popcountll(word & ~data[i]);
+                    data[i] |= word;
+                    constexpr uint64_t EVEN = 0x5555555555555555ULL; // all even bits
+                    const uint64_t coalesced =
+                        (word | (word >> 1ULL)) & EVEN; // if either haplotype has it (i.e. shifted by 1)
+                    // if it's already present from another child, we coalesce at this node
+                    uint64_t new_coals = coalesced & seen_d[i];
+                    *tracker.m_coalsAdded += __builtin_popcountll(new_coals);
+                    seen_d[i] |= coalesced;
+                }
             }
 
         } else if (const SparseCoverageSet* other_v = dynamic_cast<const SparseCoverageSet*>(&other)) {
-            for (const uint32_t& sample : other_v->m_sampleIdxs) {
-                add(sample);
+            for (const uint32_t sample : other_v->m_sampleIdxs) {
+                addElem(sample);
+            }
+
+            if (tracker.m_seenSet != nullptr) {
+                auto* seenBV = tracker.m_seenSet;
+                auto& seenWords = seenBV->m_elems;
+
+                for (const uint32_t sample : other_v->m_sampleIdxs) {
+                    const size_t base = (static_cast<size_t>(sample) / 2) * 2; // even index per individual
+                    const size_t vecIdx = base / m_blockSize;
+                    const size_t offset = base % m_blockSize;
+                    const uint64_t mask = (uint64_t{1} << offset);
+
+                    if ((seenWords[vecIdx] & mask) != 0) {
+                        (*tracker.m_coalsAdded)++;
+                    }
+                    seenWords[vecIdx] |= mask;
+                }
             }
         }
+    }
+
+    bool overlapsWith(const SampleCoverageSet& other) const {
+        release_assert(totalSamples() == other.totalSamples());
+        if (const BitVecCoverageSet* other_v = dynamic_cast<const BitVecCoverageSet*>(&other)) {
+            if (numSamplesNonOverlapping() + other_v->numSamplesNonOverlapping() > totalSamples()) {
+                return true;
+            }
+            const uint64_t* __restrict data = m_elems.data();
+            const uint64_t* __restrict otherData = other_v->m_elems.data();
+            const size_t len = m_elems.size();
+            for (int i = 0; i < len; i++) {
+                if ((data[i] & otherData[i]) != 0) {
+                    return true;
+                }
+            }
+        } else if (const SparseCoverageSet* other_v = dynamic_cast<const SparseCoverageSet*>(&other)) {
+            for (const uint32_t sample : other_v->m_sampleIdxs) {
+                size_t vecIdx = sample / m_blockSize;
+                size_t offset = sample % m_blockSize;
+                if ((m_elems[vecIdx] & (1ULL << offset)) != 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
 private:
@@ -138,6 +265,7 @@ private:
     std::vector<uint64_t> m_elems;
     size_t m_totalSampleCount;
     size_t m_numSampleCoverage{};
+    size_t m_numSamplesNonOverlapping{};
 };
 
 class TopoCandidateCollectorVisitor : public grgl::GRGVisitor {
@@ -166,36 +294,61 @@ public:
 
         size_t individualCoalCount = 0;
         // Map from an individual to which child contained it.
-        std::unordered_map<NodeIDSizeT, NodeIDSizeT> individualToChild;
+        // std::unordered_map<NodeIDSizeT, NodeIDSizeT> individualToChild;
         NodeIDList candidateNodes;
 
-        NodeIDList samplesBeneath;
-        if (isSample) {
-            samplesBeneath.emplace_back(nodeId);
-        }
+        // NodeIDList samplesBeneath;
+        // if (isSample) {
+        //     samplesBeneath.emplace_back(nodeId);
+        // }
 
-        size_t childSampleCount{};
-        std::vector<const SampleCoverageSet*> childSampleCoverage{};
-        for (const auto& childId : grg->getDownEdges(nodeId)) {
-            const auto& childSampleIt = m_sampleCoverage.find(childId);
-            if (childSampleIt != m_sampleCoverage.end()) {
-                auto& sampleCoverage = (childSampleIt->second);
-                childSampleCount += sampleCoverage->numSamplesCovered();
-                childSampleCoverage.push_back(sampleCoverage.get());
-            }
-        }
+        size_t sampleCount = m_sampleCounts[nodeId];
 
         std::unique_ptr<SampleCoverageSet> samplesBeneathSet;
-        double coveragePercent = (double)childSampleCount / (double)grg->numSamples();
-        if (coveragePercent > USE_DENSE_COVERAGE_PERCENT) {
+        std::unique_ptr<BitVecCoverageSet> coalTrackerSet;
+        std::unordered_map<NodeIDSizeT, NodeIDSizeT> coalTrackerMap;
+
+        double coveragePercent = (double)sampleCount / (double)grg->numSamples();
+        bool dense = coveragePercent > USE_DENSE_COVERAGE_PERCENT;
+        if (dense) {
             samplesBeneathSet = std::unique_ptr<SampleCoverageSet>(new BitVecCoverageSet(grg->numSamples()));
+            coalTrackerSet = std::unique_ptr<BitVecCoverageSet>(new BitVecCoverageSet(grg->numSamples()));
         } else {
-            samplesBeneathSet = std::unique_ptr<SampleCoverageSet>(new SparseCoverageSet(grg->numSamples()));
+            size_t sparse_reserve_amount = sampleCount;
+            samplesBeneathSet =
+                std::unique_ptr<SampleCoverageSet>(new SparseCoverageSet(grg->numSamples(), sparse_reserve_amount));
+        }
+
+        if (isSample) {
+            samplesBeneathSet->addElem(nodeId);
         }
 
 #if CLEANUP_SAMPLE_SETS_MAPPING
         m_refCounts[nodeId] = grg->numUpEdges(nodeId);
 #endif
+
+        for (const auto& childId : grg->getDownEdges(nodeId)) {
+            const auto& childSampleIt = m_sampleCoverage.find(childId);
+            if (childSampleIt != m_sampleCoverage.end()) {
+                auto& childSamples = (childSampleIt->second);
+                if (childSamples->numSamplesCovered() > 1) {
+                    candidateNodes.emplace_back(childId);
+                }
+
+                CoalescenceTracker tracker{};
+                if (computeCoals) {
+                    if (dense) {
+                        tracker = CoalescenceTracker(coalTrackerSet.get(), &individualCoalCount);
+                    } else {
+                        tracker = CoalescenceTracker(&coalTrackerMap, childId, &individualCoalCount);
+                    }
+                }
+
+                samplesBeneathSet->mergeSampleCoverage(*childSamples, tracker);
+            }
+        }
+
+        /*
         for (const auto& childId : grg->getDownEdges(nodeId)) {
             const auto& childSampleIt = m_nodeToSamples.find(childId);
             if (childSampleIt != m_nodeToSamples.end()) {
@@ -214,12 +367,13 @@ public:
                     }
                 }
             }
-        }
+            }
+            */
         // Check if we had a mismatch in expected vs. total sample sets.
         release_assert(nodeId < m_sampleCounts.size());
         release_assert(m_sampleCounts[nodeId] <= grg->numSamples());
-        NodeIDSizeT missing = (m_sampleCounts[nodeId] - samplesBeneath.size());
-
+        // NodeIDSizeT missing = (m_sampleCounts[nodeId] - samplesBeneath.size());
+        NodeIDSizeT missing = (m_sampleCounts[nodeId] - samplesBeneathSet->numSamplesCovered());
         // We can only record coalescence counts if there are no samples missing.
         if (missing == 0 && computeCoals) {
             grg->setNumIndividualCoals(nodeId, individualCoalCount);
@@ -229,22 +383,27 @@ public:
         // and emit candidate nodes to map the mutation to.
         const bool keepGoing = (missing == 0 && !isRoot);
         if (missing == 0 && isRoot) {
-            m_collectedNodes.emplace_back(nodeId, samplesBeneath.size()); // Root is a candidate node.
+            // m_collectedNodes.emplace_back(nodeId, samplesBeneath.size());
+            m_collectedNodes.emplace_back(nodeId, samplesBeneathSet->numSamplesCovered()); // Root is a candidate node.
 #if CLEANUP_SAMPLE_SETS_MAPPING
             // Prevent candidates from having their samplesets garbage collected.
             m_refCounts[nodeId] = MAX_GRG_NODES + 1;
 #endif
-            m_nodeToSamples.emplace(nodeId, std::move(samplesBeneath));
+
+            m_sampleCoverage.emplace(nodeId, std::move(samplesBeneathSet));
+            // m_nodeToSamples.emplace(nodeId, std::move(samplesBeneath));
         } else if (!keepGoing) {
             for (const auto& candidate : candidateNodes) {
-                m_collectedNodes.emplace_back(candidate, m_nodeToSamples[candidate].size());
+                // m_collectedNodes.emplace_back(candidate, m_nodeToSamples[candidate].size());
+                m_collectedNodes.emplace_back(candidate, m_sampleCoverage[candidate]->numSamplesCovered());
 #if CLEANUP_SAMPLE_SETS_MAPPING
                 // Prevent candidates from having their samplesets garbage collected.
                 m_refCounts[candidate] = MAX_GRG_NODES + 1;
 #endif
             }
         } else {
-            m_nodeToSamples.emplace(nodeId, std::move(samplesBeneath));
+            m_sampleCoverage.emplace(nodeId, std::move(samplesBeneathSet));
+            // m_nodeToSamples.emplace(nodeId, std::move(samplesBeneath));
         }
 
 #if CLEANUP_SAMPLE_SETS_MAPPING
@@ -254,25 +413,30 @@ public:
                 continue;
             }
             if (--m_refCounts[childId] == 0) {
-                m_nodeToSamples.erase(childId);
+                // m_nodeToSamples.erase(childId);
+                m_sampleCoverage.erase(childId);
             }
         }
 #endif
         return keepGoing;
     }
 
-    NodeIDList getSamplesForCandidate(NodeID candidateId) {
-        NodeIDList result;
-        auto findIt = m_nodeToSamples.find(candidateId);
-        release_assert(findIt != m_nodeToSamples.end());
+    std::unique_ptr<SampleCoverageSet> getSamplesForCandidate(NodeID candidateId) {
+        // NodeIDList result;
+        std::unique_ptr<SampleCoverageSet> result;
+        // auto findIt = m_nodeToSamples.find(candidateId);
+        auto findIt = m_sampleCoverage.find(candidateId);
+        // release_assert(findIt != m_nodeToSamples.end());
+        release_assert(findIt != m_sampleCoverage.end());
         result = std::move(findIt->second);
-        m_nodeToSamples.erase(findIt);
+        // m_nodeToSamples.erase(findIt);
+        m_sampleCoverage.erase(findIt);
         return std::move(result);
     }
 
     std::unordered_map<NodeID, std::unique_ptr<SampleCoverageSet>> m_sampleCoverage;
     std::vector<NodeSamples> m_collectedNodes;
-    std::unordered_map<NodeID, NodeIDList> m_nodeToSamples;
+    // std::unordered_map<NodeID, NodeIDList> m_nodeToSamples;
 
 private:
     // These are the _total_ samples beneath each node (not restricted to current samples being searched)
@@ -312,7 +476,8 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
 
     const size_t ploidy = grg->getPloidy();
     // The set of nodes that we have covered so far (greedily extended)
-    NodeIDSet covered;
+    // NodeIDSet covered;
+    BitVecCoverageSet coalCoverSet{grg->numSamples()};
 
     TopoCandidateCollectorVisitor collector(sampleCounts);
     if (mutSamples.size() > 1) {
@@ -353,7 +518,10 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
 
     size_t individualCoalCount = 0;
     // Map from an individual to which child contained it.
-    std::unordered_map<NodeIDSizeT, NodeIDSizeT> individualToChild;
+    // std::unordered_map<NodeIDSizeT, NodeIDSizeT> individualToChild;
+
+    BitVecCoverageSet seenSet{grg->numSamples()};
+
     const NodeID mutNodeId = grg->makeNode(1, true);
     if (!newMutation.isMissing()) {
         grg->addMutation(newMutation, mutNodeId, missingnessNode);
@@ -362,11 +530,11 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     }
     NodeIDList addedNodes;
     const size_t numMutSamples = mutSamples.size();
-    while (!candidates.empty() && covered.size() < numMutSamples) {
+    while (!candidates.empty() && coalCoverSet.numSamplesNonOverlapping() < numMutSamples) {
         const auto& candidate = candidates.back();
         const auto candidateId = std::get<0>(candidate);
-        const NodeIDList candidateSet = collector.getSamplesForCandidate(candidateId);
-        release_assert(!candidateSet.empty());
+        const std::unique_ptr<SampleCoverageSet> candidateSet = collector.getSamplesForCandidate(candidateId);
+        release_assert(!candidateSet->empty());
         // Different candidates may cover different subsets of the sample set that
         // we are currently trying to cover. Those sample sets MUST be non-overlapping
         // or we will introduce a diamond into the graph:
@@ -376,8 +544,11 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
         // that both point to a sample (or samples) that we care about, so we have to
         // track that here. We do that by only considering candidates that have no overlap
         // with our already-covered set.
-        if (!setsOverlap(covered, candidateSet)) {
+        if (!coalCoverSet.overlapsWith(*candidateSet)) {
             // Mark all the sample nodes as covered.
+            CoalescenceTracker tracker = CoalescenceTracker(&seenSet, &individualCoalCount);
+            coalCoverSet.mergeSampleCoverage(*candidateSet, tracker);
+            /*
             for (const auto sampleId : candidateSet) {
                 covered.emplace(sampleId);
                 if (ploidy == 2) {
@@ -388,7 +559,8 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
                         individualCoalCount++;
                     }
                 }
-            }
+                }*/
+
             if (candidateId >= shapeNodeIdMax) {
                 stats.reusedMutNodes++;
             }
@@ -396,11 +568,11 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
             // Use this candidate (or the nodes below it) to cover the sample subset.
             stats.reusedNodes++;
             grg->connect(mutNodeId, candidateId);
-            stats.reusedNodeCoverage += candidateSet.size();
-            if (candidateSet.size() >= stats.reuseSizeHist.size()) {
+            stats.reusedNodeCoverage += candidateSet->numSamplesCovered();
+            if (candidateSet->numSamplesCovered() >= stats.reuseSizeHist.size()) {
                 stats.reuseSizeBiggerThanHistMax++;
             } else {
-                stats.reuseSizeHist[candidateSet.size()]++;
+                stats.reuseSizeHist[candidateSet->numSamplesCovered()]++;
             }
         }
         candidates.pop_back();
@@ -410,15 +582,16 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     // samples.
     NodeIDSet uncovered;
     for (const NodeID sampleNodeId : mutSamples) {
-        const auto coveredIt = covered.find(sampleNodeId);
-        if (coveredIt == covered.end()) {
+        if (!coalCoverSet.contains(sampleNodeId)) {
             uncovered.emplace(sampleNodeId);
             // The individual had already been seen and >=1 of the samples was previously uncovered,
             // then the new node we create is going to be the coalescence location for that individual.
             if (ploidy == 2) {
-                auto insertPair = individualToChild.emplace(sampleNodeId / ploidy, mutNodeId);
-                if (!insertPair.second) {
+                NodeID individualId = (sampleNodeId / 2) * 2;
+                if (seenSet.contains(individualId)) {
                     individualCoalCount++;
+                } else {
+                    seenSet.addElem(individualId);
                 }
             }
         }
