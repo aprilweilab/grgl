@@ -13,6 +13,10 @@
 #include "grgl/node_data.h"
 #include "util.h"
 #include <cuda_runtime.h>
+#include <vector>
+#include <iostream>
+#include <cassert>
+#include <algorithm>
 
 namespace grgl {
 
@@ -24,6 +28,8 @@ struct CudaCSR {
     index_t* row_offsets;    // Device pointer to row offsets (size: num_rows + 1)
     index_t* col_indices;    // Device pointer to column indices (size: nnz)
     index_t* host_height_cutoffs;
+    double* host_avg_child_counts;
+    index_t* host_heavy_cutoffs;
     size_t num_rows;         // Number of rows
     size_t num_cols;         // Number of columns  
     size_t nnz;              // Number of non-zero elements
@@ -32,6 +38,8 @@ struct CudaCSR {
     // Constructor
     CudaCSR() : row_offsets(nullptr), col_indices(nullptr), 
         host_height_cutoffs(nullptr),
+        host_avg_child_counts(nullptr),
+        host_heavy_cutoffs(nullptr),
         num_rows(0), num_cols(0), nnz(0), max_height(0)
     {}
     
@@ -51,6 +59,9 @@ struct CudaCSR {
         cudaMalloc(&row_offsets, (num_rows + 1) * sizeof(index_t));
         cudaMalloc(&col_indices, nnz * sizeof(index_t));
         host_height_cutoffs = new index_t[max_height + 1];
+        host_avg_child_counts = new double[max_height];
+        host_heavy_cutoffs = new index_t[max_height];
+        host_avg_child_counts[0] = 0.0;
     }
     
     // Free GPU memory
@@ -66,6 +77,14 @@ struct CudaCSR {
         if (host_height_cutoffs) {
             delete[] host_height_cutoffs;
             host_height_cutoffs = nullptr;
+        }
+        if (host_avg_child_counts) {
+            delete[] host_avg_child_counts;
+            host_avg_child_counts = nullptr;
+        }
+        if (host_heavy_cutoffs) {
+            delete[] host_heavy_cutoffs;
+            host_heavy_cutoffs = nullptr;
         }
         num_rows = num_cols = nnz = 0;
     }
@@ -103,6 +122,17 @@ struct CudaCSR {
         std::cout << std::endl;
     }
 };
+
+template<class index_t>
+struct nodes {
+        index_t id;
+        index_t child_count;
+    };
+
+template<class index_t>
+bool cmp(const nodes<index_t>& a, const nodes<index_t>& b) {
+    return a.child_count > b.child_count;
+}
 
 // This visitor is tested ONLY on CSRGRG (immutable, ordered GRG)
 // in the first visitor path, we get the height of each node, and thus the new id. new id is of (height, gid)
@@ -158,6 +188,25 @@ public:
         return true;
     }
 
+
+    void rearrange(GRG* grg) {
+        for (int h = 1; h < m_maxHeight; h++) {
+            std::cout << "Rearranging height " << h << " with " << m_oldId[h].size() << " nodes." << std::endl;
+            std::vector<nodes<index_t>> node_list;
+            for (size_t i = 0; i < m_oldId[h].size(); i++) {
+                NodeID old_id = m_oldId[h][i];
+                index_t child_count = grg->numDownEdges(old_id);
+                node_list.push_back({old_id, child_count});
+            }
+            std::sort(node_list.begin(), node_list.end(), cmp<index_t>);
+            for (size_t i = 0; i < node_list.size(); i++) {
+                m_oldId[h][i] = node_list[i].id;
+                NodeID old_id = node_list[i].id;
+                m_newId[old_id] = std::make_pair(h, i);
+            }
+        }
+    }
+
     // After visiting all nodes, we can construct the CSR representation
     // This function should be called only once after all visits are done
     void constructCSR(
@@ -196,9 +245,28 @@ public:
                 }
             }
         }
+#define HEAVY_COE 8.0
+
+        for (int h = 1; h < m_maxHeight; h++) {
+            index_t heavy_cutoff = HEAVY_COE * m_childCounts[h] / m_oldId[h].size();
+            for (size_t i = 0; i < m_oldId[h].size(); i++) {
+                NodeID old_id = m_oldId[h][i];
+                index_t child_count = grg->numDownEdges(old_id);
+                if (child_count < heavy_cutoff) {
+                    gpu_csr.host_heavy_cutoffs[h] = i;
+                    break;
+                }
+            }
+            std::cout << "Height " << h << ": " << gpu_csr.host_heavy_cutoffs[h] << " out of " << m_oldId[h].size() << " nodes, heavy cutoff: " << heavy_cutoff << std::endl;
+
+        }
 
         host_row_offsets[m_num_nodes] = current_col_index;
         release_assert(current_col_index == m_num_elements);
+
+        for (int h = 1; h < m_maxHeight; h++) {
+            gpu_csr.host_avg_child_counts[h] = 1.0 * m_childCounts[h] / m_oldId[h].size();
+        }
 
         gpu_csr.copyToDevice(host_row_offsets.data(), host_col_indices.data());
     }
@@ -246,7 +314,7 @@ private:
     index_t m_maxHeight;
     size_t m_num_nodes;
     size_t m_num_elements;
-
+    
     std::vector<size_t> m_childCounts; // sum of child counts for nodes of the same height
     std::vector<std::vector<index_t>> m_oldId;  // new_id -> old_id mapping
     std::vector<std::pair<index_t, index_t>> m_newId; // old_id -> new_id mapping

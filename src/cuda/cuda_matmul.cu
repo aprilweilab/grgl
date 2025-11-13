@@ -75,6 +75,9 @@ __global__ void cudaGRGTraversalDOWNSingleLevelKernel(
     }
 }
 
+#define COL_BUFFER_ITER 16
+
+
 template<class index_t, class data_t>
 __global__ void cudaGRGTraversalUPMultiElementSingleLevelKernel(
         index_t* row_offsets,
@@ -94,13 +97,41 @@ __global__ void cudaGRGTraversalUPMultiElementSingleLevelKernel(
     int my_offset = threadIdx.x / unit;
     int stride = blockDim.x / unit;
 
+    extern __shared__ index_t col_buffer[];
+
     for (index_t row = my_start_row; row < my_end_row; row++) {
         index_t row_start = row_offsets[row];
         index_t row_end = row_offsets[row + 1];
+        index_t row_nnz = row_end - row_start;
+        index_t total_iters = (row_nnz + stride - 1) / stride;
         data_t sum = 0;
-        for (index_t idx = row_start + my_offset; idx < row_end; idx += stride) {
-            index_t col = col_indices[idx];
+
+        for (index_t i = 0; i < total_iters; i++) {
+            // preload col_buffer if necessary
+            // need to avoid deadlock due to sync threads
+            index_t current_step = i % COL_BUFFER_ITER;
+
+            if (current_step == 0) {
+                __syncthreads();
+                for (int j = threadIdx.x; j < stride * COL_BUFFER_ITER; j += blockDim.x) {
+                    index_t idx = row_start + i * stride + j;
+                    if (idx >= row_end) {
+                        break;
+                    }
+                    col_buffer[j] = col_indices[idx];
+                }
+                __syncthreads();
+            }
+
+            index_t idx = row_start + i * stride + my_offset;
+            if (idx >= row_end) {
+                continue;
+            }
+
+            //index_t col = col_indices[idx];
+            index_t col = col_buffer[my_offset + current_step * stride]; //col_indices[current_step * stride + my_offset];
             sum += values[col * unit + my_element_id];
+            // __syncthreads();
         }
         // Use atomicAdd to update the value
         atomicAdd(&values[row * unit + my_element_id], sum);
@@ -159,7 +190,59 @@ void reorder(data_t* dst, const data_t* src, const std::vector<index_t>& permuta
 }
 
 template<class index_t, class data_t>
-void cudaTraverseUP(CudaCSR<index_t, data_t>& gpu_csr, data_t* h_sample_values, data_t* h_output_values, index_t unit=1) {
+void cudaTraverseUPKernelLauncher(CudaCSR<index_t, data_t>& gpu_csr, data_t* values, size_t start_row, size_t end_row, double avg_edge_per_node) {
+
+    int block_size = 64;
+    int rows_per_block = 32;
+    int num_rows = end_row - start_row;
+    int num_blocks = (num_rows + rows_per_block - 1) / rows_per_block;
+
+    if (avg_edge_per_node <= 8){
+        constexpr int THREADS_PER_ROW = 4;
+        cudaGRGTraversalUPSingleLevelKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size>>>(
+            gpu_csr.row_offsets,
+            gpu_csr.col_indices,
+            values,
+            start_row,
+            end_row,
+            rows_per_block
+        );
+    } else if (avg_edge_per_node <= 16){
+        constexpr int THREADS_PER_ROW = 8;
+        cudaGRGTraversalUPSingleLevelKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size>>>(
+            gpu_csr.row_offsets,
+            gpu_csr.col_indices,
+            values,
+            start_row,
+            end_row,
+            rows_per_block
+        );
+    } else if (avg_edge_per_node <= 32){
+        constexpr int THREADS_PER_ROW = 16;
+        cudaGRGTraversalUPSingleLevelKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size>>>(
+            gpu_csr.row_offsets,
+            gpu_csr.col_indices,
+            values,
+            start_row,
+            end_row,
+            rows_per_block
+        );
+    } else {
+        constexpr int THREADS_PER_ROW = 32;
+        cudaGRGTraversalUPSingleLevelKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size>>>(
+            gpu_csr.row_offsets,
+            gpu_csr.col_indices,
+            values,
+            start_row,
+            end_row,
+            rows_per_block
+        );
+    }
+}
+
+
+template<class index_t, class data_t>
+void cudaTraverseUP(CudaCSR<index_t, data_t>& gpu_csr, data_t* h_sample_values, data_t* h_output_values, std::vector<cudaStream_t> streams, index_t unit=1) {
     // 1. set the initial values
     // assume the input values are reordered according to the GPU CSR format
     data_t* values;
@@ -183,9 +266,11 @@ void cudaTraverseUP(CudaCSR<index_t, data_t>& gpu_csr, data_t* h_sample_values, 
     for (size_t level = 1; level < gpu_csr.max_height; level++) {
         size_t start_row = gpu_csr.host_height_cutoffs[level];
         size_t end_row = gpu_csr.host_height_cutoffs[level+1];
-        size_t num_rows = end_row - start_row;
+        // size_t num_rows = end_row - start_row;
+        index_t heavy_cutoff = gpu_csr.host_heavy_cutoffs[level];
 
         if (unit == 1) {
+            /*
             constexpr int THREADS_PER_ROW = 8;
             int block_size = 64;
             int rows_per_block = 32;
@@ -198,21 +283,45 @@ void cudaTraverseUP(CudaCSR<index_t, data_t>& gpu_csr, data_t* h_sample_values, 
                 end_row,
                 rows_per_block
             );
+            */
+           cudaTraverseUPKernelLauncher<index_t, data_t>(gpu_csr, values, start_row, end_row, gpu_csr.host_avg_child_counts[level]);
         } else {
-            constexpr int THREADS_PER_UNIT = 10;
+            constexpr int THREADS_PER_UNIT = 4;
+            constexpr int HEAVY_THREADS_PER_UNIT = 48;
+            if (heavy_cutoff != 0) {
+                int threads_per_block = HEAVY_THREADS_PER_UNIT * unit;
+                int rows_per_block = 1;
+                int num_blocks = (heavy_cutoff + rows_per_block - 1) / rows_per_block;
+                
+                cudaGRGTraversalUPMultiElementSingleLevelKernel<index_t, data_t><<<num_blocks, threads_per_block, COL_BUFFER_ITER * sizeof(data_t) * HEAVY_THREADS_PER_UNIT, streams[1]>>>(
+                    gpu_csr.row_offsets,
+                    gpu_csr.col_indices,
+                    values,
+                    start_row,
+                    start_row + heavy_cutoff,
+                    rows_per_block,
+                    unit
+                );
+                    
+            }
+            
             int threads_per_block = unit * THREADS_PER_UNIT;
-            int rows_per_block = 32;
-            int num_blocks = (num_rows + rows_per_block - 1) / rows_per_block;
-            cudaGRGTraversalUPMultiElementSingleLevelKernel<index_t, data_t><<<num_blocks, threads_per_block>>>(
+            int rows_per_block = 1;
+            int num_blocks = (end_row - start_row - heavy_cutoff + rows_per_block - 1) / rows_per_block;
+
+            cudaGRGTraversalUPMultiElementSingleLevelKernel<index_t, data_t><<<num_blocks, threads_per_block, COL_BUFFER_ITER * sizeof(data_t) * THREADS_PER_UNIT, streams[0]>>>(
                 gpu_csr.row_offsets,
                 gpu_csr.col_indices,
                 values,
-                start_row,
+                start_row + heavy_cutoff,
                 end_row,
                 rows_per_block,
                 unit
             );
+
         }
+
+        cudaDeviceSynchronize();
         // std::cout << "Launched kernel for level " << level << " with start_row " << start_row << " and end_row " << end_row << std::endl;
     }
 
@@ -374,6 +483,7 @@ void GRG::matrixMultiplicationGPU(const IOType* inputMatrix,
         TraversalDirection::DIRECTION_DOWN,
         seeds
     );
+    visitor.rearrange(this);
     CudaCSR<index_t, data_t> gpu_csr;
     visitor.constructCSR(this, gpu_csr);
     auto time_ed = std::chrono::high_resolution_clock::now();
@@ -381,6 +491,13 @@ void GRG::matrixMultiplicationGPU(const IOType* inputMatrix,
     std::cout << "Converted GRG to GPU CSR format with " << gpu_csr.num_rows << " rows and " << gpu_csr.nnz << " non-zeros." << std::endl;
     std::cout << "Time taken for conversion: " << duration << " ms" << std::endl;
     visitor.printChildCounts();
+
+    // create cuda streams
+    const int num_streams = 4;
+    std::vector<cudaStream_t> streams(num_streams);
+    for (int i = 0; i < num_streams; i++) {
+        cudaStreamCreate(&streams[i]);
+    }
 
     if (direction == DIRECTION_DOWN) {
         // Downward, we are calculating "how do the mutations impact the samples?"
@@ -460,13 +577,13 @@ void GRG::matrixMultiplicationGPU(const IOType* inputMatrix,
 
         reorder<index_t, data_t>(values.data(), nodeValues.data(), visitor.getNewId(), 0, numSamples(), effectiveInputRows);
 
-// #define GRGL_GPU_CONTROLLED_EXP
+//#define GRGL_GPU_CONTROLLED_EXP
 #ifdef GRGL_GPU_CONTROLLED_EXP
         auto max_height = gpu_csr.max_height;
         for (int height = 1; height < max_height; height++) {
             std::cout << "Processing height " << height << std::endl;
             gpu_csr.max_height = height;
-            cudaTraverseUP<index_t, data_t>(gpu_csr, values.data(), output.data(), effectiveInputRows);
+            cudaTraverseUP<index_t, data_t>(gpu_csr, values.data(), output.data(), streams, effectiveInputRows);
         }   
         gpu_csr.max_height = max_height;
 #endif
@@ -474,11 +591,11 @@ void GRG::matrixMultiplicationGPU(const IOType* inputMatrix,
 #ifdef WARMUP_GPU
         // warm up
         for (size_t i = 0; i < 3; i++) {
-            cudaTraverseUP<index_t, data_t>(gpu_csr, values.data(), output.data(), effectiveInputRows);
+            cudaTraverseUP<index_t, data_t>(gpu_csr, values.data(), output.data(), streams, effectiveInputRows);
         }
 #endif
 
-        cudaTraverseUP<index_t, data_t>(gpu_csr, values.data(), output.data(), effectiveInputRows);
+        cudaTraverseUP<index_t, data_t>(gpu_csr, values.data(), output.data(), streams, effectiveInputRows);
 
         reorder<index_t, data_t>(output_reordered.data(), output.data(), visitor.getOldId(), 0, numNodes(), effectiveInputRows);
 
