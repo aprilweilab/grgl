@@ -1,10 +1,12 @@
-import unittest
-import subprocess
-import os
-import numpy as np
-import pygrgl
+from typing import List
+import concurrent.futures
 import glob
-from typing import List, Dict, Tuple, Optional
+import numpy as np
+import os
+import pygrgl
+import subprocess
+import time
+import unittest
 
 JOBS = 4
 CLEANUP = True
@@ -41,6 +43,7 @@ class TestMatrixMultiplication(unittest.TestCase):
         cls.grg_filename = construct_grg("test-200-samples.vcf.gz", "test.matmul.grg")
         cls.grg = pygrgl.load_immutable_grg(cls.grg_filename)
         np.random.seed(42)
+        cls.tp_exec = concurrent.futures.ThreadPoolExecutor(max_workers=JOBS)
 
     def direction_helper(
         self, grg: pygrgl.GRG, size: int, direction: pygrgl.TraversalDirection
@@ -255,6 +258,69 @@ class TestMatrixMultiplication(unittest.TestCase):
                 pygrgl.TraversalDirection.UP,
                 init=np.ones(10),
             )
+
+    def test_parallel(self):
+        """
+        We disable the Python Global Interpreter Lock (GIL) during the matrix multiplication C++ code
+        execution. This code just exercises that behavior (there is not a great way to test that code
+        is correct for multi-threading, so this is the best we can do).
+        """
+        # We use hte same input for a multiplication against the entire GRG, and all the split pieces in
+        # parallel. Result should be identical.
+        K = 10
+        in_vector = np.random.standard_normal((K, self.grg.num_mutations))
+        full_result = pygrgl.matmul(self.grg, in_vector, pygrgl.TraversalDirection.DOWN)
+
+        def multi_down(
+            grg_list: List[pygrgl.GRG], inmatrix: np.typing.NDArray
+        ) -> np.typing.NDArray:
+            start = 0
+            futures = []
+            for grg in grg_list:
+                end = start + grg.num_mutations
+                assert end <= inmatrix.shape[1]
+                sub_matrix = inmatrix[:, start:end]
+                futures.append(
+                    self.tp_exec.submit(
+                        pygrgl.matmul, grg, sub_matrix, pygrgl.TraversalDirection.DOWN
+                    )
+                )
+                start = end
+            assert end == inmatrix.shape[1]
+            result = None
+            for future in futures:
+                if result is None:
+                    result = future.result().copy()
+                else:
+                    result += future.result()
+            return result
+
+        test_dir = "test.matmul.par.split"
+        subprocess.check_output(
+            [
+                "grg",
+                "split",
+                "-j",
+                str(JOBS),
+                self.grg_filename,
+                "-s",
+                str(1_000_000),
+                "-o",
+                test_dir,
+            ]
+        )
+        num_muts = 0
+        grgs = []
+        for fn in glob.glob(os.path.join(test_dir, "*.grg")):
+            grgs.append(pygrgl.load_immutable_grg(fn))
+            num_muts += grgs[-1].num_mutations
+        # We have to sort the GRGs by position, or the results will not be equivalent to running on the
+        # entire (unsplit) GRG!
+        grgs.sort(key=lambda g: g.bp_range[0])
+        assert num_muts == self.grg.num_mutations
+        split_result = multi_down(grgs, in_vector)
+
+        np.testing.assert_allclose(full_result, split_result)
 
     @classmethod
     def tearDownClass(cls):
