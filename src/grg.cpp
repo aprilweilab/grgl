@@ -392,6 +392,95 @@ void GRG::visitTopoNodeOrderedDense(GRGVisitor& visitor,
     }
 }
 
+void GRG::visitTopoParallel(ParallelGRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList) {
+    if (!this->nodesAreOrdered()) {
+        throw ApiMisuseFailure("Parallel visit only supported when nodes are topologically ordered!");
+    }
+
+    GRGPtr sharedThis = shared_from_this();
+    static std::vector<uint8_t> visitQueue;
+    visitQueue.clear();
+    visitQueue.resize(numNodes());
+
+    size_t layer = 1;
+    ssize_t toVisit = static_cast<ssize_t>(seedList.size());
+    for (const auto& seedId : seedList) {
+        visitQueue.at(seedId) = 1;
+    }
+
+    if (toVisit == 0) {
+        return;
+    }
+
+    std::vector<NodeID> nodeBatch;
+    nodeBatch.reserve(seedList.size());
+
+    if (direction == DIRECTION_UP) {
+        size_t nodeIdx = 0;
+        while (nodeIdx < this->numNodes() && toVisit > 0) {
+            nodeBatch.clear();
+            while (nodeIdx < this->numNodes()) {
+                const uint8_t nodeLayer = visitQueue[nodeIdx];
+                if (nodeLayer == 0 || nodeLayer > layer) {
+                    break;
+                }
+                nodeBatch.push_back(nodeIdx);
+                for (const NodeID parent : this->getUpEdges(nodeIdx)) {
+                    if (visitQueue[parent] == 0) {
+                        visitQueue[parent] = layer + 1;
+                        toVisit++;
+                    }
+                }
+                nodeIdx++;
+            }
+
+            if (nodeBatch.empty()) {
+                layer++;
+                continue;
+            }
+
+            toVisit -= static_cast<ssize_t>(nodeBatch.size());
+            const bool keepGoing = visitor.parallelVisit(sharedThis, nodeBatch, direction);
+            if (!keepGoing || toVisit == 0) {
+                break;
+            }
+            layer++;
+        }
+    } else {
+        ssize_t nodeIdx = static_cast<ssize_t>(this->numNodes());
+        while (nodeIdx > 0 && toVisit > 0) {
+            nodeBatch.clear();
+            while (nodeIdx > 0) {
+                const NodeID currentId = nodeIdx - 1;
+                const uint8_t nodeLayer = visitQueue[currentId];
+                if (nodeLayer == 0 || nodeLayer > layer) {
+                    break;
+                }
+                nodeBatch.push_back(currentId);
+                for (const NodeID child : this->getDownEdges(currentId)) {
+                    if (visitQueue[child] == 0) {
+                        visitQueue[child] = layer + 1;
+                        toVisit++;
+                    }
+                }
+                nodeIdx--;
+            }
+
+            if (nodeBatch.empty()) {
+                layer++;
+                continue;
+            }
+
+            toVisit -= static_cast<ssize_t>(nodeBatch.size());
+            const bool keepGoing = visitor.parallelVisit(sharedThis, nodeBatch, direction);
+            if (!keepGoing || toVisit == 0) {
+                break;
+            }
+            layer++;
+        }
+    }
+}
+
 void GRG::visitTopoNodeOrderedSparse(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList) {
     GRGPtr sharedThis = shared_from_this();
     NodeIDSet alreadySeen;

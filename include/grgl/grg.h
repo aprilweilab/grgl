@@ -500,6 +500,8 @@ public:
                            const NodeIDList& seedList,
                            const std::vector<NodeIDSizeT>* sortOrder = nullptr) = 0;
 
+    virtual void visitTopoParallel(ParallelGRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
+
     /**
      * Add a population to the GRG.
      */
@@ -1041,6 +1043,7 @@ public:
                    TraversalDirection direction,
                    const NodeIDList& seedList,
                    const std::vector<NodeIDSizeT>* sortOrder = nullptr) override;
+
 
     EagerCSREdges32 m_downEdges;
     EagerCSREdges32 m_upEdges;

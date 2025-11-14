@@ -445,7 +445,7 @@ private:
     std::vector<NodeIDSizeT> m_refCounts;
 #endif
 };
-
+/* 
 static bool setsOverlap(const NodeIDSet& alreadyCovered, const NodeIDList& candidateSet) {
     for (auto nodeId : candidateSet) {
         if (alreadyCovered.find(nodeId) != alreadyCovered.end()) {
@@ -453,7 +453,7 @@ static bool setsOverlap(const NodeIDSet& alreadyCovered, const NodeIDList& candi
         }
     }
     return false;
-}
+}*/
 
 // Tracking individual coalescence is a bit spread out, but I think it is the most efficient way to do it.
 // 1. Above, when searching for candidate nodes in the existing hierarchy, any node that does not have its
@@ -477,7 +477,7 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     const size_t ploidy = grg->getPloidy();
     // The set of nodes that we have covered so far (greedily extended)
     // NodeIDSet covered;
-    BitVecCoverageSet coalCoverSet{grg->numSamples()};
+    BitVecCoverageSet coverageSet{grg->numSamples()};
 
     TopoCandidateCollectorVisitor collector(sampleCounts);
     if (mutSamples.size() > 1) {
@@ -520,7 +520,7 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     // Map from an individual to which child contained it.
     // std::unordered_map<NodeIDSizeT, NodeIDSizeT> individualToChild;
 
-    BitVecCoverageSet seenSet{grg->numSamples()};
+    BitVecCoverageSet coalTrackingSet{grg->numSamples()};
 
     const NodeID mutNodeId = grg->makeNode(1, true);
     if (!newMutation.isMissing()) {
@@ -530,7 +530,7 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     }
     NodeIDList addedNodes;
     const size_t numMutSamples = mutSamples.size();
-    while (!candidates.empty() && coalCoverSet.numSamplesNonOverlapping() < numMutSamples) {
+    while (!candidates.empty() && coverageSet.numSamplesNonOverlapping() < numMutSamples) {
         const auto& candidate = candidates.back();
         const auto candidateId = std::get<0>(candidate);
         const std::unique_ptr<SampleCoverageSet> candidateSet = collector.getSamplesForCandidate(candidateId);
@@ -544,10 +544,10 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
         // that both point to a sample (or samples) that we care about, so we have to
         // track that here. We do that by only considering candidates that have no overlap
         // with our already-covered set.
-        if (!coalCoverSet.overlapsWith(*candidateSet)) {
+        if (!coverageSet.overlapsWith(*candidateSet)) {
             // Mark all the sample nodes as covered.
-            CoalescenceTracker tracker = CoalescenceTracker(&seenSet, &individualCoalCount);
-            coalCoverSet.mergeSampleCoverage(*candidateSet, tracker);
+            CoalescenceTracker tracker = CoalescenceTracker(&coalTrackingSet, &individualCoalCount);
+            coverageSet.mergeSampleCoverage(*candidateSet, tracker);
             /*
             for (const auto sampleId : candidateSet) {
                 covered.emplace(sampleId);
@@ -582,16 +582,16 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     // samples.
     NodeIDSet uncovered;
     for (const NodeID sampleNodeId : mutSamples) {
-        if (!coalCoverSet.contains(sampleNodeId)) {
+        if (!coverageSet.contains(sampleNodeId)) {
             uncovered.emplace(sampleNodeId);
             // The individual had already been seen and >=1 of the samples was previously uncovered,
             // then the new node we create is going to be the coalescence location for that individual.
             if (ploidy == 2) {
                 NodeID individualId = (sampleNodeId / 2) * 2;
-                if (seenSet.contains(individualId)) {
+                if (coalTrackingSet.contains(individualId)) {
                     individualCoalCount++;
                 } else {
-                    seenSet.addElem(individualId);
+                    coalTrackingSet.addElem(individualId);
                 }
             }
         }

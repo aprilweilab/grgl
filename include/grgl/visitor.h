@@ -61,6 +61,27 @@ public:
     visit(const GRGPtr& grg, NodeID node, TraversalDirection direction, DfsPass dfsPass = DFS_PASS_NONE) = 0;
 };
 
+/**
+ * Visitor abstract base class for paralle traversal the nodes of a GRG.
+ *
+ * To traverse a GRG in parallel, create a class that inherits from `ParallelGRGVisitor` and overrides the `visit()`
+ * function as well as the `parallelVisit()` function Then use the GRG::visitDfs(), GRG::visitBfs(), GRG::visitTopo()
+ * or GRG::visitTopoParallel() functions and pass your visitor as an argument.
+ */
+class ParallelGRGVisitor : public GRGVisitor {
+public:
+    /**
+     * Visit a layer in the GRG.
+     * @param[in] grg The graph.
+     * @param[in] nodes The current layer of nodes we are visiting. These are required to not be connected.
+     * @param[in] direction Whether we're traversing bottom-up (DIRECTION_UP) or
+     *      top-down (DIRECTION_DOWN).
+     */
+    virtual bool parallelVisit(const GRGPtr& grg,
+                               NodeIDList& nodes,
+                               TraversalDirection direction) = 0;
+};
+
 } // namespace grgl
 
 #endif /* GRG_VISITOR_H */
