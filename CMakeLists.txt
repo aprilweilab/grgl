@@ -314,7 +314,7 @@ if(ENABLE_TESTS)
   if(ENABLE_CUDA)
       set(GRGL_CUDA_TEST_SOURCES
           ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_cuda_support.cpp
-          ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_cuda_mult.cpp
+          ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_cuda_matmul.cpp
           # ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_cuda_grg.cpp
           # ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_cuda_traversal.cpp
           # ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_cuda_matmul.cpp

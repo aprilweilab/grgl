@@ -2,7 +2,7 @@
 #define GRGL_CUDA_MATMUL_H
 
 #ifdef GRGL_CUDA_ENABLED
-
+#ifdef DEPRECATED_CUDA_MATMUL_H
 #include "grgl/grg.h"
 #include "grgl/serialize.h"
 #include "grg_helpers.h"
@@ -329,5 +329,6 @@ bool checkCudaDevice();
 
 } // namespace grgl
 
+#endif // DEPRECATED_CUDA_MATMUL_H
 #endif // GRGL_CUDA_ENABLED
 #endif // GRGL_CUDA_MATMUL_H
