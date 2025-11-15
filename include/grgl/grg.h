@@ -556,36 +556,6 @@ public:
                               NodeInitEnum nodeInit = NIE_ZERO,
                               IOType* missMatrix = nullptr);
 
-#ifdef GRGL_CUDA_ENABLED
-    template <typename IOType, typename NodeValueType, bool useBitVector>
-    void matrixMultiplicationGPU(const IOType* inputMatrix,
-                                size_t inputCols,
-                                size_t inputRows,
-                                TraversalDirection direction,
-                                IOType* outputMatrix,
-                                size_t outputSize,
-                                bool emitAllNodes = false,
-                                bool byIndividual = false,
-                                const IOType* initMatrix = nullptr,
-                                NodeInitEnum nodeInit = NIE_ZERO,
-                                IOType* missMatrix = nullptr);
-
-    // currently the input should be the same as the CPU version. the format transformation and sending to GPU are done for each operation
-    template <typename T>
-    std::vector<T> matMulGPU(const std::vector<T>& inputMatrix, const size_t numRows, TraversalDirection direction) {
-        if (numRows == 0 || (inputMatrix.size() % numRows != 0)) {
-            throw ApiMisuseFailure("inputMatrix must be divisible by numRows");
-        }
-        const size_t numCols = inputMatrix.size() / numRows;
-        const size_t outSize = (numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? numSamples() : numMutations()));
-        std::vector<T> result(outSize);
-        matrixMultiplicationGPU<T, T, false>(inputMatrix.data(), numCols, numRows, direction, result.data(), outSize);
-        return std::move(result);
-    }
-
-    // Runtime check function
-    bool hasCudaSupport() const;
-#endif
 
     /**
      * Compute one of two possible matrix multiplications across the entire

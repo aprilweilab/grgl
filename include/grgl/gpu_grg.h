@@ -19,7 +19,6 @@
 #include <stdexcept>
 #include <chrono>
 #include <cuda_runtime.h>
-// #include "grgl/cuda_matmul.h"
 #include "grgl/common.h"
 #include "grgl/grg.h"
 
@@ -32,7 +31,7 @@ public:
     // these are resident GPU pointers
     index_t* row_offsets;    // Device pointer to row offsets (size: num_rows + 1)
     index_t* old_to_new_mapping;
-    index_t* new_to_old_mapping;
+    index_t* new_to_old_mapping;  // This is not used actually
     index_t* mutation_and_new_mapping; // Mapping between mutation id and new node id (in pairs)
 
     // Since col indices may be large, this data may not be resident on GPU
@@ -44,9 +43,6 @@ public:
     std::vector<index_t> host_height_cutoffs;
     std::vector<index_t> host_heavy_cutoffs;
     std::vector<double> host_avg_child_counts;
-
-    // std::vector<index_t> host_old_to_new_mapping;  // old_id -> new_id
-    // std::vector<index_t> host_new_to_old_mapping;  // new_id -> old_id
 
     size_t num_rows;         // Number of rows, i.e. number of nodes
     size_t num_samples;      // Number of samples, i.e. number of leaf nodes
@@ -79,6 +75,9 @@ public:
         if (size < queryColIndSize()) {
             throw ApiMisuseFailure("Provided buffer size is smaller than required col indices size");
         }
+        if (col_indices) {
+            throw ApiMisuseFailure("Col indices buffer is already set");
+        }
         col_indices = static_cast<index_t*>(ptr);
     }
 
@@ -88,6 +87,8 @@ public:
     void copyColIndFromHost() {
         if (col_indices) {
             cudaMemcpyAsync(col_indices, host_col_indices.data(), nnz * sizeof(index_t), cudaMemcpyHostToDevice, *work_stream_ptr);
+        } else {
+            throw ApiMisuseFailure("No col indices buffer set for GPUGRG copyColIndFromHost operation");
         }
     }
 
@@ -109,6 +110,9 @@ public:
 
     // This function frees the GPU memory buffer for col indices
     void freeColInd() {
+        if (col_indices == nullptr) {
+            throw ApiMisuseFailure("Col indices buffer is already freed");
+        }
         cudaFree(col_indices);
         col_indices = nullptr;
     }
@@ -130,6 +134,7 @@ public:
         cudaMalloc(&new_to_old_mapping, num_rows * sizeof(index_t));
         cudaMalloc(&mutation_and_new_mapping, num_mutations * 2 * sizeof(index_t)); // Allocate for pairs
         CHECK_CUDA_LAST_ERROR();
+
         if (allocate_col_indices) {
             cudaMalloc(&col_indices, nnz * sizeof(index_t));
         } else {
@@ -309,7 +314,7 @@ public:
             d_buffer,
             buffer_size_byte
         );
-        cudaDeviceSynchronize();
+        this->wait();
         CHECK_CUDA_LAST_ERROR();
 
         std::vector<T> result(outSize);
@@ -618,7 +623,7 @@ private:
  * - new_to_old_mapping: num_rows * sizeof(index_t) bytes
  */
 
-constexpr uint64_t GPUGRG_MAGIC = 0x4752474C47505500ULL; // "GRGLGPU" + null byte
+constexpr uint64_t GPUGRG_MAGIC = 0x4752474C47505500ULL; // "GRGLGPU" + version byte 00
 
 /**
  * Store a GPUGRG structure to disk in binary format.
@@ -779,6 +784,8 @@ GPUGRG<index_t> loadGPUGRGFromDisk(const std::string& filename) {
         host_avg_child_counts.data(),
         host_col_indices.data()
     );
+
+    CHECK_CUDA_LAST_ERROR();
     
     return gpu_grg;
 }
@@ -841,6 +848,8 @@ GPUGRG<index_t> convertGRGToGPUGRG(GRG* grg) {
     
     return gpu_grg;
 }
+
+bool hasCudaSupport();
 
 } // namespace grgl
 

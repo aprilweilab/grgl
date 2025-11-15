@@ -297,6 +297,7 @@ __global__ void cudaReorderPermutationPairKernel(
 // Reorder data on CPU
 // The i-th element in src is moved to permutation[i] in dst
 // NOT optimized for performance
+/*
 template <class index_t, class data_t>
 void reorder(data_t* dst, const data_t* src, const std::vector<index_t>& permutation, size_t st, size_t ed, size_t unit=1) {
     for (size_t i = st; i < ed; i++) {
@@ -307,6 +308,7 @@ void reorder(data_t* dst, const data_t* src, const std::vector<index_t>& permuta
         // std::cout << "Reorder input: old idx " << i << " to new idx " << new_idx << " with value " << src[i] << std::endl;
     }
 }
+    */
 
 template<class index_t, class data_t>
 void cudaTraverseUPKernelLauncher(GPUGRG<index_t>& gpu_grg, data_t* values, size_t start_row, size_t end_row, double avg_edge_per_node, cudaStream_t stream) {
@@ -508,7 +510,7 @@ void cudaTraverseDOWN(GPUGRG<index_t>& gpu_grg, data_t* d_inout_values, cudaStre
 
     // gpu_csr.print();
     //std::vector<data_t> values_host(gpu_csr.num_rows);
-    std::cout << "Finished GPU traversal." << std::endl;
+    std::cout << "Finished GPU traversal DOWN." << std::endl;
     
     // copy back the result to host
     /*
@@ -567,12 +569,6 @@ void GPUGRG<index_t>::matrixMultiplication(const data_t* inputMatrix,
         int threads_per_block = node_per_block * feature_num;
         int num_blocks = (this->num_mutations + node_per_block - 1) / node_per_block;
 
-        // print the params
-        std::cout << "Matrix Multiplication Downward: feature_num=" << feature_num 
-                  << ", node_per_block=" << node_per_block 
-                  << ", threads_per_block=" << threads_per_block 
-                  << ", num_blocks=" << num_blocks << std::endl;
-
         cudaReorderPermutationPairKernel<index_t, data_t, false, true, true><<<num_blocks, threads_per_block, 0, *(this->work_stream_ptr)>>>(
             buffer,
             inputMatrix,
@@ -583,11 +579,10 @@ void GPUGRG<index_t>::matrixMultiplication(const data_t* inputMatrix,
             this->num_mutations,
             node_per_block
         );
-
-        // check cuda kernel error
+        CHECK_CUDA_LAST_ERROR();
 
         cudaTraverseDOWN<index_t, data_t>(*this, buffer, *(this->work_stream_ptr), feature_num);
-
+        CHECK_CUDA_LAST_ERROR();
 
         if (emitAllNodes) {
             num_blocks = (this->num_rows + node_per_block - 1) / node_per_block;
@@ -615,6 +610,7 @@ void GPUGRG<index_t>::matrixMultiplication(const data_t* inputMatrix,
                 node_per_block
             );
         }
+        CHECK_CUDA_LAST_ERROR();
 
     } else {
         // Upward, we are calculating "how do the samples impact the mutations?"
@@ -632,6 +628,8 @@ void GPUGRG<index_t>::matrixMultiplication(const data_t* inputMatrix,
             this->num_samples,
             node_per_block
         );
+
+        CHECK_CUDA_LAST_ERROR();
 
         cudaEvent_t event;
         cudaEventCreate(&event);
@@ -667,7 +665,7 @@ void GPUGRG<index_t>::matrixMultiplication(const data_t* inputMatrix,
             end_events.push_back(end_event);
             cudaStreamWaitEvent(*(this->work_stream_ptr), end_event, 0);
         }
-            */
+        */
 
         if (emitAllNodes) {            
             num_blocks = (this->num_rows + node_per_block - 1) / node_per_block;
@@ -698,12 +696,6 @@ void GPUGRG<index_t>::matrixMultiplication(const data_t* inputMatrix,
         CHECK_CUDA_LAST_ERROR();
     }
     CHECK_CUDA_LAST_ERROR();
-}
-
-bool GRG::hasCudaSupport() const {
-    int deviceCount;
-    cudaError_t error = cudaGetDeviceCount(&deviceCount);
-    return (error == cudaSuccess && deviceCount > 0);
 }
 
 /*
@@ -762,6 +754,12 @@ template void GPUGRG<uint64_t>::matrixMultiplication<int>(
     const int*, size_t, size_t, TraversalDirection, 
     int*, size_t, bool, int*, size_t
 );
+
+bool hasCudaSupport() {
+    int deviceCount;
+    cudaError_t error = cudaGetDeviceCount(&deviceCount);
+    return (error == cudaSuccess && deviceCount > 0);
+}
 
 /*
 template void GPUGRG<uint64_t>::matrixMultiplication<long long>(

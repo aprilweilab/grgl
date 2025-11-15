@@ -2,7 +2,9 @@
 
 #include <gtest/gtest.h>
 #include "grgl/grg.h"
+#include "grgl/gpu_grg.h"
 #include <memory>
+#include <cuda_runtime.h>
 
 using namespace grgl;
 
@@ -18,7 +20,7 @@ protected:
 
 TEST_F(CudaSupportTest, CudaHardwareMustBeAvailable) {
     // This test FAILS if CUDA is compiled but no hardware is available
-    bool cudaSupported = grg->hasCudaSupport();
+    bool cudaSupported = grgl::hasCudaSupport();
     
     EXPECT_TRUE(cudaSupported) 
         << "CUDA support was compiled in but no CUDA hardware detected. "
