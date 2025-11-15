@@ -326,6 +326,66 @@ public:
 
         return std::move(result);
     }
+
+
+    template <typename T>
+    std::vector<T> matMulPerf(
+        const std::vector<T>& inputMatrix, 
+        const size_t numRows, 
+        TraversalDirection direction,
+        int iterations=5
+    ) {
+        CHECK_CUDA_LAST_ERROR();
+        if (numRows == 0 || (inputMatrix.size() % numRows != 0)) {
+            throw ApiMisuseFailure("inputMatrix must be divisible by numRows");
+        }
+        const size_t numCols = inputMatrix.size() / numRows;
+        const size_t outSize =
+            (numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? this->num_samples : this->num_mutations));
+        
+        T* d_inputMatrix;
+        T* d_outputMatrix;
+        cudaMalloc(&d_inputMatrix, inputMatrix.size() * sizeof(T));
+        cudaMalloc(&d_outputMatrix, outSize * sizeof(T));
+        cudaMemcpy(d_inputMatrix, inputMatrix.data(), inputMatrix.size() * sizeof(T), cudaMemcpyHostToDevice);
+
+        CHECK_CUDA_LAST_ERROR();
+
+        T* d_buffer;
+        size_t buffer_size_byte = numRows * this->num_rows * sizeof(T);
+        cudaMalloc(&d_buffer, buffer_size_byte);
+
+        CHECK_CUDA_LAST_ERROR();
+
+        auto start = std::chrono::high_resolution_clock::now();
+        for (int it = 0; it < iterations; it++) {
+            this->matrixMultiplication<T>(
+                d_inputMatrix, 
+                numCols, 
+                numRows, 
+                direction, 
+                d_outputMatrix, 
+                outSize,
+                false,
+                d_buffer,
+                buffer_size_byte
+            );
+            this->wait();
+            CHECK_CUDA_LAST_ERROR();
+        }
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed = end - start;
+        std::cout << "Average end-to-end runtime for matrixMultiplication function (GPU) over " << iterations << " iterations: " << (elapsed.count() / iterations) << " ms" << std::endl;
+
+        std::vector<T> result(outSize);
+        cudaMemcpy(result.data(), d_outputMatrix, outSize * sizeof(T), cudaMemcpyDeviceToHost);
+        cudaFree(d_inputMatrix);
+        cudaFree(d_outputMatrix);
+        cudaFree(d_buffer);
+        CHECK_CUDA_LAST_ERROR();
+
+        return std::move(result);
+    }
     
     /*
      * Raw matrix multiplication implementation.

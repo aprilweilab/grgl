@@ -2,7 +2,6 @@
 #ifndef GRGL_CUDA_MATMUL_CU
 #define GRGL_CUDA_MATMUL_CU
 
-#define GRGL_CUDA_ENABLED
 #ifdef GRGL_CUDA_ENABLED
 
 

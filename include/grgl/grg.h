@@ -602,7 +602,11 @@ public:
         const size_t outSize =
             (numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? numSamples() : numMutations()));
         std::vector<T> result(outSize);
+        auto start = std::chrono::high_resolution_clock::now();
         matrixMultiplication<T, T, false>(inputMatrix.data(), numCols, numRows, direction, result.data(), outSize);
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> diff = end - start;
+        std::cout << "End-to-end run of matrixMultiplication (CPU) took " << diff.count() << " ms" << std::endl;
         return std::move(result);
     }
 
