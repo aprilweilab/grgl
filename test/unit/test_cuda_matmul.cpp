@@ -321,7 +321,7 @@ TEST(GPUGRG, BenchMatMul) {
     }
     std::cout << "Using " << iterations << " iterations for BenchMatMul test" << std::endl;
 
-    env_p = std::getenv("GRGL_TEST_MATMUL_ROWS");
+    env_p = std::getenv("GRGL_BENCH_MATMUL_ROWS");
     size_t rowCount;
     if (env_p != nullptr) {
         rowCount = std::stoul(env_p);
