@@ -12,71 +12,16 @@
 // #include "grgl/grg.h"
 // #include "grgl/cuda_matmul.h"
 #include "grgl/gpu_grg.h"
+#include "grgl/cuda_kernels.cuh"
 
 
 namespace grgl {
 
-template<class index_t, class data_t, int THREADS_PER_ROW>
-__global__ void cudaGRGTraversalUPSingleLevelKernel(
-        index_t* row_offsets,
-        index_t* col_indices,
-        data_t* values,
-        size_t start_row,
-        size_t end_row,
-        size_t rows_per_block) {
-    index_t my_start_row = start_row + (blockIdx.x * rows_per_block);
-    index_t my_end_row = my_start_row + rows_per_block;
-    if (my_end_row > end_row) {
-        my_end_row = end_row;
-    }
-    int my_group_id = threadIdx.x / THREADS_PER_ROW;
-    int my_thread_id = threadIdx.x % THREADS_PER_ROW;
-    int stride = blockDim.x / THREADS_PER_ROW;
-    for (index_t row = my_start_row + my_group_id; row < my_end_row; row += stride ) {
-        index_t row_start = row_offsets[row];
-        index_t row_end = row_offsets[row + 1];
-        data_t sum = 0;
-        for (index_t idx = row_start + my_thread_id; idx < row_end; idx += THREADS_PER_ROW) {
-            index_t col = col_indices[idx];
-            sum += values[col];
-        }
-        // Reduce within the group. Use Warp shuffle.
-        for (int offset = THREADS_PER_ROW / 2; offset > 0; offset /= 2) {
-            sum += __shfl_down_sync(0xFFFFFFFF, sum, offset);
-        }
-        if (my_thread_id == 0) {
-            values[row] = sum;
-        }
-    }
-}
 
-template<class index_t, class data_t, int THREADS_PER_ROW>
-__global__ void cudaGRGTraversalDOWNSingleLevelKernel(
-        index_t* row_offsets,
-        index_t* col_indices,
-        data_t* values,
-        size_t start_row,
-        size_t end_row,
-        size_t rows_per_block) {
-    index_t my_start_row = start_row + (blockIdx.x * rows_per_block);
-    index_t my_end_row = my_start_row + rows_per_block;
-    if (my_end_row > end_row) {
-        my_end_row = end_row;
-    }
-    int my_group_id = threadIdx.x / THREADS_PER_ROW;
-    int my_thread_id = threadIdx.x % THREADS_PER_ROW;
-    int stride = blockDim.x / THREADS_PER_ROW;
-    for (index_t row = my_start_row + my_group_id; row < my_end_row; row += stride ) {
-        index_t row_start = row_offsets[row];
-        index_t row_end = row_offsets[row + 1];
-        data_t my_val = values[row];
-        for (index_t idx = row_start + my_thread_id; idx < row_end; idx += THREADS_PER_ROW) {
-            index_t col = col_indices[idx];
-            atomicAdd(&values[col], my_val);
-            // printf("Thread %d adding %f to row %d. New value is %f. My id is %d\n", threadIdx.x, my_val, col, values[col], row);
-        }
-    }
-}
+#define MIN_BLOCK_SIZE 64   // set to 64 for better occupancy
+#define CONCURRENT_BLOCKS_PER_SM 32 // 2048 / MIN_BLOCK_SIZE
+#define NUM_SMS 108  // for A100 GPU
+#define MIN_LUNCHED_BLOCKS (CONCURRENT_BLOCKS_PER_SM * NUM_SMS)
 
 #define COL_BUFFER_ITER 16
 
@@ -310,18 +255,54 @@ void reorder(data_t* dst, const data_t* src, const std::vector<index_t>& permuta
     */
 
 template<class index_t, class data_t>
-void cudaTraverseUPKernelLauncher(GPUGRG<index_t>& gpu_grg, data_t* values, size_t start_row, size_t end_row, double avg_edge_per_node, cudaStream_t stream) {
+void cudaTraverseUpSingleElementLauncher(
+    index_t* row_offsets,
+    index_t* col_indices, 
+    data_t* values, 
+    size_t start_row, 
+    size_t end_row, 
+    size_t heavy_cutoff,
+    double avg_edge_per_node, 
+    cudaStream_t stream) {
 
-    int block_size = 64;
-    int rows_per_block = 32;
+    if (heavy_cutoff != 0) {
+        // std::cout << "Warning: heavy_cutoff is not zero in cudaTraverseUpSingleElementLauncher. This may lead to performance issues." << std::endl;
+        int block_size = MIN_BLOCK_SIZE;
+        int rows_per_block = 2;
+        int num_blocks = (heavy_cutoff + rows_per_block - 1) / rows_per_block;
+        cudaTraversalUpSingleElementKernel<index_t, data_t, 32><<<num_blocks, block_size, 0, stream>>>(
+            row_offsets,
+            col_indices,
+            values,
+            start_row,
+            start_row + heavy_cutoff,
+            rows_per_block
+        );
+        start_row += heavy_cutoff;
+    }
+
+    int block_size = MIN_BLOCK_SIZE;
     int num_rows = end_row - start_row;
+    int rows_per_block_max_occupancy = (num_rows + MIN_LUNCHED_BLOCKS - 1) / MIN_LUNCHED_BLOCKS;
+    int rows_per_block = 32;
+    if (rows_per_block_max_occupancy < rows_per_block) {
+        rows_per_block = rows_per_block_max_occupancy;
+    }
     int num_blocks = (num_rows + rows_per_block - 1) / rows_per_block;
+
+    /*
+    std::cout << "Launching cudaTraverseUpSingleElementLauncher with block_size " << block_size 
+              << ", rows_per_block " << rows_per_block 
+              << ", num_blocks " << num_blocks 
+              << ", avg_edge_per_node " << avg_edge_per_node 
+              << std::endl;
+    */
 
     if (avg_edge_per_node <= 8){
         constexpr int THREADS_PER_ROW = 4;
-        cudaGRGTraversalUPSingleLevelKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size, 0, stream>>>(
-            gpu_grg.row_offsets,
-            gpu_grg.col_indices,
+        cudaTraversalUpSingleElementKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size, 0, stream>>>(
+            row_offsets,
+            col_indices,
             values,
             start_row,
             end_row,
@@ -329,9 +310,9 @@ void cudaTraverseUPKernelLauncher(GPUGRG<index_t>& gpu_grg, data_t* values, size
         );
     } else if (avg_edge_per_node <= 16){
         constexpr int THREADS_PER_ROW = 8;
-        cudaGRGTraversalUPSingleLevelKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size, 0, stream>>>(
-            gpu_grg.row_offsets,
-            gpu_grg.col_indices,
+        cudaTraversalUpSingleElementKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size, 0, stream>>>(
+            row_offsets,
+            col_indices,
             values,
             start_row,
             end_row,
@@ -339,9 +320,9 @@ void cudaTraverseUPKernelLauncher(GPUGRG<index_t>& gpu_grg, data_t* values, size
         );
     } else if (avg_edge_per_node <= 32){
         constexpr int THREADS_PER_ROW = 16;
-        cudaGRGTraversalUPSingleLevelKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size, 0, stream>>>(
-            gpu_grg.row_offsets,
-            gpu_grg.col_indices,
+        cudaTraversalUpSingleElementKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size, 0, stream>>>(
+            row_offsets,
+            col_indices,
             values,
             start_row,
             end_row,
@@ -349,9 +330,91 @@ void cudaTraverseUPKernelLauncher(GPUGRG<index_t>& gpu_grg, data_t* values, size
         );
     } else {
         constexpr int THREADS_PER_ROW = 32;
-        cudaGRGTraversalUPSingleLevelKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size, 0, stream>>>(
-            gpu_grg.row_offsets,
-            gpu_grg.col_indices,
+        cudaTraversalUpSingleElementKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size, 0, stream>>>(
+            row_offsets,
+            col_indices,
+            values,
+            start_row,
+            end_row,
+            rows_per_block
+        );
+    }
+}
+
+template<class index_t, class data_t>
+void cudaTraverseDownSingleElementLauncher(
+    index_t* row_offsets,
+    index_t* col_indices, 
+    data_t* values, 
+    size_t start_row, 
+    size_t end_row, 
+    size_t heavy_cutoff, 
+    double avg_edge_per_node, 
+    cudaStream_t stream) {
+
+    if (heavy_cutoff != 0) {
+        // std::cout << "Warning: heavy_cutoff is not zero in cudaTraverseDownSingleElementLauncher. This may lead to performance issues." << std::endl;
+        int block_size = MIN_BLOCK_SIZE;
+        int rows_per_block = 1;
+        int num_blocks = (heavy_cutoff + rows_per_block - 1) / rows_per_block;
+        cudaTraversalDownSingleElementKernel<index_t, data_t, 32><<<num_blocks, block_size, 0, stream>>>(
+            row_offsets,
+            col_indices,
+            values,
+            start_row,
+            start_row + heavy_cutoff,
+            rows_per_block
+        );
+        start_row += heavy_cutoff;
+    }
+
+    int block_size = MIN_BLOCK_SIZE;
+    int num_rows = end_row - start_row;
+    int rows_per_block_max_occupancy = (num_rows + MIN_LUNCHED_BLOCKS - 1) / MIN_LUNCHED_BLOCKS;
+    int rows_per_block = 16;
+    if (rows_per_block_max_occupancy < rows_per_block) {
+        rows_per_block = rows_per_block_max_occupancy;
+    }
+
+    int num_blocks = (num_rows + rows_per_block - 1) / rows_per_block;
+
+    // std::cout << "Launching cudaTraverseDownSingleElementLauncher with " << num_blocks << " blocks, block size " << block_size << ", rows per block " << rows_per_block << ", avg_edge_per_node " << avg_edge_per_node << std::endl;
+
+    if (avg_edge_per_node <= 8){
+        constexpr int THREADS_PER_ROW = 4;
+        cudaTraversalDownSingleElementKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size, 0, stream>>>(
+            row_offsets,
+            col_indices,
+            values,
+            start_row,
+            end_row,
+            rows_per_block
+        );
+    } else if (avg_edge_per_node <= 16){
+        constexpr int THREADS_PER_ROW = 8;
+        cudaTraversalDownSingleElementKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size, 0, stream>>>(
+            row_offsets,
+            col_indices,
+            values,
+            start_row,
+            end_row,
+            rows_per_block
+        );
+    } else if (avg_edge_per_node <= 32){
+        constexpr int THREADS_PER_ROW = 16;
+        cudaTraversalDownSingleElementKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size, 0, stream>>>(
+            row_offsets,
+            col_indices,
+            values,
+            start_row,
+            end_row,
+            rows_per_block
+        );
+    } else {
+        constexpr int THREADS_PER_ROW = 32;
+        cudaTraversalDownSingleElementKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size, 0, stream>>>(
+            row_offsets,
+            col_indices,
             values,
             start_row,
             end_row,
@@ -385,7 +448,17 @@ void cudaTraverseUP(GPUGRG<index_t>& gpu_grg, data_t*d_inout_values, std::vector
         index_t heavy_cutoff = gpu_grg.host_heavy_cutoffs[level];
 
         if (unit == 1) {
-           cudaTraverseUPKernelLauncher<index_t, data_t>(gpu_grg, d_inout_values, start_row, end_row, gpu_grg.host_avg_child_counts[level], streams[0]);
+           cudaTraverseUpSingleElementLauncher<index_t, data_t>(
+                gpu_grg.row_offsets,
+                gpu_grg.col_indices,
+                d_inout_values, 
+                start_row, 
+                end_row, 
+                heavy_cutoff,
+                gpu_grg.host_avg_child_counts[level], 
+                streams[0]
+            );
+        
         } else {
             constexpr int THREADS_PER_UNIT = 4;
             constexpr int HEAVY_THREADS_PER_UNIT = 48;
@@ -466,20 +539,20 @@ void cudaTraverseDOWN(GPUGRG<index_t>& gpu_grg, data_t* d_inout_values, cudaStre
     for (int level = gpu_grg.max_height - 1; level > 0; level--) {
         size_t start_row = gpu_grg.host_height_cutoffs[level];
         size_t end_row = gpu_grg.host_height_cutoffs[level+1];
+        double avg_edge_per_node = gpu_grg.host_avg_child_counts[level];
         size_t num_rows = end_row - start_row;
+        size_t heavy_cutoff = gpu_grg.host_heavy_cutoffs[level];
 
         if (unit == 1) {
-            constexpr int THREADS_PER_ROW = 8;
-            int block_size = 64;
-            int rows_per_block = 32;
-            int num_blocks = (num_rows + rows_per_block - 1) / rows_per_block;
-            cudaGRGTraversalDOWNSingleLevelKernel<index_t, data_t, THREADS_PER_ROW><<<num_blocks, block_size, 0, stream>>>(
+            cudaTraverseDownSingleElementLauncher<index_t, data_t>(
                 gpu_grg.row_offsets,
                 gpu_grg.col_indices,
                 d_inout_values,
                 start_row,
                 end_row,
-                rows_per_block
+                heavy_cutoff,
+                avg_edge_per_node,
+                stream
             );
         } else {
             constexpr int THREADS_PER_UNIT = 10;

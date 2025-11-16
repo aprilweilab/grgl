@@ -299,11 +299,19 @@ TEST(GPUGRG, MatMulEnvVarMultiRow) {
 }
 
 TEST(GPUGRG, BenchMatMul) {
-    char* env_p = std::getenv("GRGL_TEST_GRG_FILE");
+    char* env_p;
+    bool direct_gpu = false;
+
+    env_p = std::getenv("GRGL_BENCH_GPUGRG_FILE");
+    if (env_p != nullptr) {
+        direct_gpu = true;
+    } 
+    env_p = std::getenv("GRGL_BENCH_GRG_FILE");
     if (env_p == nullptr) {
-        std::cout << "Environment variable GRGL_TEST_GRG_FILE not set, skipping" << std::endl;
+        std::cout << "Environment variable GRGL_BENCH_GRG_FILE not set, skipping" << std::endl;
         return;
     }
+    
     size_t iterations = 10;
     env_p = std::getenv("GRGL_BENCH_ITERATIONS");
     if (env_p != nullptr) {
@@ -322,45 +330,91 @@ TEST(GPUGRG, BenchMatMul) {
     }
     std::cout << "Using row count " << rowCount << " for MatMultMultiRowFromEnvVar test" << std::endl;
 
-    env_p = std::getenv("GRGL_TEST_GRG_FILE");
-    const char * const testFile = (env_p != nullptr) ? env_p : "test.grg.dotproductgood.grg";
-    grgl::IFSPointer inStream = std::make_shared<std::ifstream>(testFile);
-    auto grg = readImmutableGrg(inStream);
-    ASSERT_TRUE(grg->nodesAreOrdered());
+    if (direct_gpu) {
+        env_p = std::getenv("GRGL_BENCH_GPUGRG_FILE");
+        GPUGRG<uint64_t> gpu_grg = loadGPUGRGFromDisk<uint64_t>(env_p);
+        env_p = std::getenv("GRGL_BENCH_GRG_FILE");
+        const char * const testFile = (env_p != nullptr) ? env_p : "test.grg.dotproductgood.grg";
+        grgl::IFSPointer inStream = std::make_shared<std::ifstream>(testFile);
+        auto grg = readImmutableGrg(inStream);
+        ASSERT_TRUE(grg->nodesAreOrdered());
 
-    GPUGRG<uint64_t> gpu_grg = convertGRGToGPUGRG<uint64_t>(grg.get());
-    // Top-down dot-product
-    
-    std::vector<double> mutValues(grg->numMutations() * rowCount, 2.0);
-    mutValues[0] = 2.0; // make sure input vector is not all ones
-    mutValues[1] = 3.0;
-    mutValues[grg->numMutations() - 1] = 4.0;
-    mutValues[grg->numMutations() * rowCount - 1] = 5.0;
-    std::cout << "Starting benchmark DOWN matMul with " << iterations << " iterations." << std::endl;
-    auto result0 = gpu_grg.matMulPerf(mutValues, rowCount, TraversalDirection::DIRECTION_DOWN, iterations);
-    auto result1 = grg->matMul(mutValues, rowCount, TraversalDirection::DIRECTION_DOWN);
-    // ASSERT_EQ(result0.size(), result1.size());
-    /*
-    for (size_t i = 0; i < result0.size(); i++) {
-        if (result0[i] != result1[i]) {
-            std::cout << "Difference at index " << i << ": GPU result = " << result0[i]
-                      << ", CPU result = " << result1[i] << std::endl;
+        std::cout << "Loaded GPUGRG from disk: " << env_p << std::endl;
+        std::vector<double> mutValues(grg->numMutations() * rowCount, 2.0);
+        mutValues[0] = 2.0; // make sure input vector is not all ones
+        mutValues[1] = 3.0;
+        mutValues[grg->numMutations() - 1] = 4.0;
+        mutValues[grg->numMutations() * rowCount - 1] = 5.0;
+        std::cout << "Starting benchmark DOWN matMul with " << iterations << " iterations." << std::endl;
+        auto result0 = gpu_grg.matMulPerf(mutValues, rowCount, TraversalDirection::DIRECTION_DOWN, iterations);
+        auto result1 = grg->matMul(mutValues, rowCount, TraversalDirection::DIRECTION_DOWN);
+        // ASSERT_EQ(result0.size(), result1.size());
+        /*
+        for (size_t i = 0; i < result0.size(); i++) {
+            if (result0[i] != result1[i]) {
+                std::cout << "Difference at index " << i << ": GPU result = " << result0[i]
+                        << ", CPU result = " << result1[i] << std::endl;
+            }
         }
-    }
-        */
-    // ASSERT_EQ(result0, result1);
+            */
+        // ASSERT_EQ(result0, result1);
+        
+
+        // Bottom-up dot-product
+
+        std::vector<double> sampleValues(grg->numSamples() * rowCount, 4.0);
+        sampleValues[0] = 2.0; // make sure input vector is not all ones
+        sampleValues[1] = 3.0;
+        sampleValues[grg->numSamples() - 1] = 4.0;
+        sampleValues[grg->numSamples() * rowCount - 1] = 5.0;
+        std::cout << "Starting benchmark UP matMul with " << iterations << " iterations." << std::endl;
+        auto result2 = gpu_grg.matMulPerf(sampleValues, rowCount, TraversalDirection::DIRECTION_UP, iterations);
+        auto result3 = grg->matMul(sampleValues, rowCount, TraversalDirection::DIRECTION_UP);
+    } else {
+        env_p = std::getenv("GRGL_BENCH_GRG_FILE");
+        if (env_p == nullptr) {
+            std::cout << "Environment variable GRGL_BENCH_GRG_FILE not set, skipping" << std::endl;
+            return;
+        }
+        const char * const testFile = (env_p != nullptr) ? env_p : "test.grg.dotproductgood.grg";
+        grgl::IFSPointer inStream = std::make_shared<std::ifstream>(testFile);
+        auto grg = readImmutableGrg(inStream);
+        ASSERT_TRUE(grg->nodesAreOrdered());
+        GPUGRG<uint64_t> gpu_grg = convertGRGToGPUGRG<uint64_t>(grg.get());
     
+        // Top-down dot-product
+        
+        std::vector<double> mutValues(grg->numMutations() * rowCount, 2.0);
+        mutValues[0] = 2.0; // make sure input vector is not all ones
+        mutValues[1] = 3.0;
+        mutValues[grg->numMutations() - 1] = 4.0;
+        mutValues[grg->numMutations() * rowCount - 1] = 5.0;
+        std::cout << "Starting benchmark DOWN matMul with " << iterations << " iterations." << std::endl;
+        auto result0 = gpu_grg.matMulPerf(mutValues, rowCount, TraversalDirection::DIRECTION_DOWN, iterations);
+        auto result1 = grg->matMul(mutValues, rowCount, TraversalDirection::DIRECTION_DOWN);
+        // ASSERT_EQ(result0.size(), result1.size());
+        /*
+        for (size_t i = 0; i < result0.size(); i++) {
+            if (result0[i] != result1[i]) {
+                std::cout << "Difference at index " << i << ": GPU result = " << result0[i]
+                        << ", CPU result = " << result1[i] << std::endl;
+            }
+        }
+            */
+        // ASSERT_EQ(result0, result1);
+        
 
-    // Bottom-up dot-product
+        // Bottom-up dot-product
 
-    std::vector<double> sampleValues(grg->numSamples() * rowCount, 4.0);
-    sampleValues[0] = 2.0; // make sure input vector is not all ones
-    sampleValues[1] = 3.0;
-    sampleValues[grg->numSamples() - 1] = 4.0;
-    sampleValues[grg->numSamples() * rowCount - 1] = 5.0;
-    std::cout << "Starting benchmark UP matMul with " << iterations << " iterations." << std::endl;
-    auto result2 = gpu_grg.matMulPerf(sampleValues, rowCount, TraversalDirection::DIRECTION_UP, iterations);
-    auto result3 = grg->matMul(sampleValues, rowCount, TraversalDirection::DIRECTION_UP);
+        std::vector<double> sampleValues(grg->numSamples() * rowCount, 4.0);
+        sampleValues[0] = 2.0; // make sure input vector is not all ones
+        sampleValues[1] = 3.0;
+        sampleValues[grg->numSamples() - 1] = 4.0;
+        sampleValues[grg->numSamples() * rowCount - 1] = 5.0;
+        std::cout << "Starting benchmark UP matMul with " << iterations << " iterations." << std::endl;
+        auto result2 = gpu_grg.matMulPerf(sampleValues, rowCount, TraversalDirection::DIRECTION_UP, iterations);
+        auto result3 = grg->matMul(sampleValues, rowCount, TraversalDirection::DIRECTION_UP);
+    }
     // ASSERT_EQ(result2.size(), result3.size());
     // manually compare all elements and print any differences
     /*

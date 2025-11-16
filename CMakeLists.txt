@@ -50,7 +50,7 @@ if(ENABLE_CUDA)
             if(CMAKE_BUILD_TYPE STREQUAL "Debug")
                 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -g -G -lineinfo")
             else()
-                set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3 -lineinfo")
+                set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3")
             endif()
             # Set CUDA properties for shared libraries
             set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
