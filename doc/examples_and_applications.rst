@@ -27,7 +27,7 @@ Phenotype Simulation
 --------------------
 
 Given a GRG, you can simulate phenotypes for the individual samples contained within it. This is done using the
- package `grg_pheno_sim <https://github.com/aprilweilab/grg_pheno_sim/>`_, which can be installed via::
+package `grg_pheno_sim <https://github.com/aprilweilab/grg_pheno_sim/>`_, which can be installed via::
 
 	pip install grg_pheno_sim
 
