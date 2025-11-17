@@ -348,6 +348,12 @@ More usage examples can be found in the `example jupyter notebooks <https://gith
 
 **TODO: Provide a simple end-to-end example that performs both phenotype simulation and GWAS.**
 
+Splitting GRGs
+--------------
+
+See command ``grg split --help`` and Python API :py:meth:`save_subset`.
+
+
 Splitting equally
 -----------------
 
