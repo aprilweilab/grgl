@@ -178,6 +178,7 @@ set(GRGL_CORE_SOURCES
 if(ENABLE_CUDA)
     set(GRGL_CUDA_SOURCES
         ${CMAKE_CURRENT_LIST_DIR}/src/cuda/cuda_matmul.cu
+        ${CMAKE_CURRENT_LIST_DIR}/src/cuda/gpu_grg.cu
     )
     list(APPEND GRGL_CORE_SOURCES ${GRGL_CUDA_SOURCES})
 endif()

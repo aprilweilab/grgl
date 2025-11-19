@@ -2,7 +2,7 @@
 
 #include <gtest/gtest.h>
 #include "grgl/grg.h"
-#include "grgl/gpu_grg.h"
+#include "grgl/cuda/gpu_grg.h"
 #include <memory>
 #include <cuda_runtime.h>
 

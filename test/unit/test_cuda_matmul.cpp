@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include "grgl/gpu_grg.h"
+#include "grgl/cuda/gpu_grg.h"
 #include "grgl/common.h"
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
@@ -40,7 +40,7 @@ TEST(GPUGRG, Construction) {
     grg = readImmutableGrg(inStream);
     ASSERT_TRUE(grg->nodesAreOrdered());
     CHECK_CUDA_LAST_ERROR();
-    GPUGRG<uint64_t> gpu_grg = convertGRGToGPUGRG<uint64_t>(grg.get());
+    GPUGRG gpu_grg = convertGRGToGPUGRG(grg.get());
 
     ASSERT_EQ(gpu_grg.numRows, grg->numNodes());
     ASSERT_EQ(gpu_grg.numEdges, grg->numEdges());
@@ -77,7 +77,7 @@ TEST(GPUGRG, StoreAndLoad) {
     grg = readImmutableGrg(inStream);
     ASSERT_TRUE(grg->nodesAreOrdered());
 
-    GPUGRG<uint64_t> gpu_grg = convertGRGToGPUGRG<uint64_t>(grg.get());
+    GPUGRG gpu_grg = convertGRGToGPUGRG(grg.get());
     CHECK_CUDA_LAST_ERROR();
     ASSERT_EQ(gpu_grg.numRows, grg->numNodes());
     ASSERT_EQ(gpu_grg.numEdges, grg->numEdges());
@@ -86,8 +86,8 @@ TEST(GPUGRG, StoreAndLoad) {
     ASSERT_GE(gpu_grg.maxHeight, 3);
 
     const char * const gpuGrgFile = "test.gpu_grg.storeload.gpugrg";
-    storeGPUGRGToDisk<uint64_t>(gpu_grg, gpuGrgFile);
-    GPUGRG<uint64_t> loaded_gpu_grg = loadGPUGRGFromDisk<uint64_t>(gpuGrgFile);
+    storeGPUGRGToDisk(gpu_grg, gpuGrgFile);
+    GPUGRG loaded_gpu_grg = loadGPUGRGFromDisk(gpuGrgFile);
 
     CHECK_CUDA_LAST_ERROR();
     ASSERT_EQ(loaded_gpu_grg.numRows, gpu_grg.numRows);
@@ -125,7 +125,7 @@ TEST(GPUGRG, MatMult) {
     grg = readImmutableGrg(inStream);
     ASSERT_TRUE(grg->nodesAreOrdered());
 
-    GPUGRG<uint64_t> gpu_grg = convertGRGToGPUGRG<uint64_t>(grg.get());
+    GPUGRG gpu_grg = convertGRGToGPUGRG(grg.get());
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Convert CUDA kernel launch error: " << cudaGetErrorString(err) << std::endl;
@@ -188,7 +188,7 @@ TEST(GPUGRG, MatMulEnvVar) {
     auto grg = readImmutableGrg(inStream);
     ASSERT_TRUE(grg->nodesAreOrdered());
 
-    GPUGRG<uint64_t> gpu_grg = convertGRGToGPUGRG<uint64_t>(grg.get());
+    GPUGRG gpu_grg = convertGRGToGPUGRG(grg.get());
     std::cout << "Loaded and converted GRG from file: " << testFile << std::endl;
     // Top-down dot-product
     std::vector<double> mutValues(grg->numMutations(), 1.0);
@@ -246,11 +246,11 @@ TEST(GPUGRG, MatMulEnvVarMultiRow) {
     auto grg = readImmutableGrg(inStream);
     ASSERT_TRUE(grg->nodesAreOrdered());
 
-    GPUGRG<uint64_t> gpu_grg_a = convertGRGToGPUGRG<uint64_t>(grg.get());
+    GPUGRG gpu_grg_a = convertGRGToGPUGRG(grg.get());
     std::cout << "Loaded and converted GRG from file: " << testFile << std::endl;
     const char * const gpuGrgFile = "test.gpu_grg.storeload.gpugrg";
-    storeGPUGRGToDisk<uint64_t>(gpu_grg_a, gpuGrgFile);
-    GPUGRG<uint64_t> gpu_grg = loadGPUGRGFromDisk<uint64_t>(gpuGrgFile);
+    storeGPUGRGToDisk(gpu_grg_a, gpuGrgFile);
+    GPUGRG gpu_grg = loadGPUGRGFromDisk(gpuGrgFile);
     std::cout << "Loaded GPUGRG from disk: " << gpuGrgFile << std::endl;
     // Top-down dot-product
     
@@ -332,7 +332,7 @@ TEST(GPUGRG, BenchMatMul) {
 
     if (direct_gpu) {
         env_p = std::getenv("GRGL_BENCH_GPUGRG_FILE");
-        GPUGRG<uint64_t> gpu_grg = loadGPUGRGFromDisk<uint64_t>(env_p);
+        GPUGRG gpu_grg = loadGPUGRGFromDisk(env_p);
         env_p = std::getenv("GRGL_BENCH_GRG_FILE");
         const char * const testFile = (env_p != nullptr) ? env_p : "test.grg.dotproductgood.grg";
         grgl::IFSPointer inStream = std::make_shared<std::ifstream>(testFile);
@@ -380,8 +380,8 @@ TEST(GPUGRG, BenchMatMul) {
         grgl::IFSPointer inStream = std::make_shared<std::ifstream>(testFile);
         auto grg = readImmutableGrg(inStream);
         ASSERT_TRUE(grg->nodesAreOrdered());
-        GPUGRG<uint64_t> gpu_grg = convertGRGToGPUGRG<uint64_t>(grg.get());
-    
+        GPUGRG gpu_grg = convertGRGToGPUGRG(grg.get());
+
         // Top-down dot-product
         
         std::vector<double> mutValues(grg->numMutations() * rowCount, 2.0);
