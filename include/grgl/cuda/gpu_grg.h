@@ -21,25 +21,107 @@
 #include <chrono>
 #include <cuda_runtime.h>
 #include <fstream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace grgl {
 
+template <typename T> class CudaBuffer {
+public:
+    CudaBuffer()
+        : m_buffer(nullptr) {}
+
+    CudaBuffer(size_t dim1) {
+        // Check for potential overflow before multiplication
+        if (dim1 > SIZE_MAX / sizeof(T)) {
+            throw std::runtime_error("CudaBuffer allocation size would overflow");
+        }
+        const size_t allocSize = dim1 * sizeof(T);
+        cudaMalloc(&m_buffer, allocSize);
+        CHECK_CUDA_LAST_ERROR();
+    }
+
+    CudaBuffer(size_t dim1, size_t dim2) {
+        // Check for potential overflow before multiplication
+        if (dim1 > 0 && dim2 > SIZE_MAX / sizeof(T) / dim1) {
+            throw std::runtime_error("CudaBuffer allocation size would overflow");
+        }
+        const size_t allocSize = dim1 * dim2 * sizeof(T);
+        cudaMalloc(&m_buffer, allocSize);
+        CHECK_CUDA_LAST_ERROR();
+    }
+
+    ~CudaBuffer() {
+        if (m_buffer != nullptr) {
+            cudaFree(m_buffer);
+            m_buffer = nullptr;
+        }
+    }
+
+    T* get() { return m_buffer; }
+
+    // Disable all copying of this type.
+    CudaBuffer(const CudaBuffer& rhs) = delete;
+    CudaBuffer& operator=(const CudaBuffer& rhs) = delete;
+    CudaBuffer& operator=(CudaBuffer&& rhs) noexcept = delete;
+    CudaBuffer(CudaBuffer&& rhs) noexcept = delete;
+
+private:
+    T* m_buffer;
+};
+
+typedef std::shared_ptr<CudaBuffer<NodeIDSizeT>> CudaNodeIDBufferPtr;
 
 constexpr uint64_t GPUGRG_MAGIC = 0x4752474C47505501ULL; // "GRGLGPU" + version byte 01
 
 class GPUGRG {
-public:
+private:
     // these are resident GPU pointers
-    NodeIDSizeT* rowOffsets; // Device pointer to row offsets (size: num_rows + 1)
-    NodeIDSizeT* oldToNewMapping;
-    NodeIDSizeT* newToOldMapping;       // This is not used actually
-    NodeIDSizeT* mutationAndNewMapping; // Mapping between mutation id and new node id (in pairs)
+    CudaNodeIDBufferPtr rowOffsets; // Device pointer to row offsets (size: num_rows + 1)
+    CudaNodeIDBufferPtr oldToNewMapping;
+    CudaNodeIDBufferPtr newToOldMapping;       // This is not used actually
+    CudaNodeIDBufferPtr mutationAndNewMapping; // Mapping between mutation id and new node id (in pairs)
 
     // Since col indices may be large, this data may not be resident on GPU
-    NodeIDSizeT* colIndices; // Device pointer to column indices (size: nnz)
+    CudaNodeIDBufferPtr colIndices; // Device pointer to column indices (size: nnz)
+
+public:
+    NodeIDSizeT* getRowOffsets() {
+        if (!rowOffsets) {
+            throw ApiMisuseFailure("Row offsets GPU buffer is not allocated");
+        }
+        return rowOffsets->get();
+    }
+
+    NodeIDSizeT* getOldToNewMapping() {
+        if (!oldToNewMapping) {
+            throw ApiMisuseFailure("Old to new mapping GPU buffer is not allocated");
+        }
+        return oldToNewMapping->get();
+    }
+
+    NodeIDSizeT* getNewToOldMapping() {
+        if (!newToOldMapping) {
+            throw ApiMisuseFailure("New to old mapping GPU buffer is not allocated");
+        }
+        return newToOldMapping->get();
+    }
+
+    NodeIDSizeT* getMutationAndNewMapping() {
+        if (!mutationAndNewMapping) {
+            throw ApiMisuseFailure("Mutation and new mapping GPU buffer is not allocated");
+        }
+        return mutationAndNewMapping->get();
+    }
+
+    NodeIDSizeT* getColIndices() {
+        if (!colIndices) {
+            throw ApiMisuseFailure("Col indices GPU buffer is not allocated");
+        }
+        return colIndices->get();
+    }
 
     // This is the corresponding host backup data
     std::vector<NodeIDSizeT> hostColIndices;
@@ -51,14 +133,13 @@ public:
     size_t numRows;      // Number of rows, i.e. number of nodes
     size_t numSamples;   // Number of samples, i.e. number of leaf nodes
     size_t numMutations; // Number of mutations. may NOT correspond to number of non-leaf nodes
-    size_t numEdges;           // Number of non-zero elements, i.e. number of edges
+    size_t numEdges;     // Number of non-zero elements, i.e. number of edges
     size_t maxHeight;
 
-    cudaStream_t* workStreamPtr; // CUDA stream for asynchronous operations
+    std::shared_ptr<cudaStream_t> workStreamPtr; // CUDA stream for asynchronous operations
 
     // friend GPUGRG loadGPUGRGFromDisk(const std::string& filename);
     // friend void storeGPUGRGToDisk(const GPUGRG& gpu_grg, const std::string& filename);
-public:
     // Constructor
     GPUGRG()
         : rowOffsets(nullptr),
@@ -81,14 +162,15 @@ public:
 
     // This function sets existing GPU memory pointers for col indices
     // will not allocate new memory
-    void setColIndBuffer(void* ptr, size_t size) {
+    // the size should be in **BYTES**
+    void setColIndBuffer(CudaNodeIDBufferPtr buffer, size_t size) {
         if (size < queryColIndSize()) {
             throw ApiMisuseFailure("Provided buffer size is smaller than required col indices size");
         }
         if (colIndices) {
             throw ApiMisuseFailure("Col indices buffer is already set");
         }
-        colIndices = static_cast<NodeIDSizeT*>(ptr);
+        colIndices = buffer;
     }
 
     // This function copies col indices from Host to GPU
@@ -96,8 +178,11 @@ public:
     // The caller must ensure the memory space is not used by other operations.
     void copyColIndFromHost() {
         if (colIndices) {
-            cudaMemcpyAsync(
-                colIndices, hostColIndices.data(), numEdges * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice, *workStreamPtr);
+            cudaMemcpyAsync(getColIndices(),
+                            hostColIndices.data(),
+                            numEdges * sizeof(NodeIDSizeT),
+                            cudaMemcpyHostToDevice,
+                            *workStreamPtr);
         } else {
             throw ApiMisuseFailure("No col indices buffer set for GPUGRG copyColIndFromHost operation");
         }
@@ -118,6 +203,7 @@ public:
     void removeColIndBuffer() { colIndices = nullptr; }
 
     // This function frees the GPU memory buffer for col indices
+    /*
     void freeColInd() {
         if (colIndices == nullptr) {
             throw ApiMisuseFailure("Col indices buffer is already freed");
@@ -125,6 +211,7 @@ public:
         cudaFree(colIndices);
         colIndices = nullptr;
     }
+    */
 
     // Init vars and allocate GPU memory for all structures
     // This function is blocking
@@ -135,7 +222,7 @@ public:
               size_t mutations,
               size_t height,
               bool allocateColIndices = true,
-              cudaStream_t* streamPtr = nullptr) {
+              std::shared_ptr<cudaStream_t> streamPtr = nullptr) {
         free(); // Free any existing memory
         CHECK_CUDA_LAST_ERROR();
         numRows = rows;
@@ -144,17 +231,18 @@ public:
         numMutations = mutations;
         maxHeight = height;
 
-        cudaMalloc(&rowOffsets, (numRows + 1) * sizeof(NodeIDSizeT));
+        rowOffsets = std::make_shared<CudaBuffer<NodeIDSizeT>>(numRows + 1);
         CHECK_CUDA_LAST_ERROR();
-        cudaMalloc(&oldToNewMapping, numRows * sizeof(NodeIDSizeT));
+        oldToNewMapping = std::make_shared<CudaBuffer<NodeIDSizeT>>(numRows);
         CHECK_CUDA_LAST_ERROR();
-        cudaMalloc(&newToOldMapping, numRows * sizeof(NodeIDSizeT));
+        newToOldMapping = std::make_shared<CudaBuffer<NodeIDSizeT>>(numRows);
         CHECK_CUDA_LAST_ERROR();
-        cudaMalloc(&mutationAndNewMapping, numMutations * 2 * sizeof(NodeIDSizeT)); // Allocate for pairs
+        mutationAndNewMapping = std::make_shared<CudaBuffer<NodeIDSizeT>>(numMutations, 2);
         CHECK_CUDA_LAST_ERROR();
 
         if (allocateColIndices) {
-            cudaMalloc(&colIndices, numEdges * sizeof(NodeIDSizeT));
+            colIndices = std::make_shared<CudaBuffer<NodeIDSizeT>>(numEdges);
+            CHECK_CUDA_LAST_ERROR();
         } else {
             colIndices = nullptr;
         }
@@ -168,34 +256,19 @@ public:
         if (streamPtr) {
             workStreamPtr = streamPtr;
         } else {
-            workStreamPtr = new cudaStream_t();
-            cudaStreamCreate(workStreamPtr);
+            workStreamPtr = std::make_shared<cudaStream_t>();
+            cudaStreamCreate(workStreamPtr.get());
         }
         CHECK_CUDA_LAST_ERROR();
     }
 
     // Free GPU memory
     void free() {
-        if (rowOffsets) {
-            cudaFree(rowOffsets);
-            rowOffsets = nullptr;
-        }
-        if (colIndices) {
-            cudaFree(colIndices);
-            colIndices = nullptr;
-        }
-        if (oldToNewMapping) {
-            cudaFree(oldToNewMapping);
-            oldToNewMapping = nullptr;
-        }
-        if (newToOldMapping) {
-            cudaFree(newToOldMapping);
-            newToOldMapping = nullptr;
-        }
-        if (mutationAndNewMapping) {
-            cudaFree(mutationAndNewMapping);
-            mutationAndNewMapping = nullptr;
-        }
+        rowOffsets = nullptr;
+        colIndices = nullptr;
+        oldToNewMapping = nullptr;
+        newToOldMapping = nullptr;
+        mutationAndNewMapping = nullptr;
         CHECK_CUDA_LAST_ERROR();
 
         hostColIndices.clear();
@@ -208,8 +281,10 @@ public:
         maxHeight = 0;
 
         if (workStreamPtr) {
-            cudaStreamDestroy(*workStreamPtr);
-            delete workStreamPtr;
+            // This may not work if we are multithreading
+            if (workStreamPtr.use_count() == 1) {
+                cudaStreamDestroy(*workStreamPtr);
+            }
             workStreamPtr = nullptr;
         }
         CHECK_CUDA_LAST_ERROR();
@@ -231,13 +306,13 @@ public:
             throw ApiMisuseFailure("Device memory not allocated yet!");
         }
         CHECK_CUDA_LAST_ERROR();
-        cudaMemcpy(this->rowOffsets, rowOffsets, (numRows + 1) * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
+        cudaMemcpy(this->getRowOffsets(), rowOffsets, (numRows + 1) * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
         CHECK_CUDA_LAST_ERROR();
-        cudaMemcpy(this->oldToNewMapping, oldToNewMapping, numRows * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
+        cudaMemcpy(this->getOldToNewMapping(), oldToNewMapping, numRows * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
         CHECK_CUDA_LAST_ERROR();
-        cudaMemcpy(this->newToOldMapping, newToOldMapping, numRows * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
+        cudaMemcpy(this->getNewToOldMapping(), newToOldMapping, numRows * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
         CHECK_CUDA_LAST_ERROR();
-        cudaMemcpy(this->mutationAndNewMapping,
+        cudaMemcpy(this->getMutationAndNewMapping(),
                    mutationAndNewMapping,
                    numMutations * 2 * sizeof(NodeIDSizeT),
                    cudaMemcpyHostToDevice);
@@ -254,7 +329,7 @@ public:
             if (!this->colIndices) {
                 throw ApiMisuseFailure("Column indices GPU buffer is not allocated");
             }
-            cudaMemcpy(this->colIndices, colIndices, numEdges * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
+            cudaMemcpy(this->getColIndices(), colIndices, numEdges * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
         }
         CHECK_CUDA_LAST_ERROR();
     }
@@ -267,7 +342,6 @@ public:
         std::cout << "  max_height: " << maxHeight << std::endl;
         std::cout << "  num_samples: " << numSamples << std::endl;
         std::cout << "  num_mutations: " << numMutations << std::endl;
-
     }
 
     /**
@@ -354,6 +428,7 @@ public:
         }
         auto end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> elapsed = end - start;
+
         std::cout << "Average end-to-end runtime for matrixMultiplication function (GPU) over " << iterations
                   << " iterations: " << (elapsed.count() / iterations) << " ms" << std::endl;
 
@@ -386,13 +461,35 @@ public:
 };
 
 /**
+ * Binary file format for GPUGRG storage:
+ *
+ * Header (56 bytes):
+ * - uint64_t magic_number (8 bytes) - File format identifier
+ * - uint64_t num_rows (8 bytes)
+ * - uint64_t nnz (8 bytes)
+ * - uint64_t max_height (8 bytes)
+ * - uint64_t num_samples (8 bytes)
+ * - uint64_t num_mutations (8 bytes)
+ * - uint64_t index_size (8 bytes) - Size of NodeIDSizeT type in bytes
+ *
+ * Data sections:
+ * - row_offsets: (num_rows + 1) * sizeof(NodeIDSizeT) bytes
+ * - col_indices: nnz * sizeof(NodeIDSizeT) bytes
+ * - height_cutoffs: (max_height + 1) * sizeof(NodeIDSizeT) bytes
+ * - heavy_cutoffs: (max_height + 1) * sizeof(NodeIDSizeT) bytes
+ * - avg_child_counts: (max_height + 1) * sizeof(double) bytes
+ * - old_to_new_mapping: num_rows * sizeof(NodeIDSizeT) bytes
+ * - new_to_old_mapping: num_rows * sizeof(NodeIDSizeT) bytes
+ */
+
+/**
  * Store a GPUGRG structure to disk in binary format.
  *
  * @param gpu_grg The GPUGRG structure to store (must have valid CPU data)
  * @param filename Path to the output file
  * @throws std::runtime_error if file operations fail
  */
-void storeGPUGRGToDisk(const GPUGRG& gpu_grg, const std::string& filename);
+void storeGPUGRGToDisk(GPUGRG& gpu_grg, const std::string& filename);
 
 /**
  * Load a GPUGRG structure from disk.
@@ -409,9 +506,7 @@ struct nodes {
     NodeIDSizeT childCounts;
 };
 
-bool cmp(const nodes& a, const nodes& b) {
-    return a.childCounts > b.childCounts;
-}
+bool cmp(const nodes& a, const nodes& b) { return a.childCounts > b.childCounts; }
 } // namespace
 
 // This visitor is tested ONLY on CSRGRG (immutable, ordered GRG)
@@ -495,7 +590,9 @@ public:
     // this function rearranges nodes at each height by their child counts
     void rearrange(GRG* grg) {
         for (int h = 1; h < h_maxHeight; h++) {
+#ifdef GRGL_GPU_DEBUG
             std::cout << "Rearranging height " << h << " with " << h_oldId[h].size() << " nodes." << std::endl;
+#endif
             std::vector<nodes> nodeList;
             for (size_t i = 0; i < h_oldId[h].size(); i++) {
                 NodeID oldID = h_oldId[h][i];
@@ -554,7 +651,9 @@ public:
             }
         }
 
+#ifdef GRGL_GPU_DEBUG
         std::cout << "Host col indices constructed with size: " << h_colIndices.size() << std::endl;
+#endif
 
         constexpr double HEAVY_RATIO = 8.0; // TODO: define this in another place
 
@@ -571,7 +670,9 @@ public:
             }
         }
 
+#ifdef GRGL_GPU_DEBUG
         std::cout << "Host Heavy Cutoffs constructed." << std::endl;
+#endif
 
         h_rowOffsets[h_numNodes] = currrentColIndex;
         release_assert(currrentColIndex == h_numEdges);
@@ -601,14 +702,17 @@ public:
 
         size_t numValidMutations = mutationNewPairs.size() / 2;
 
+#ifdef GRGL_GPU_DEBUG
         std::cout << "Mutation and new id pairs constructed with size: " << mutationNewPairs.size() << std::endl;
+#endif
         if (numValidMutations != grg->numMutations()) {
             std::cout << "Warning: Valid mutations (" << numValidMutations << ") is less than total mutations ("
                       << grg->numMutations() << ")." << std::endl;
         }
-
-        std::cout << "Constructing GPUGRG with " << h_numNodes << " nodes, " << h_numEdges
-                  << " elements, max height " << h_maxHeight << std::endl;
+#ifdef GRGL_GPU_DEBUG
+        std::cout << "Constructing GPUGRG with " << h_numNodes << " nodes, " << h_numEdges << " elements, max height "
+                  << h_maxHeight << std::endl;
+#endif
         gpu_grg.init(h_numNodes, grg->numSamples(), h_numEdges, numValidMutations, h_maxHeight);
 
         gpu_grg.copyToDevice(h_rowOffsets.data(),
@@ -640,43 +744,19 @@ private:
     size_t h_numNodes;
     size_t h_numEdges;
 
-    std::vector<size_t> h_childCounts;                // sum of child counts for nodes of the same height
-    std::vector<std::vector<NodeIDSizeT>> h_oldId;        // new_id -> old_id mapping
+    std::vector<size_t> h_childCounts;                        // sum of child counts for nodes of the same height
+    std::vector<std::vector<NodeIDSizeT>> h_oldId;            // new_id -> old_id mapping
     std::vector<std::pair<NodeIDSizeT, NodeIDSizeT>> h_newID; // old_id -> new_id mapping
 };
 
 /**
- * Binary file format for GPUGRG storage:
- *
- * Header (56 bytes):
- * - uint64_t magic_number (8 bytes) - File format identifier
- * - uint64_t num_rows (8 bytes)
- * - uint64_t nnz (8 bytes)
- * - uint64_t max_height (8 bytes)
- * - uint64_t num_samples (8 bytes)
- * - uint64_t num_mutations (8 bytes)
- * - uint64_t index_size (8 bytes) - Size of NodeIDSizeT type in bytes
- *
- * Data sections:
- * - row_offsets: (num_rows + 1) * sizeof(NodeIDSizeT) bytes
- * - col_indices: nnz * sizeof(NodeIDSizeT) bytes
- * - height_cutoffs: (max_height + 1) * sizeof(NodeIDSizeT) bytes
- * - heavy_cutoffs: (max_height + 1) * sizeof(NodeIDSizeT) bytes
- * - avg_child_counts: (max_height + 1) * sizeof(double) bytes
- * - old_to_new_mapping: num_rows * sizeof(NodeIDSizeT) bytes
- * - new_to_old_mapping: num_rows * sizeof(NodeIDSizeT) bytes
- */
-
-/**
  * Convert a GRG to GPUGRG format for GPU matrix multiplication.
- * This function performs the same conversion that was previously done inline
- * in matrixMultiplicationGPU, but as a standalone reusable function.
  *
  * @param grg The GRG to convert (must have ordered nodes)
  * @return GPUGRG structure with GPU memory allocated and data copied
  * @throws std::runtime_error if GRG doesn't meet requirements
  */
-GPUGRG convertGRGToGPUGRG(GRG* grg); 
+GPUGRG convertGRGToGPUGRG(GRGPtr grg);
 
 bool hasCudaSupport();
 

@@ -7,4 +7,5 @@ clang-format -i src/*.h
 clang-format -i src/cuda/*.cu
 clang-format -i src/python/*.cpp
 clang-format -i include/grgl/*.h
-clang-format -i include/grgl/*.cuh
+clang-format -i include/grgl/cuda/*.h
+clang-format -i include/grgl/cuda/*.cuh

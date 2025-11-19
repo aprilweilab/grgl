@@ -40,7 +40,7 @@ TEST(GPUGRG, Construction) {
     grg = readImmutableGrg(inStream);
     ASSERT_TRUE(grg->nodesAreOrdered());
     CHECK_CUDA_LAST_ERROR();
-    GPUGRG gpu_grg = convertGRGToGPUGRG(grg.get());
+    GPUGRG gpu_grg = convertGRGToGPUGRG(grg);
 
     ASSERT_EQ(gpu_grg.numRows, grg->numNodes());
     ASSERT_EQ(gpu_grg.numEdges, grg->numEdges());
@@ -77,7 +77,7 @@ TEST(GPUGRG, StoreAndLoad) {
     grg = readImmutableGrg(inStream);
     ASSERT_TRUE(grg->nodesAreOrdered());
 
-    GPUGRG gpu_grg = convertGRGToGPUGRG(grg.get());
+    GPUGRG gpu_grg = convertGRGToGPUGRG(grg);
     CHECK_CUDA_LAST_ERROR();
     ASSERT_EQ(gpu_grg.numRows, grg->numNodes());
     ASSERT_EQ(gpu_grg.numEdges, grg->numEdges());
@@ -125,7 +125,7 @@ TEST(GPUGRG, MatMult) {
     grg = readImmutableGrg(inStream);
     ASSERT_TRUE(grg->nodesAreOrdered());
 
-    GPUGRG gpu_grg = convertGRGToGPUGRG(grg.get());
+    GPUGRG gpu_grg = convertGRGToGPUGRG(grg);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         std::cerr << "Convert CUDA kernel launch error: " << cudaGetErrorString(err) << std::endl;
@@ -188,7 +188,7 @@ TEST(GPUGRG, MatMulEnvVar) {
     auto grg = readImmutableGrg(inStream);
     ASSERT_TRUE(grg->nodesAreOrdered());
 
-    GPUGRG gpu_grg = convertGRGToGPUGRG(grg.get());
+    GPUGRG gpu_grg = convertGRGToGPUGRG(grg);
     std::cout << "Loaded and converted GRG from file: " << testFile << std::endl;
     // Top-down dot-product
     std::vector<double> mutValues(grg->numMutations(), 1.0);
@@ -246,7 +246,7 @@ TEST(GPUGRG, MatMulEnvVarMultiRow) {
     auto grg = readImmutableGrg(inStream);
     ASSERT_TRUE(grg->nodesAreOrdered());
 
-    GPUGRG gpu_grg_a = convertGRGToGPUGRG(grg.get());
+    GPUGRG gpu_grg_a = convertGRGToGPUGRG(grg);
     std::cout << "Loaded and converted GRG from file: " << testFile << std::endl;
     const char * const gpuGrgFile = "test.gpu_grg.storeload.gpugrg";
     storeGPUGRGToDisk(gpu_grg_a, gpuGrgFile);
@@ -380,7 +380,7 @@ TEST(GPUGRG, BenchMatMul) {
         grgl::IFSPointer inStream = std::make_shared<std::ifstream>(testFile);
         auto grg = readImmutableGrg(inStream);
         ASSERT_TRUE(grg->nodesAreOrdered());
-        GPUGRG gpu_grg = convertGRGToGPUGRG(grg.get());
+        GPUGRG gpu_grg = convertGRGToGPUGRG(grg);
 
         // Top-down dot-product
         

@@ -5,11 +5,11 @@
 #error "Cannot include cuda_kernels.cuh if CUDA is not enabled; rebuild with GRGL_CUDA_ENABLED defined."
 #endif
 
+#include "grgl/grgnode.h"
 #include <chrono>
 #include <cuda_runtime.h>
 #include <iostream>
 #include <vector>
-#include "grgl/grgnode.h"
 
 namespace grgl {
 
@@ -203,8 +203,7 @@ __global__ void cudaTraversalUpMultiElementKernel(NodeIDSizeT* rowOffsets,
             }
 
             // NodeIDSizeT col = colIndices[idx];
-            NodeIDSizeT col =
-                colBuffer[myOffset + curStep * stride]; // colIndices[curStep * stride + myOffset];
+            NodeIDSizeT col = colBuffer[myOffset + curStep * stride]; // colIndices[curStep * stride + myOffset];
             sum += values[col * unit + myElementID];
             // __syncthreads();
         }
@@ -265,8 +264,7 @@ __global__ void cudaTraversalDownMultiElementKernel(NodeIDSizeT* rowOffsets,
             }
 
             // NodeIDSizeT col = colIndices[idx];
-            NodeIDSizeT col =
-                colBuffer[myOffset + curStep * stride]; // colIndices[curStep * stride + myOffset];
+            NodeIDSizeT col = colBuffer[myOffset + curStep * stride]; // colIndices[curStep * stride + myOffset];
             atomicAdd(&values[col * unit + myElementID], myVal);
             // __syncthreads();
         }
