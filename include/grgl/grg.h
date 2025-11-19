@@ -23,7 +23,6 @@
 #include <map>
 #include <memory>
 #include <vector>
-#include <chrono>
 
 #include "grgl/common.h"
 #include "grgl/csr_storage.h"
@@ -556,7 +555,6 @@ public:
                               NodeInitEnum nodeInit = NIE_ZERO,
                               IOType* missMatrix = nullptr);
 
-
     /**
      * Compute one of two possible matrix multiplications across the entire
      * graph. The input matrix \f$V\f$ can be either \f$K \times N\f$ (\f$N\f$
@@ -602,11 +600,7 @@ public:
         const size_t outSize =
             (numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? numSamples() : numMutations()));
         std::vector<T> result(outSize);
-        auto start = std::chrono::high_resolution_clock::now();
         matrixMultiplication<T, T, false>(inputMatrix.data(), numCols, numRows, direction, result.data(), outSize);
-        auto end = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double, std::milli> diff = end - start;
-        std::cout << "End-to-end run of matrixMultiplication (CPU) took " << diff.count() << " ms" << std::endl;
         return std::move(result);
     }
 
@@ -1091,11 +1085,6 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
                                IOType* missMatrix) {
     release_assert(inputCols > 0);
     release_assert(inputRows > 0);
-    std::cout << "Starting CPU GRG matMul with inputCols " << inputCols << ", inputRows " << inputRows
-              << ", outputSize " << outputSize << ", direction "
-              << ((direction == DIRECTION_DOWN) ? "DOWN" : "UP") << ", emitAllNodes " << emitAllNodes
-              << ", byIndividual " << byIndividual << ", nodeInit " << static_cast<int>(nodeInit)
-              << ", useBitVector " << useBitVector << std::endl;
     const size_t outputCols = outputSize / inputRows;
     validateMatMulInputs(this, inputCols, inputRows, direction, outputSize, emitAllNodes, byIndividual, outputCols);
     // When we do bitvector calculations, we must have the number of input rows be a multiple of the
@@ -1165,7 +1154,6 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
             }
         }
         if (this->nodesAreOrdered()) {
-            auto time_st = std::chrono::high_resolution_clock::now();
             for (NodeID i = numNodes(); i > 0; i--) {
                 const NodeID nodeId = i - 1;
                 const size_t base = nodeId * effectiveInputRows;
@@ -1175,10 +1163,6 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
                         nodeValues.data(), nodeValues.data(), cbase, base, effectiveInputRows);
                 }
             }
-            auto time_en = std::chrono::high_resolution_clock::now();
-            // give time in ms
-            std::chrono::duration<double, std::milli> time_diff = time_en - time_st;
-            std::cout << "CPU GRG Matmul core took " << time_diff.count() << " ms\n";
         } else {
             ValueSumVisitor<NodeValueType> valueSumVisitor(nodeValues, effectiveInputRows);
             this->visitDfs(valueSumVisitor, DIRECTION_UP, getSampleNodes());
@@ -1208,7 +1192,6 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
             }
         }
         if (this->nodesAreOrdered()) {
-            auto time_st = std::chrono::high_resolution_clock::now();
             for (NodeID nodeId = numSamples(); nodeId < numNodes(); nodeId++) {
                 const size_t base = nodeId * effectiveInputRows;
                 for (NodeID childId : this->getDownEdges(nodeId)) {
@@ -1217,11 +1200,6 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
                         nodeValues.data(), nodeValues.data(), base, cbase, effectiveInputRows);
                 }
             }
-            auto time_en = std::chrono::high_resolution_clock::now();
-            // give time in ms
-            std::chrono::duration<double, std::milli> time_diff = time_en - time_st;
-            std::cout << "CPU GRG Matmul core took " << time_diff.count() << " ms\n";
-
         } else {
             ValueSumVisitor<NodeValueType> valueSumVisitor(nodeValues, effectiveInputRows);
             this->visitDfs(valueSumVisitor, DIRECTION_DOWN, getRootNodes());

@@ -12,7 +12,7 @@ C_MODULE_NAME = "_grgl"
 env_debug = int(os.environ.get("GRGL_DEBUG", 0))
 env_bgen = int(os.environ.get("GRGL_BGEN", 0))
 env_copy_bins = int(os.environ.get("GRGL_COPY_BINS", 0))
-env_cuda = os.environ.get("GRGL_CUDA", "auto").lower()
+env_cuda = os.environ.get("GRGL_CUDA", "off").lower()
 
 THISDIR = os.path.realpath(os.path.dirname(__file__))
 

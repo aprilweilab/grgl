@@ -42,11 +42,11 @@ TEST(GPUGRG, Construction) {
     CHECK_CUDA_LAST_ERROR();
     GPUGRG<uint64_t> gpu_grg = convertGRGToGPUGRG<uint64_t>(grg.get());
 
-    ASSERT_EQ(gpu_grg.num_rows, grg->numNodes());
-    ASSERT_EQ(gpu_grg.nnz, grg->numEdges());
-    ASSERT_EQ(gpu_grg.num_samples, grg->numSamples());
-    ASSERT_EQ(gpu_grg.num_mutations, grg->numMutations());
-    ASSERT_GE(gpu_grg.max_height, 3);
+    ASSERT_EQ(gpu_grg.numRows, grg->numNodes());
+    ASSERT_EQ(gpu_grg.numEdges, grg->numEdges());
+    ASSERT_EQ(gpu_grg.numSamples, grg->numSamples());
+    ASSERT_EQ(gpu_grg.numMutations, grg->numMutations());
+    ASSERT_GE(gpu_grg.maxHeight, 3);
 
     CHECK_CUDA_LAST_ERROR();
 
@@ -79,22 +79,22 @@ TEST(GPUGRG, StoreAndLoad) {
 
     GPUGRG<uint64_t> gpu_grg = convertGRGToGPUGRG<uint64_t>(grg.get());
     CHECK_CUDA_LAST_ERROR();
-    ASSERT_EQ(gpu_grg.num_rows, grg->numNodes());
-    ASSERT_EQ(gpu_grg.nnz, grg->numEdges());
-    ASSERT_EQ(gpu_grg.num_samples, grg->numSamples());
-    ASSERT_EQ(gpu_grg.num_mutations, grg->numMutations());
-    ASSERT_GE(gpu_grg.max_height, 3);
+    ASSERT_EQ(gpu_grg.numRows, grg->numNodes());
+    ASSERT_EQ(gpu_grg.numEdges, grg->numEdges());
+    ASSERT_EQ(gpu_grg.numSamples, grg->numSamples());
+    ASSERT_EQ(gpu_grg.numMutations, grg->numMutations());
+    ASSERT_GE(gpu_grg.maxHeight, 3);
 
     const char * const gpuGrgFile = "test.gpu_grg.storeload.gpugrg";
     storeGPUGRGToDisk<uint64_t>(gpu_grg, gpuGrgFile);
     GPUGRG<uint64_t> loaded_gpu_grg = loadGPUGRGFromDisk<uint64_t>(gpuGrgFile);
 
     CHECK_CUDA_LAST_ERROR();
-    ASSERT_EQ(loaded_gpu_grg.num_rows, gpu_grg.num_rows);
-    ASSERT_EQ(loaded_gpu_grg.nnz, gpu_grg.nnz);
-    ASSERT_EQ(loaded_gpu_grg.num_samples, gpu_grg.num_samples);
-    ASSERT_EQ(loaded_gpu_grg.num_mutations, gpu_grg.num_mutations);
-    ASSERT_EQ(loaded_gpu_grg.max_height, gpu_grg.max_height);
+    ASSERT_EQ(loaded_gpu_grg.numRows, gpu_grg.numRows);
+    ASSERT_EQ(loaded_gpu_grg.numEdges, gpu_grg.numEdges);
+    ASSERT_EQ(loaded_gpu_grg.numSamples, gpu_grg.numSamples);
+    ASSERT_EQ(loaded_gpu_grg.numMutations, gpu_grg.numMutations);
+    ASSERT_EQ(loaded_gpu_grg.maxHeight, gpu_grg.maxHeight);
 
     CHECK_CUDA_LAST_ERROR();
 }
@@ -132,11 +132,11 @@ TEST(GPUGRG, MatMult) {
         throw std::runtime_error("CUDA kernel launch failed");
     }
 
-    ASSERT_EQ(gpu_grg.num_rows, grg->numNodes());
-    ASSERT_EQ(gpu_grg.nnz, grg->numEdges());
-    ASSERT_EQ(gpu_grg.num_samples, grg->numSamples());
-    ASSERT_EQ(gpu_grg.num_mutations, grg->numMutations());
-    ASSERT_GE(gpu_grg.max_height, 3);
+    ASSERT_EQ(gpu_grg.numRows, grg->numNodes());
+    ASSERT_EQ(gpu_grg.numEdges, grg->numEdges());
+    ASSERT_EQ(gpu_grg.numSamples, grg->numSamples());
+    ASSERT_EQ(gpu_grg.numMutations, grg->numMutations());
+    ASSERT_GE(gpu_grg.maxHeight, 3);
 
     std::vector<double> mutValues(3, 1.0); // Input vector [1, 2, 1]
     mutValues[1] = 2.0;
