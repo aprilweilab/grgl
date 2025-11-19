@@ -14,13 +14,13 @@ void storeGPUGRGToDisk(GPUGRG& gpuGRG, const std::string& filename) {
     }
 
     // Write header
-    uint64_t magic = GPUGRG_MAGIC;
-    uint64_t numRows = gpuGRG.numRows;
-    uint64_t numEdges = gpuGRG.numEdges;
-    uint64_t maxHeight = gpuGRG.maxHeight;
-    uint64_t numSamples = gpuGRG.numSamples;
-    uint64_t numMutations = gpuGRG.numMutations;
-    uint64_t indexSize = sizeof(NodeIDSizeT);
+    const uint64_t magic = GPUGRG_MAGIC;
+    const uint64_t numRows = gpuGRG.numRows;
+    const uint64_t numEdges = gpuGRG.numEdges;
+    const uint64_t maxHeight = gpuGRG.maxHeight;
+    const uint64_t numSamples = gpuGRG.numSamples;
+    const uint64_t numMutations = gpuGRG.numMutations;
+    const uint64_t indexSize = sizeof(NodeIDSizeT);
 
     file.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
     file.write(reinterpret_cast<const char*>(&numRows), sizeof(numRows));

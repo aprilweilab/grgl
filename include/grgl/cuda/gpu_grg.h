@@ -363,35 +363,38 @@ public:
         const size_t outSize =
             (numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? this->numSamples : this->numMutations));
 
-        T* d_inputMatrix;
-        T* d_outputMatrix;
-        cudaMalloc(&d_inputMatrix, inputMatrix.size() * sizeof(T));
-        cudaMalloc(&d_outputMatrix, outSize * sizeof(T));
-        cudaMemcpy(d_inputMatrix, inputMatrix.data(), inputMatrix.size() * sizeof(T), cudaMemcpyHostToDevice);
+        CudaBuffer<T> d_inputMatrix(inputMatrix.size());
+        CudaBuffer<T> d_outputMatrix(outSize);
+        cudaMemcpy(d_inputMatrix.get(), inputMatrix.data(), inputMatrix.size() * sizeof(T), cudaMemcpyHostToDevice);
 
         CHECK_CUDA_LAST_ERROR();
 
-        T* d_buffer;
+        CudaBuffer<T> d_buffer(numRows, this->numRows);
         size_t bufferSizeByte = numRows * this->numRows * sizeof(T);
-        cudaMalloc(&d_buffer, bufferSizeByte);
 
         CHECK_CUDA_LAST_ERROR();
 
-        this->matrixMultiplication<T>(
-            d_inputMatrix, numCols, numRows, direction, d_outputMatrix, outSize, false, d_buffer, bufferSizeByte);
+        this->matrixMultiplication<T>(d_inputMatrix.get(),
+                                      numCols,
+                                      numRows,
+                                      direction,
+                                      d_outputMatrix.get(),
+                                      outSize,
+                                      false,
+                                      d_buffer.get(),
+                                      bufferSizeByte);
         this->wait();
         CHECK_CUDA_LAST_ERROR();
 
         std::vector<T> result(outSize);
-        cudaMemcpy(result.data(), d_outputMatrix, outSize * sizeof(T), cudaMemcpyDeviceToHost);
-        cudaFree(d_inputMatrix);
-        cudaFree(d_outputMatrix);
-        cudaFree(d_buffer);
+        cudaMemcpy(result.data(), d_outputMatrix.get(), outSize * sizeof(T), cudaMemcpyDeviceToHost);
         CHECK_CUDA_LAST_ERROR();
 
         return std::move(result);
     }
 
+    // This function is for performance testing.
+    // Will run the same operation multiple times and report average time.
     template <typename T>
     std::vector<T> matMulPerf(const std::vector<T>& inputMatrix,
                               const size_t numRows,
@@ -405,17 +408,14 @@ public:
         const size_t outSize =
             (numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? this->numSamples : this->numMutations));
 
-        T* d_inputMatrix;
-        T* d_outputMatrix;
-        cudaMalloc(&d_inputMatrix, inputMatrix.size() * sizeof(T));
-        cudaMalloc(&d_outputMatrix, outSize * sizeof(T));
-        cudaMemcpy(d_inputMatrix, inputMatrix.data(), inputMatrix.size() * sizeof(T), cudaMemcpyHostToDevice);
+        CudaBuffer<T> d_inputMatrix(inputMatrix.size());
+        CudaBuffer<T> d_outputMatrix(outSize);
+        cudaMemcpy(d_inputMatrix.get(), inputMatrix.data(), inputMatrix.size() * sizeof(T), cudaMemcpyHostToDevice);
 
         CHECK_CUDA_LAST_ERROR();
 
-        T* d_buffer;
+        CudaBuffer<T> d_buffer(numRows, this->numRows);
         size_t bufferSizeByte = numRows * this->numRows * sizeof(T);
-        cudaMalloc(&d_buffer, bufferSizeByte);
 
         CHECK_CUDA_LAST_ERROR();
 
@@ -433,10 +433,7 @@ public:
                   << " iterations: " << (elapsed.count() / iterations) << " ms" << std::endl;
 
         std::vector<T> result(outSize);
-        cudaMemcpy(result.data(), d_outputMatrix, outSize * sizeof(T), cudaMemcpyDeviceToHost);
-        cudaFree(d_inputMatrix);
-        cudaFree(d_outputMatrix);
-        cudaFree(d_buffer);
+        cudaMemcpy(result.data(), d_outputMatrix.get(), outSize * sizeof(T), cudaMemcpyDeviceToHost);
         CHECK_CUDA_LAST_ERROR();
 
         return std::move(result);
