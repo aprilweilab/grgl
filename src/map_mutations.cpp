@@ -20,13 +20,17 @@
 #include "grgl/csr_storage.h"
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
+#include "grgl/node_data.h"
 #include "grgl/visitor.h"
 #include "util.h"
 
 #include <algorithm>
+#include <atomic>
 #include <iostream>
 #include <memory>
+#include <omp.h>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 // When enabled: garbage collects unneeded sample sets
@@ -89,7 +93,6 @@ public:
 
     virtual bool empty() const = 0;
     virtual void addElem(NodeID sample) = 0;
-
     virtual void mergeSampleCoverage(const SampleCoverageSet& other, CoalescenceTracker tracker = {}) = 0;
 
     SampleCoverageSet() = default;
@@ -268,10 +271,44 @@ private:
     size_t m_numSamplesNonOverlapping{};
 };
 
-class TopoCandidateCollectorVisitor : public grgl::GRGVisitor {
+class TopoCandidateCollectorVisitor : public grgl::ParallelGRGVisitor {
 public:
     explicit TopoCandidateCollectorVisitor(const std::vector<NodeIDSizeT>& sampleCounts)
         : m_sampleCounts(sampleCounts) {}
+
+    void parallelVisit(const grgl::GRGPtr& grg,
+                       const grgl::NodeIDList& nodes,
+                       std::vector<bool>& results,
+                       grgl::TraversalDirection direction,
+                       size_t numThreads) override {
+        release_assert(direction == TraversalDirection::DIRECTION_UP);
+#if CLEANUP_SAMPLE_SETS_MAPPING
+        if (m_refCounts.empty()) {
+            m_refCounts.resize(grg->numNodes());
+        }
+#endif
+        for (NodeID node : nodes) {
+            m_sampleCoverage.emplace(node, nullptr);
+        }
+#pragma omp parallel for schedule(guided) num_threads(numThreads) default(none) shared(nodes, grg, results)
+        for (int i = 0; i < nodes.size(); ++i) {
+            results[i] = safeVisit(grg, nodes[i]);
+        }
+
+#if CLEANUP_SAMPLE_SETS_MAPPING
+        for (NodeID nodeId : nodes) {
+            for (const auto& childId : grg->getDownEdges(nodeId)) {
+                // Skip children that aren't part of our search.
+                if (m_refCounts[childId] == 0) {
+                    continue;
+                }
+                if (--m_refCounts[childId] == 0) {
+                    m_sampleCoverage.erase(childId);
+                }
+            }
+        }
+#endif
+    }
 
     bool visit(const grgl::GRGPtr& grg,
                const grgl::NodeID nodeId,
@@ -286,6 +323,41 @@ public:
             m_refCounts.resize(grg->numNodes());
         }
 #endif
+        m_sampleCoverage.emplace(nodeId, nullptr);
+        bool keepGoing = safeVisit(grg, nodeId);
+
+#if CLEANUP_SAMPLE_SETS_MAPPING
+        for (const auto& childId : grg->getDownEdges(nodeId)) {
+            // Skip children that aren't part of our search.
+            if (m_refCounts[childId] == 0) {
+                continue;
+            }
+            if (--m_refCounts[childId] == 0) {
+                m_sampleCoverage.erase(childId);
+            }
+        }
+#endif
+        return keepGoing;
+    }
+
+    std::unique_ptr<SampleCoverageSet> getSamplesForCandidate(NodeID candidateId) {
+        std::unique_ptr<SampleCoverageSet> result;
+        auto findIt = m_sampleCoverage.find(candidateId);
+        release_assert(findIt != m_sampleCoverage.end());
+        result = std::move(findIt->second);
+        m_sampleCoverage.erase(findIt);
+        return std::move(result);
+    }
+
+    std::unordered_map<NodeID, std::unique_ptr<SampleCoverageSet>> m_sampleCoverage;
+    std::vector<NodeSamples> m_collectedNodes;
+
+private:
+    bool safeVisit(const grgl::GRGPtr& grg, const grgl::NodeID nodeId) {
+        release_assert(grg->hasUpEdges());
+
+        // Note: Any modification to current node or children is safe, as we never process parent and child at the same
+        // time
         const bool isRoot = grg->numUpEdges(nodeId) == 0;
         const bool isSample = grg->isSample(nodeId);
         const size_t ploidy = grg->getPloidy();
@@ -293,14 +365,7 @@ public:
         const bool computeCoals = !isSample && (ploidy == 2) && (COAL_COUNT_NOT_SET == numCoals);
 
         size_t individualCoalCount = 0;
-        // Map from an individual to which child contained it.
-        // std::unordered_map<NodeIDSizeT, NodeIDSizeT> individualToChild;
         NodeIDList candidateNodes;
-
-        // NodeIDList samplesBeneath;
-        // if (isSample) {
-        //     samplesBeneath.emplace_back(nodeId);
-        // }
 
         size_t sampleCount = m_sampleCounts[nodeId];
 
@@ -324,9 +389,9 @@ public:
         }
 
 #if CLEANUP_SAMPLE_SETS_MAPPING
+        // safe, as NodeID is only handled by a single thread
         m_refCounts[nodeId] = grg->numUpEdges(nodeId);
 #endif
-
         for (const auto& childId : grg->getDownEdges(nodeId)) {
             const auto& childSampleIt = m_sampleCoverage.find(childId);
             if (childSampleIt != m_sampleCoverage.end()) {
@@ -348,31 +413,9 @@ public:
             }
         }
 
-        /*
-        for (const auto& childId : grg->getDownEdges(nodeId)) {
-            const auto& childSampleIt = m_nodeToSamples.find(childId);
-            if (childSampleIt != m_nodeToSamples.end()) {
-                auto childSamples = childSampleIt->second;
-                if (childSamples.size() > 1) {
-                    candidateNodes.emplace_back(childId);
-                }
-                for (const auto childSampleId : childSamples) {
-                    samplesBeneath.emplace_back(childSampleId);
-                    if (computeCoals) {
-                        auto insertPair = individualToChild.emplace(childSampleId / ploidy, childId);
-                        // The individual already existed from a _different child_, so the two samples just coalesced.
-                        if (!insertPair.second && childId != insertPair.first->second) {
-                            individualCoalCount++;
-                        }
-                    }
-                }
-            }
-            }
-            */
         // Check if we had a mismatch in expected vs. total sample sets.
         release_assert(nodeId < m_sampleCounts.size());
         release_assert(m_sampleCounts[nodeId] <= grg->numSamples());
-        // NodeIDSizeT missing = (m_sampleCounts[nodeId] - samplesBeneath.size());
         NodeIDSizeT missing = (m_sampleCounts[nodeId] - samplesBeneathSet->numSamplesCovered());
         // We can only record coalescence counts if there are no samples missing.
         if (missing == 0 && computeCoals) {
@@ -383,77 +426,42 @@ public:
         // and emit candidate nodes to map the mutation to.
         const bool keepGoing = (missing == 0 && !isRoot);
         if (missing == 0 && isRoot) {
-            // m_collectedNodes.emplace_back(nodeId, samplesBeneath.size());
+            m_collectedNodesMutex.lock();
             m_collectedNodes.emplace_back(nodeId, samplesBeneathSet->numSamplesCovered()); // Root is a candidate node.
+            m_collectedNodesMutex.unlock();
 #if CLEANUP_SAMPLE_SETS_MAPPING
             // Prevent candidates from having their samplesets garbage collected.
+            // This is safe, as we only modify the child
             m_refCounts[nodeId] = MAX_GRG_NODES + 1;
 #endif
-
-            m_sampleCoverage.emplace(nodeId, std::move(samplesBeneathSet));
-            // m_nodeToSamples.emplace(nodeId, std::move(samplesBeneath));
+            // hack to allow concurrent writing
+            m_sampleCoverage.at(nodeId).swap(samplesBeneathSet);
         } else if (!keepGoing) {
             for (const auto& candidate : candidateNodes) {
-                // m_collectedNodes.emplace_back(candidate, m_nodeToSamples[candidate].size());
-                m_collectedNodes.emplace_back(candidate, m_sampleCoverage[candidate]->numSamplesCovered());
+                m_collectedNodesMutex.lock();
+                m_collectedNodes.emplace_back(candidate, m_sampleCoverage.at(candidate)->numSamplesCovered());
+                m_collectedNodesMutex.unlock();
 #if CLEANUP_SAMPLE_SETS_MAPPING
                 // Prevent candidates from having their samplesets garbage collected.
+                // This is safe, as we only modify the child
                 m_refCounts[candidate] = MAX_GRG_NODES + 1;
 #endif
             }
         } else {
-            m_sampleCoverage.emplace(nodeId, std::move(samplesBeneathSet));
-            // m_nodeToSamples.emplace(nodeId, std::move(samplesBeneath));
+            // Concurrent writing requires that we don't modify the hashmap itself
+            // Note that this requires us to have added a nullptr to m_sampleCoverage
+            m_sampleCoverage.at(nodeId).swap(samplesBeneathSet);
         }
-
-#if CLEANUP_SAMPLE_SETS_MAPPING
-        for (const auto& childId : grg->getDownEdges(nodeId)) {
-            // Skip children that aren't part of our search.
-            if (m_refCounts[childId] == 0) {
-                continue;
-            }
-            if (--m_refCounts[childId] == 0) {
-                // m_nodeToSamples.erase(childId);
-                m_sampleCoverage.erase(childId);
-            }
-        }
-#endif
         return keepGoing;
     }
 
-    std::unique_ptr<SampleCoverageSet> getSamplesForCandidate(NodeID candidateId) {
-        // NodeIDList result;
-        std::unique_ptr<SampleCoverageSet> result;
-        // auto findIt = m_nodeToSamples.find(candidateId);
-        auto findIt = m_sampleCoverage.find(candidateId);
-        // release_assert(findIt != m_nodeToSamples.end());
-        release_assert(findIt != m_sampleCoverage.end());
-        result = std::move(findIt->second);
-        // m_nodeToSamples.erase(findIt);
-        m_sampleCoverage.erase(findIt);
-        return std::move(result);
-    }
-
-    std::unordered_map<NodeID, std::unique_ptr<SampleCoverageSet>> m_sampleCoverage;
-    std::vector<NodeSamples> m_collectedNodes;
-    // std::unordered_map<NodeID, NodeIDList> m_nodeToSamples;
-
-private:
+    std::mutex m_collectedNodesMutex;
     // These are the _total_ samples beneath each node (not restricted to current samples being searched)
     const std::vector<NodeIDSizeT>& m_sampleCounts;
 #if CLEANUP_SAMPLE_SETS_MAPPING
-    std::vector<NodeIDSizeT> m_refCounts;
+    std::vector<std::atomic<NodeIDSizeT>> m_refCounts;
 #endif
 };
-/* 
-static bool setsOverlap(const NodeIDSet& alreadyCovered, const NodeIDList& candidateSet) {
-    for (auto nodeId : candidateSet) {
-        if (alreadyCovered.find(nodeId) != alreadyCovered.end()) {
-            return true;
-        }
-    }
-    return false;
-}*/
 
 // Tracking individual coalescence is a bit spread out, but I think it is the most efficient way to do it.
 // 1. Above, when searching for candidate nodes in the existing hierarchy, any node that does not have its

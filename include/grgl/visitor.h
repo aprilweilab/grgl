@@ -77,9 +77,12 @@ public:
      * @param[in] direction Whether we're traversing bottom-up (DIRECTION_UP) or
      *      top-down (DIRECTION_DOWN).
      */
-    virtual bool parallelVisit(const GRGPtr& grg,
-                               NodeIDList& nodes,
-                               TraversalDirection direction) = 0;
+    virtual void parallelVisit(const GRGPtr& grg,
+                               const NodeIDList& nodes,
+                               std::vector<bool>& results,
+                               TraversalDirection direction,
+                               size_t numThreads
+                               ) = 0;
 };
 
 } // namespace grgl

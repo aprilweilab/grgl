@@ -413,24 +413,22 @@ void GRG::visitTopoParallel(ParallelGRGVisitor& visitor, TraversalDirection dire
     }
 
     std::vector<NodeID> nodeBatch;
+    std::vector<bool> nodeResults;
     nodeBatch.reserve(seedList.size());
+    nodeResults.reserve(seedList.size());
 
     if (direction == DIRECTION_UP) {
         size_t nodeIdx = 0;
         while (nodeIdx < this->numNodes() && toVisit > 0) {
             nodeBatch.clear();
+            nodeResults.clear();
             while (nodeIdx < this->numNodes()) {
                 const uint8_t nodeLayer = visitQueue[nodeIdx];
                 if (nodeLayer == 0 || nodeLayer > layer) {
                     break;
                 }
                 nodeBatch.push_back(nodeIdx);
-                for (const NodeID parent : this->getUpEdges(nodeIdx)) {
-                    if (visitQueue[parent] == 0) {
-                        visitQueue[parent] = layer + 1;
-                        toVisit++;
-                    }
-                }
+                nodeResults.push_back(false);
                 nodeIdx++;
             }
 
@@ -440,9 +438,18 @@ void GRG::visitTopoParallel(ParallelGRGVisitor& visitor, TraversalDirection dire
             }
 
             toVisit -= static_cast<ssize_t>(nodeBatch.size());
-            const bool keepGoing = visitor.parallelVisit(sharedThis, nodeBatch, direction);
-            if (!keepGoing || toVisit == 0) {
-                break;
+            visitor.parallelVisit(sharedThis, nodeBatch, nodeResults, direction, 1);
+            for (int i = 0; i < nodeBatch.size(); i++) {
+                NodeID processedNode = nodeBatch[i];
+                bool keepGoing = nodeResults[i];
+                if (keepGoing) {
+                    for (const NodeID parent : this->getUpEdges(processedNode)) {
+                        if (visitQueue[parent] == 0) {
+                            visitQueue[parent] = layer + 1;
+                            toVisit++;
+                        }
+                    }
+                }
             }
             layer++;
         }
@@ -450,6 +457,7 @@ void GRG::visitTopoParallel(ParallelGRGVisitor& visitor, TraversalDirection dire
         ssize_t nodeIdx = static_cast<ssize_t>(this->numNodes());
         while (nodeIdx > 0 && toVisit > 0) {
             nodeBatch.clear();
+            nodeResults.clear();
             while (nodeIdx > 0) {
                 const NodeID currentId = nodeIdx - 1;
                 const uint8_t nodeLayer = visitQueue[currentId];
@@ -457,12 +465,7 @@ void GRG::visitTopoParallel(ParallelGRGVisitor& visitor, TraversalDirection dire
                     break;
                 }
                 nodeBatch.push_back(currentId);
-                for (const NodeID child : this->getDownEdges(currentId)) {
-                    if (visitQueue[child] == 0) {
-                        visitQueue[child] = layer + 1;
-                        toVisit++;
-                    }
-                }
+                nodeResults.push_back(false);
                 nodeIdx--;
             }
 
@@ -472,9 +475,18 @@ void GRG::visitTopoParallel(ParallelGRGVisitor& visitor, TraversalDirection dire
             }
 
             toVisit -= static_cast<ssize_t>(nodeBatch.size());
-            const bool keepGoing = visitor.parallelVisit(sharedThis, nodeBatch, direction);
-            if (!keepGoing || toVisit == 0) {
-                break;
+            visitor.parallelVisit(sharedThis, nodeBatch, nodeResults, direction, 1);
+            for (int i = 0; i < nodeBatch.size(); i++) {
+                NodeID processedNode = nodeBatch[i];
+                bool keepGoing = nodeResults[i];
+                if (keepGoing) {
+                    for (const NodeID child : this->getDownEdges(processedNode)) {
+                        if (visitQueue[child] == 0) {
+                            visitQueue[child] = layer + 1;
+                            toVisit++;
+                        }
+                    }
+                }
             }
             layer++;
         }
@@ -558,3 +570,4 @@ void MutableGRG::compact(NodeID nodeId) {
 }
 
 } // namespace grgl
+
