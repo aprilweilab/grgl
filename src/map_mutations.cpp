@@ -29,11 +29,11 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <omp.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
 // When enabled: garbage collects unneeded sample sets
 #define CLEANUP_SAMPLE_SETS_MAPPING 1
 
@@ -486,7 +486,7 @@ private:
     // These are the _total_ samples beneath each node (not restricted to current samples being searched)
     const std::vector<NodeIDSizeT>& m_sampleCounts;
 #if CLEANUP_SAMPLE_SETS_MAPPING
-    std::vector<std::atomic<NodeIDSizeT>> m_refCounts;
+    std::vector<NodeIDSizeT> m_refCounts;
 #endif
 };
 
