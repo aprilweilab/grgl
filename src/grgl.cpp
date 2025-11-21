@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
         parser,
         "lf-no-tree",
         "Ignore variants with frequency less than this threshold, for tree building. If >= 1.0, it is a count."
-        " If <1.0 then it is a frequency. Default: 1.0",
+        " If <1.0 then it is a frequency. Default: 0.0",
         {'f', "lf-no-tree"});
     args::Flag noIndividualIds(
         parser, "no-indiv-ids", "Do not store individual string identifiers in the GRG", {"no-indiv-ids"});
