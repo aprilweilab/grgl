@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <omp.h>
@@ -47,7 +48,7 @@
 
 namespace grgl {
 
-using NodeSamples = std::tuple<NodeID, size_t>;
+using NodeSamples = std::tuple<NodeID, size_t, uint64_t>;
 
 static bool cmpNodeSamples(const NodeSamples& ns1, const NodeSamples& ns2) {
     const size_t samplesCount1 = std::get<1>(ns1);
@@ -56,7 +57,7 @@ static bool cmpNodeSamples(const NodeSamples& ns1, const NodeSamples& ns2) {
 }
 
 // What percentage of total samples must be covered before we switch to dense bitvecs
-#define USE_DENSE_COVERAGE_PERCENT (0.05f)
+#define USE_DENSE_COVERAGE_PERCENT (0.03125f)
 
 class BitVecCoverageSet;
 class SparseCoverageSet;
@@ -190,6 +191,8 @@ public:
             uint64_t* __restrict data = m_elems.data();
             const uint64_t* __restrict otherData = other_v->m_elems.data();
             const size_t len = m_elems.size();
+            // The fast-path just ORs in each 64-bit word; when coalescence tracking is enabled we also keep
+            // per-individual seen state in a sibling bitvec to count collisions.
             if (tracker.m_seenSet == nullptr) {
                 for (int i = 0; i < len; i++) {
                     m_numSamplesNonOverlapping += __builtin_popcountll(otherData[i] & ~data[i]);
@@ -203,9 +206,10 @@ public:
                     uint64_t word = otherData[i];
                     m_numSamplesNonOverlapping += __builtin_popcountll(word & ~data[i]);
                     data[i] |= word;
+                    // We track "individual seen" bits in even positions so that adjacent haplotypes share a bucket.
                     constexpr uint64_t EVEN = 0x5555555555555555ULL; // all even bits
                     const uint64_t coalesced =
-                        (word | (word >> 1ULL)) & EVEN; // if either haplotype has it (i.e. shifted by 1)
+                        (word | (word >> 1ULL)) & EVEN; // pack two consecutive haplotype bits into one individual slot
                     // if it's already present from another child, we coalesce at this node
                     uint64_t new_coals = coalesced & seen_d[i];
                     *tracker.m_coalsAdded += __builtin_popcountll(new_coals);
@@ -223,6 +227,7 @@ public:
                 auto& seenWords = seenBV->m_elems;
 
                 for (const uint32_t sample : other_v->m_sampleIdxs) {
+                    // Collapse the two haplotypes for an individual down to their even slot in the bitset.
                     const size_t base = (static_cast<size_t>(sample) / 2) * 2; // even index per individual
                     const size_t vecIdx = base / m_blockSize;
                     const size_t offset = base % m_blockSize;
@@ -276,6 +281,13 @@ public:
     explicit TopoCandidateCollectorVisitor(const std::vector<NodeIDSizeT>& sampleCounts)
         : m_sampleCounts(sampleCounts) {}
 
+    void loadBatch(std::vector<NodeIDList>& batch) {
+        for (size_t i = 0; i < batch.size(); i++) {
+            for (const NodeID& sample : batch[i]) {
+                m_batchMembership[sample] |= (1ULL << i);
+            }
+        }
+    }
     void parallelVisit(const grgl::GRGPtr& grg,
                        const grgl::NodeIDList& nodes,
                        std::vector<bool>& results,
@@ -287,6 +299,9 @@ public:
             m_refCounts.resize(grg->numNodes());
         }
 #endif
+        if (m_batchMembership.empty()) {
+            m_batchMembership.resize(grg->numNodes());
+        }
         for (NodeID node : nodes) {
             m_sampleCoverage.emplace(node, nullptr);
         }
@@ -323,6 +338,10 @@ public:
             m_refCounts.resize(grg->numNodes());
         }
 #endif
+
+        if (m_batchMembership.empty()) {
+            m_batchMembership.resize(grg->numNodes());
+        }
         m_sampleCoverage.emplace(nodeId, nullptr);
         bool keepGoing = safeVisit(grg, nodeId);
 
@@ -350,9 +369,15 @@ public:
     }
 
     std::unordered_map<NodeID, std::unique_ptr<SampleCoverageSet>> m_sampleCoverage;
+    // When batching, we need to keep track of which node is a candidate for each mutation.
+    // To do this, we can use a per-node bitset. If each of a node's children are candidates for a mutation,
+    // then it itself must be a candidate for a mutation.
+    std::vector<uint64_t> m_batchMembership;
     std::vector<NodeSamples> m_collectedNodes;
 
 private:
+    std::mutex m_collectedNodesMutex;
+    // shared 'thread-safe' logic
     bool safeVisit(const grgl::GRGPtr& grg, const grgl::NodeID nodeId) {
         release_assert(grg->hasUpEdges());
 
@@ -372,7 +397,7 @@ private:
         std::unique_ptr<SampleCoverageSet> samplesBeneathSet;
         std::unique_ptr<BitVecCoverageSet> coalTrackerSet;
         std::unordered_map<NodeIDSizeT, NodeIDSizeT> coalTrackerMap;
-
+        uint64_t batchMembership{};
         double coveragePercent = (double)sampleCount / (double)grg->numSamples();
         bool dense = coveragePercent > USE_DENSE_COVERAGE_PERCENT;
         if (dense) {
@@ -385,11 +410,11 @@ private:
         }
 
         if (isSample) {
+            // TODO: process batch membership. Maybe can do in a separate layer?
             samplesBeneathSet->addElem(nodeId);
         }
 
 #if CLEANUP_SAMPLE_SETS_MAPPING
-        // safe, as NodeID is only handled by a single thread
         m_refCounts[nodeId] = grg->numUpEdges(nodeId);
 #endif
         for (const auto& childId : grg->getDownEdges(nodeId)) {
@@ -398,6 +423,7 @@ private:
                 auto& childSamples = (childSampleIt->second);
                 if (childSamples->numSamplesCovered() > 1) {
                     candidateNodes.emplace_back(childId);
+                    batchMembership &= m_batchMembership[childId];
                 }
 
                 CoalescenceTracker tracker{};
@@ -427,35 +453,36 @@ private:
         const bool keepGoing = (missing == 0 && !isRoot);
         if (missing == 0 && isRoot) {
             m_collectedNodesMutex.lock();
-            m_collectedNodes.emplace_back(nodeId, samplesBeneathSet->numSamplesCovered()); // Root is a candidate node.
+            m_collectedNodes.emplace_back(
+                nodeId, samplesBeneathSet->numSamplesCovered(), m_batchMembership[nodeId]); // Root is a candidate node.
             m_collectedNodesMutex.unlock();
 #if CLEANUP_SAMPLE_SETS_MAPPING
             // Prevent candidates from having their samplesets garbage collected.
-            // This is safe, as we only modify the child
             m_refCounts[nodeId] = MAX_GRG_NODES + 1;
 #endif
             // hack to allow concurrent writing
             m_sampleCoverage.at(nodeId).swap(samplesBeneathSet);
+            m_batchMembership[nodeId] = batchMembership;
         } else if (!keepGoing) {
+            m_collectedNodesMutex.lock();
             for (const auto& candidate : candidateNodes) {
-                m_collectedNodesMutex.lock();
-                m_collectedNodes.emplace_back(candidate, m_sampleCoverage.at(candidate)->numSamplesCovered());
-                m_collectedNodesMutex.unlock();
+                m_collectedNodes.emplace_back(
+                    candidate, m_sampleCoverage.at(candidate)->numSamplesCovered(), m_batchMembership[candidate]);
 #if CLEANUP_SAMPLE_SETS_MAPPING
                 // Prevent candidates from having their samplesets garbage collected.
-                // This is safe, as we only modify the child
                 m_refCounts[candidate] = MAX_GRG_NODES + 1;
 #endif
             }
+            m_collectedNodesMutex.unlock();
         } else {
             // Concurrent writing requires that we don't modify the hashmap itself
             // Note that this requires us to have added a nullptr to m_sampleCoverage
             m_sampleCoverage.at(nodeId).swap(samplesBeneathSet);
+            m_batchMembership[nodeId] = batchMembership;
         }
         return keepGoing;
     }
 
-    std::mutex m_collectedNodesMutex;
     // These are the _total_ samples beneath each node (not restricted to current samples being searched)
     const std::vector<NodeIDSizeT>& m_sampleCounts;
 #if CLEANUP_SAMPLE_SETS_MAPPING
@@ -525,9 +552,6 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     }
 
     size_t individualCoalCount = 0;
-    // Map from an individual to which child contained it.
-    // std::unordered_map<NodeIDSizeT, NodeIDSizeT> individualToChild;
-
     BitVecCoverageSet coalTrackingSet{grg->numSamples()};
 
     const NodeID mutNodeId = grg->makeNode(1, true);
