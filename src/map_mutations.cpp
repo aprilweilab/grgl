@@ -421,6 +421,9 @@ private:
             const auto& childSampleIt = m_sampleCoverage.find(childId);
             if (childSampleIt != m_sampleCoverage.end()) {
                 auto& childSamples = (childSampleIt->second);
+                if (!childSamples) {
+                    continue;
+                }
                 if (childSamples->numSamplesCovered() > 1) {
                     candidateNodes.emplace_back(childId);
                     batchMembership &= m_batchMembership[childId];
@@ -580,19 +583,6 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
             // Mark all the sample nodes as covered.
             CoalescenceTracker tracker = CoalescenceTracker(&coalTrackingSet, &individualCoalCount);
             coverageSet.mergeSampleCoverage(*candidateSet, tracker);
-            /*
-            for (const auto sampleId : candidateSet) {
-                covered.emplace(sampleId);
-                if (ploidy == 2) {
-                    auto insertPair = individualToChild.emplace(sampleId / ploidy, candidateId);
-                    // The individual already existed from a _different node_, so the two samples will coalesce
-                    // at the new mutation node.
-                    if (!insertPair.second && candidateId != insertPair.first->second) {
-                        individualCoalCount++;
-                    }
-                }
-                }*/
-
             if (candidateId >= shapeNodeIdMax) {
                 stats.reusedMutNodes++;
             }
