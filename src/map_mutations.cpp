@@ -57,7 +57,7 @@ static bool cmpNodeSamples(const NodeSamples& ns1, const NodeSamples& ns2) {
 }
 
 // What percentage of total samples must be covered before we switch to dense bitvecs
-#define USE_DENSE_COVERAGE_PERCENT (0.03125f)
+#define USE_DENSE_COVERAGE_PERCENT (0.0625f)
 
 class BitVecCoverageSet;
 class SparseCoverageSet;
@@ -184,10 +184,10 @@ public:
     size_t numSamplesNonOverlapping() const { return m_numSamplesNonOverlapping; }
 
     void mergeSampleCoverage(const SampleCoverageSet& other, CoalescenceTracker tracker = {}) override {
-        m_numSampleCoverage += other.numSamplesCovered();
         release_assert(totalSamples() == other.totalSamples());
         // todo: add asserts to make sure CoalescenceTracker bitvecs (if present) are sized correctly.
         if (const BitVecCoverageSet* other_v = dynamic_cast<const BitVecCoverageSet*>(&other)) {
+            m_numSampleCoverage += other.numSamplesCovered();
             uint64_t* __restrict data = m_elems.data();
             const uint64_t* __restrict otherData = other_v->m_elems.data();
             const size_t len = m_elems.size();
