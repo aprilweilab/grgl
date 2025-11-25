@@ -392,7 +392,7 @@ void GRG::visitTopoNodeOrderedDense(GRGVisitor& visitor,
     }
 }
 
-void GRG::visitTopoParallel(ParallelGRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList) {
+void GRG::visitTopoParallel(ParallelGRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList, size_t numThreads) {
     if (!this->nodesAreOrdered()) {
         throw ApiMisuseFailure("Parallel visit only supported when nodes are topologically ordered!");
     }
