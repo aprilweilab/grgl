@@ -25,12 +25,13 @@
 #include "util.h"
 
 #include <algorithm>
-#include <atomic>
+#include <array>
 #include <cstdint>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <omp.h>
+#include <sys/types.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -425,11 +426,10 @@ public:
     std::array<CandidateList, 64> m_collectedNodes;
 
 private:
-    void addCollected(NodeID candidateId, SampleCoverageSet& coverageSet) {
-        uint64_t membership = coverageSet.getBatchMembership();
-        while (membership != 0) {
-            int idx = __builtin_ctzll(membership);
-            membership &= membership - 1;
+    void addCollected(NodeID candidateId, SampleCoverageSet& coverageSet, uint64_t mutAdds) {
+        while (mutAdds != 0) {
+            int idx = __builtin_ctzll(mutAdds);
+            mutAdds &= mutAdds - 1;
             m_collectedNodes[idx].emplace_back(candidateId, coverageSet.numSamplesCovered());
         }
     }
@@ -497,6 +497,8 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
                 }
             }
             samplesBeneathSet->mergeSampleCoverage(*childSample, tracker);
+        } else {
+            samplesBeneathSet->setBatchMembership(0ULL);
         }
     }
 
@@ -505,38 +507,63 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
     release_assert(m_sampleCounts[nodeId] <= grg->numSamples());
     NodeIDSizeT missing = (m_sampleCounts[nodeId] - samplesBeneathSet->numSamplesCovered());
     // We can only record coalescence counts if there are no samples missing.
+    // TODO: make this work with our batched
     if (missing == 0 && computeCoals) {
         grg->setNumIndividualCoals(nodeId, individualCoalCount);
     }
 
     // If we've reached the root of the graph or have missing samples beneath us, we need to stop the search
     // and emit candidate nodes to map the mutation to.
-    const bool keepGoing = (missing == 0 && !isRoot) && samplesBeneathSet->getBatchMembership() != 0;
-    if (missing == 0 && isRoot) {
-        m_collectedNodesMutex.lock();
-        addCollected(nodeId, *samplesBeneathSet);
-        m_collectedNodesMutex.unlock();
+    const uint64_t membership = samplesBeneathSet->getBatchMembership();
+    const bool keepGoing = !isRoot && membership != 0;
+
+    if (isRoot) {
+        // Root can only be a candidate when it fully covers the batch for at least one bit.
+        if (membership != 0) {
+            std::lock_guard<std::mutex> lock(m_collectedNodesMutex);
+            addCollected(nodeId, *samplesBeneathSet, membership);
 #if CLEANUP_SAMPLE_SETS_MAPPING
-        // Prevent candidates from having their samplesets garbage collected.
-        m_refCounts[nodeId] = MAX_GRG_NODES + 1;
+            // Prevent candidates from having their samplesets garbage collected.
+            m_refCounts[nodeId] = MAX_GRG_NODES + 1;
 #endif
-        // hack to allow concurrent writing
-        m_sampleCoverage.at(nodeId).swap(samplesBeneathSet);
-    } else if (!keepGoing) {
-        m_collectedNodesMutex.lock();
+            // hack to allow concurrent writing
+            m_sampleCoverage.at(nodeId).swap(samplesBeneathSet);
+        }
+
+        // Emit children for bits where they have coverage that the root does not.
         for (const auto& candidate : candidateNodes) {
-            addCollected(candidate, *m_sampleCoverage.at(candidate));
+            uint64_t emitChildren = m_sampleCoverage.at(candidate)->getBatchMembership() ^ membership;
+            if (emitChildren != 0) {
+                std::lock_guard<std::mutex> lock(m_collectedNodesMutex);
+                addCollected(candidate, *m_sampleCoverage.at(candidate), emitChildren);
+#if CLEANUP_SAMPLE_SETS_MAPPING
+                // Prevent candidates from having their samplesets garbage collected.
+                m_refCounts[candidate] = MAX_GRG_NODES + 1;
+#endif
+            }
+        }
+
+        // No parent above root.
+        return false;
+    }
+
+    for (const auto& candidate : candidateNodes) {
+        uint64_t emitChildren = m_sampleCoverage.at(candidate)->getBatchMembership() ^ membership;
+        if (emitChildren != 0) {
+            std::lock_guard<std::mutex> lock(m_collectedNodesMutex);
+            addCollected(candidate, *m_sampleCoverage.at(candidate), emitChildren);
 #if CLEANUP_SAMPLE_SETS_MAPPING
             // Prevent candidates from having their samplesets garbage collected.
             m_refCounts[candidate] = MAX_GRG_NODES + 1;
 #endif
         }
-        m_collectedNodesMutex.unlock();
-    } else {
+    }
+    if (keepGoing) {
         // Concurrent writing requires that we don't modify the hashmap itself
         // Note that this requires us to have added a nullptr to m_sampleCoverage
         m_sampleCoverage.at(nodeId).swap(samplesBeneathSet);
     }
+
     return keepGoing;
 }
 
@@ -841,6 +868,4 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
     }
     return stats;
 }
-
 }; // namespace grgl
-
