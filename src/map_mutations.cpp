@@ -95,7 +95,13 @@ public:
 
     virtual bool empty() const = 0;
     virtual void addElem(NodeID sample) = 0;
-    virtual void mergeSampleCoverage(const SampleCoverageSet& other, CoalescenceTracker tracker = {}) = 0;
+    void mergeSampleCoverage(const SampleCoverageSet& other, CoalescenceTracker tracker = {}) {
+        m_batchMembership &= other.m_batchMembership;
+        mergeSampleCoverageImpl(other, tracker);
+    }
+
+    uint64_t getBatchMembership() const { return m_batchMembership; }
+    void setBatchMembership(uint64_t membership) { m_batchMembership = membership; }
 
     SampleCoverageSet() = default;
     SampleCoverageSet(SampleCoverageSet&&) = delete;
@@ -103,6 +109,12 @@ public:
     SampleCoverageSet& operator=(const SampleCoverageSet&) = default;
     SampleCoverageSet& operator=(SampleCoverageSet&&) = default;
     virtual ~SampleCoverageSet() = default;
+
+protected:
+    virtual void mergeSampleCoverageImpl(const SampleCoverageSet& other, CoalescenceTracker) = 0;
+
+private:
+    uint64_t m_batchMembership = ~0ULL;
 };
 
 class SparseCoverageSet : public SampleCoverageSet {
@@ -118,7 +130,9 @@ public:
     size_t numSamplesCovered() const override { return m_sampleIdxs.size(); }
     bool empty() const override { return m_sampleIdxs.empty(); }
     void addElem(NodeID sample) override { m_sampleIdxs.push_back(sample); }
-    void mergeSampleCoverage(const SampleCoverageSet& other, CoalescenceTracker tracker = {}) override {
+
+protected:
+    void mergeSampleCoverageImpl(const SampleCoverageSet& other, CoalescenceTracker tracker = {}) override {
         // we can't merge a bitvec coverage set into a non-bitvec coverage set
         const auto* otherSparse = dynamic_cast<const SparseCoverageSet*>(&other);
         if (otherSparse == nullptr || otherSparse->m_sampleIdxs.empty()) {
@@ -184,7 +198,34 @@ public:
     // original api does not dedup sets when computing sizes.
     size_t numSamplesNonOverlapping() const { return m_numSamplesNonOverlapping; }
 
-    void mergeSampleCoverage(const SampleCoverageSet& other, CoalescenceTracker tracker = {}) override {
+    bool overlapsWith(const SampleCoverageSet& other) const {
+        release_assert(totalSamples() == other.totalSamples());
+        if (const BitVecCoverageSet* other_v = dynamic_cast<const BitVecCoverageSet*>(&other)) {
+            if (numSamplesNonOverlapping() + other_v->numSamplesNonOverlapping() > totalSamples()) {
+                return true;
+            }
+            const uint64_t* __restrict data = m_elems.data();
+            const uint64_t* __restrict otherData = other_v->m_elems.data();
+            const size_t len = m_elems.size();
+            for (int i = 0; i < len; i++) {
+                if ((data[i] & otherData[i]) != 0) {
+                    return true;
+                }
+            }
+        } else if (const SparseCoverageSet* other_v = dynamic_cast<const SparseCoverageSet*>(&other)) {
+            for (const uint32_t sample : other_v->m_sampleIdxs) {
+                size_t vecIdx = sample / m_blockSize;
+                size_t offset = sample % m_blockSize;
+                if ((m_elems[vecIdx] & (1ULL << offset)) != 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+protected:
+    void mergeSampleCoverageImpl(const SampleCoverageSet& other, CoalescenceTracker tracker = {}) override {
         release_assert(totalSamples() == other.totalSamples());
         // todo: add asserts to make sure CoalescenceTracker bitvecs (if present) are sized correctly.
         if (const BitVecCoverageSet* other_v = dynamic_cast<const BitVecCoverageSet*>(&other)) {
@@ -243,32 +284,6 @@ public:
         }
     }
 
-    bool overlapsWith(const SampleCoverageSet& other) const {
-        release_assert(totalSamples() == other.totalSamples());
-        if (const BitVecCoverageSet* other_v = dynamic_cast<const BitVecCoverageSet*>(&other)) {
-            if (numSamplesNonOverlapping() + other_v->numSamplesNonOverlapping() > totalSamples()) {
-                return true;
-            }
-            const uint64_t* __restrict data = m_elems.data();
-            const uint64_t* __restrict otherData = other_v->m_elems.data();
-            const size_t len = m_elems.size();
-            for (int i = 0; i < len; i++) {
-                if ((data[i] & otherData[i]) != 0) {
-                    return true;
-                }
-            }
-        } else if (const SparseCoverageSet* other_v = dynamic_cast<const SparseCoverageSet*>(&other)) {
-            for (const uint32_t sample : other_v->m_sampleIdxs) {
-                size_t vecIdx = sample / m_blockSize;
-                size_t offset = sample % m_blockSize;
-                if ((m_elems[vecIdx] & (1ULL << offset)) != 0) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
 private:
     constexpr static size_t m_blockSize = 64;
     std::vector<uint64_t> m_elems;
@@ -281,11 +296,19 @@ class MutationBatch {
     friend class TopoCandidateCollectorVisitor;
 
 public:
-    void addMutation(Mutation& mutation, NodeIDList mutSamples) {
-        m_mutations.emplace_back(mutation, m_seedList.data() + m_seedList.size(), mutSamples.size());
+    explicit MutationBatch(NodeIDSizeT totalSampleCount)
+        : m_sampleMembership(totalSampleCount) {}
+
+    void addMutation(const Mutation& mutation, NodeIDList mutSamples) {
+        size_t mutIdx = m_mutations.size();
+        m_mutations.emplace_back(mutation, m_seedList.size(), mutSamples.size());
         m_seedList.insert(m_seedList.end(), mutSamples.begin(), mutSamples.end());
         m_sampleSets.push_back(mutSamples);
+        for (NodeID sample : mutSamples) {
+            m_sampleMembership[sample] |= (1ULL << mutIdx);
+        }
     }
+
     const NodeIDList& seedList() const { return m_seedList; }
     const Mutation& getMutation(size_t idx) const { return m_mutations[idx].m_mutation; }
     const NodeIDList& sampleSet(size_t idx) const { return m_sampleSets[idx]; }
@@ -295,41 +318,31 @@ public:
         m_sampleSets.clear();
         m_mutations.clear();
         m_seedList.clear();
+        std::fill(m_sampleMembership.begin(), m_sampleMembership.end(), 0);
     }
 
 private:
     struct MutSpan {
-        MutSpan(Mutation& mutation, NodeID* start, size_t length)
-            : m_mutation(mutation),
+        MutSpan(Mutation mutation, size_t start, size_t length)
+            : m_mutation(std::move(mutation)),
               m_start(start),
               m_length(length) {}
-        NodeID& operator[](size_t value) const { return m_start[value]; }
         Mutation m_mutation;
-        NodeID* m_start;
+        size_t m_start;
         size_t m_length;
     };
     NodeIDList m_seedList;
     std::vector<MutSpan> m_mutations;
     std::vector<NodeIDList> m_sampleSets;
+    std::vector<uint64_t> m_sampleMembership;
 };
 
 class TopoCandidateCollectorVisitor : public grgl::ParallelGRGVisitor {
 public:
-    explicit TopoCandidateCollectorVisitor(const std::vector<NodeIDSizeT>& sampleCounts)
-        : m_sampleCounts(sampleCounts) {}
+    explicit TopoCandidateCollectorVisitor(const std::vector<NodeIDSizeT>& sampleCounts, const MutationBatch& mutBatch)
+        : m_sampleCounts(sampleCounts),
+          m_sampleBatchMembership(mutBatch.m_sampleMembership) {}
 
-    void loadBatch(const MutationBatch& mutations) {
-        for (const NodeID& sample : mutations.m_seedList) {
-            m_batchMembership[sample] = 0;
-        }
-        for (size_t i = 0; i < mutations.m_mutations.size(); i++) {
-            const MutationBatch::MutSpan& mutationSamples = mutations.m_mutations[i];
-            for (size_t j = 0; j < mutationSamples.m_length; j++) {
-                NodeID sample = mutationSamples[j];
-                m_batchMembership[sample] |= (1ULL << i);
-            }
-        }
-    }
     void parallelVisit(const grgl::GRGPtr& grg,
                        const grgl::NodeIDList& nodes,
                        std::vector<bool>& results,
@@ -341,11 +354,8 @@ public:
             m_refCounts.resize(grg->numNodes());
         }
 #endif
-        if (m_batchMembership.empty()) {
-            m_batchMembership.resize(grg->numNodes());
-        }
-        for (NodeID node : nodes) {
-            m_sampleCoverage.emplace(node, nullptr);
+        if (m_sampleCoverage.empty()) {
+            m_sampleCoverage.resize(grg->numNodes());
         }
 #pragma omp parallel for schedule(guided) num_threads(numThreads) default(none) shared(nodes, grg, results)
         for (int i = 0; i < nodes.size(); ++i) {
@@ -360,7 +370,7 @@ public:
                     continue;
                 }
                 if (--m_refCounts[childId] == 0) {
-                    m_sampleCoverage.erase(childId);
+                    m_sampleCoverage[childId].reset();
                 }
             }
         }
@@ -381,10 +391,10 @@ public:
         }
 #endif
 
-        if (m_batchMembership.empty()) {
-            m_batchMembership.resize(grg->numNodes());
+        if (m_sampleCoverage.empty()) {
+            m_sampleCoverage.resize(grg->numNodes());
         }
-        m_sampleCoverage.emplace(nodeId, nullptr);
+
         bool keepGoing = safeVisit(grg, nodeId);
 
 #if CLEANUP_SAMPLE_SETS_MAPPING
@@ -394,7 +404,7 @@ public:
                 continue;
             }
             if (--m_refCounts[childId] == 0) {
-                m_sampleCoverage.erase(childId);
+                m_sampleCoverage[childId].reset();
             }
         }
 #endif
@@ -402,27 +412,28 @@ public:
     }
 
     const std::unique_ptr<SampleCoverageSet>& getSamplesForCandidate(NodeID candidateId) const {
-        auto findIt = m_sampleCoverage.find(candidateId);
-        release_assert(findIt != m_sampleCoverage.end());
-        return findIt->second;
+        const std::unique_ptr<SampleCoverageSet>& value = m_sampleCoverage[candidateId];
+        release_assert(value);
+        return value;
     }
 
-    std::unordered_map<NodeID, std::unique_ptr<SampleCoverageSet>> m_sampleCoverage;
-    // When batching, we need to keep track of which node is a candidate for each mutation.
-    // To do this, we can use a per-node bitset. If each of a node's children are candidates for a mutation,
-    // then it itself must be a candidate for a mutation.
-    std::vector<uint64_t> m_batchMembership;
+    std::vector<std::unique_ptr<SampleCoverageSet>> m_sampleCoverage;
+    // std::unordered_map<NodeID, std::unique_ptr<SampleCoverageSet>> m_sampleCoverage;
+    //  When batching, we need to keep track of which node is a candidate for each mutation.
+    //  To do this, we can use a per-node bitset. If each of a node's children are candidates for a mutation,
+    //  then it itself must be a candidate for a mutation.
     std::array<CandidateList, 64> m_collectedNodes;
 
 private:
-    void addCollected(NodeID candidateId, SampleCoverageSet& coverageSet, uint64_t membership) {
+    void addCollected(NodeID candidateId, SampleCoverageSet& coverageSet) {
+        uint64_t membership = coverageSet.getBatchMembership();
         while (membership != 0) {
             int idx = __builtin_ctzll(membership);
             membership &= membership - 1;
             m_collectedNodes[idx].emplace_back(candidateId, coverageSet.numSamplesCovered());
         }
     }
-
+    const std::vector<uint64_t>& m_sampleBatchMembership;
     // shared 'thread-safe' logic
     bool safeVisit(const grgl::GRGPtr& grg, grgl::NodeID nodeId);
     std::mutex m_collectedNodesMutex;
@@ -451,7 +462,6 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
     std::unique_ptr<SampleCoverageSet> samplesBeneathSet;
     std::unique_ptr<BitVecCoverageSet> coalTrackerSet;
     std::unordered_map<NodeIDSizeT, NodeIDSizeT> coalTrackerMap;
-    uint64_t batchMembership = ~0ULL;
     double coveragePercent = (double)sampleCount / (double)grg->numSamples();
     bool dense = coveragePercent > USE_DENSE_COVERAGE_PERCENT;
     if (dense) {
@@ -465,22 +475,16 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
 
     if (isSample) {
         samplesBeneathSet->addElem(nodeId);
-        batchMembership = m_batchMembership[nodeId];
+        samplesBeneathSet->setBatchMembership(m_sampleBatchMembership[nodeId]);
     }
 
 #if CLEANUP_SAMPLE_SETS_MAPPING
     m_refCounts[nodeId] = grg->numUpEdges(nodeId);
 #endif
     for (const auto& childId : grg->getDownEdges(nodeId)) {
-        const auto& childSampleIt = m_sampleCoverage.find(childId);
-        if (childSampleIt != m_sampleCoverage.end()) {
-            auto& childSamples = (childSampleIt->second);
-            if (!childSamples) {
-                continue;
-            }
-
-            batchMembership &= m_batchMembership[childId];
-            if (childSamples->numSamplesCovered() > 1) {
+        const auto& childSample = m_sampleCoverage[childId];
+        if (childSample) {
+            if (childSample->numSamplesCovered() > 1) {
                 candidateNodes.emplace_back(childId);
             }
 
@@ -492,7 +496,7 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
                     tracker = CoalescenceTracker(&coalTrackerMap, childId, &individualCoalCount);
                 }
             }
-            samplesBeneathSet->mergeSampleCoverage(*childSamples, tracker);
+            samplesBeneathSet->mergeSampleCoverage(*childSample, tracker);
         }
     }
 
@@ -507,10 +511,10 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
 
     // If we've reached the root of the graph or have missing samples beneath us, we need to stop the search
     // and emit candidate nodes to map the mutation to.
-    const bool keepGoing = (missing == 0 && !isRoot) && batchMembership != 0;
+    const bool keepGoing = (missing == 0 && !isRoot) && samplesBeneathSet->getBatchMembership() != 0;
     if (missing == 0 && isRoot) {
         m_collectedNodesMutex.lock();
-        addCollected(nodeId, *samplesBeneathSet, batchMembership);
+        addCollected(nodeId, *samplesBeneathSet);
         m_collectedNodesMutex.unlock();
 #if CLEANUP_SAMPLE_SETS_MAPPING
         // Prevent candidates from having their samplesets garbage collected.
@@ -518,11 +522,10 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
 #endif
         // hack to allow concurrent writing
         m_sampleCoverage.at(nodeId).swap(samplesBeneathSet);
-        m_batchMembership[nodeId] = batchMembership;
     } else if (!keepGoing) {
         m_collectedNodesMutex.lock();
         for (const auto& candidate : candidateNodes) {
-            addCollected(candidate, *m_sampleCoverage.at(candidate), m_batchMembership[candidate]);
+            addCollected(candidate, *m_sampleCoverage.at(candidate));
 #if CLEANUP_SAMPLE_SETS_MAPPING
             // Prevent candidates from having their samplesets garbage collected.
             m_refCounts[candidate] = MAX_GRG_NODES + 1;
@@ -533,7 +536,6 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
         // Concurrent writing requires that we don't modify the hashmap itself
         // Note that this requires us to have added a nullptr to m_sampleCoverage
         m_sampleCoverage.at(nodeId).swap(samplesBeneathSet);
-        m_batchMembership[nodeId] = batchMembership;
     }
     return keepGoing;
 }
@@ -680,13 +682,9 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     // nodes are only ever _root nodes_ (at the time they are added).
     release_assert(grg->nodesAreOrdered());
     const NodeIDList& mutSamples = mutBatch.seedList();
-    const size_t ploidy = grg->getPloidy();
 
-    TopoCandidateCollectorVisitor collector(sampleCounts);
-    if (mutSamples.size() > 1) {
-        collector.loadBatch(mutBatch);
-        grg->visitTopo(collector, grgl::TraversalDirection::DIRECTION_UP, mutSamples);
-    }
+    TopoCandidateCollectorVisitor collector(sampleCounts, mutBatch);
+    grg->visitTopo(collector, grgl::TraversalDirection::DIRECTION_UP, mutSamples);
     NodeIDList totalAdded{};
     std::array<CandidateList, 64>& candidateList = collector.m_collectedNodes;
     for (int i = 0; i < mutBatch.numMutations(); i++) {
@@ -728,70 +726,95 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
     DfsSampleCountVisitor countVisitor;
     fastCompleteDFS(grg, countVisitor);
     std::vector<NodeIDSizeT>& sampleCounts = countVisitor.m_sampleCounts;
+    auto updateSampleCounts = [&](const NodeIDList& addedNodes) {
+        sampleCounts.resize(sampleCounts.size() + addedNodes.size());
+        for (const auto& nodeId : addedNodes) {
+            NodeIDSizeT sumSamples = 0;
+            for (const auto& childId : grg->getDownEdges(nodeId)) {
+                release_assert(sampleCounts[childId] > 0);
+                sumSamples += sampleCounts[childId];
+            }
+            sampleCounts[nodeId] = sumSamples;
+        }
+    };
 
     if (verbose) {
         std::cout << "Mapping " << stats.totalMutations << " mutations\n";
     }
     const size_t onePercent = (stats.totalMutations / ONE_HUNDRED_PERCENT) + 1;
-      size_t completed = 0;
+    size_t completed = 0;
 
-      // The low-water mark for nodes. If a NodeID is greater than or equal to this, then it
-      // is a newly added (mutation) node.
-      const NodeID shapeNodeIdMax = grg->numNodes();
-      const size_t mutationBatchSize = 64;
-      MutationBatch mutBatch;
+    // The low-water mark for nodes. If a NodeID is greater than or equal to this, then it
+    // is a newly added (mutation) node.
+    const NodeID shapeNodeIdMax = grg->numNodes();
+    const size_t mutationBatchSize = 64;
+    MutationBatch mutBatch(grg->numSamples());
 
     // For each mutation, perform a topological bottom-up traversal from the sample
     // nodes of interest, and collect all nodes that reach a subset of those nodes.
-      size_t _ignored = 0;
-      std::pair<BpPosition, NodeID> currentMissing = {INVALID_POSITION, INVALID_NODE_ID};
-      MutationAndSamples unmapped = {Mutation(0.0, ""), NodeIDList()};
-      while (mutations.next(unmapped, _ignored)) {
-          const NodeIDList& mutSamples = unmapped.samples;
-          if (!mutSamples.empty()) {
-              stats.samplesProcessed += mutSamples.size();
-              if (mutSamples.size() == 1) {
-                  stats.mutationsWithOneSample++;
-              }
-              mutBatch.addMutation(unmapped.mutation, mutSamples);
-              if (mutBatch.numMutations() == mutationBatchSize) {
-                  NodeIDList addedNodes = greedyAddMutation(
-                      grg, sampleCounts, mutBatch, stats, shapeNodeIdMax, currentMissing);
+    size_t _ignored = 0;
+    std::pair<BpPosition, NodeID> currentMissing = {INVALID_POSITION, INVALID_NODE_ID};
+    MutationAndSamples unmapped = {Mutation(0.0, ""), NodeIDList()};
+    while (mutations.next(unmapped, _ignored)) {
+        const NodeIDList& mutSamples = unmapped.samples;
+        if (!mutSamples.empty()) {
+            stats.samplesProcessed += mutSamples.size();
+            // quickly skip mutations with only one sample, as we don't explicitly handle them in our batched version
+            if (mutSamples.size() == 1) {
+                stats.mutationsWithOneSample++;
+                stats.mutationsWithNoCandidates++;
 
-                  // Update sample counts for newly added nodes.
-                  sampleCounts.resize(sampleCounts.size() + addedNodes.size());
-                  for (const auto& nodeId : addedNodes) {
-                      NodeIDSizeT sumSamples = 0;
-                      for (const auto& childId : grg->getDownEdges(nodeId)) {
-                          release_assert(sampleCounts[childId] > 0);
-                          sumSamples += sampleCounts[childId];
-                      }
-                      sampleCounts[nodeId] = sumSamples;
-                  }
-                  mutBatch.clear();
-              }
-          } else {
-              if (mutBatch.numMutations() > 0) {
-                  NodeIDList addedNodes = greedyAddMutation(
-                      grg, sampleCounts, mutBatch, stats, shapeNodeIdMax, currentMissing);
+                const NodeID sampleNodeId = mutSamples[0];
+                const NodeID missingnessNode =
+                    (currentMissing.first == unmapped.mutation.getPosition()) ? currentMissing.second : INVALID_NODE_ID;
 
-                  sampleCounts.resize(sampleCounts.size() + addedNodes.size());
-                  for (const auto& nodeId : addedNodes) {
-                      NodeIDSizeT sumSamples = 0;
-                      for (const auto& childId : grg->getDownEdges(nodeId)) {
-                          release_assert(sampleCounts[childId] > 0);
-                          sumSamples += sampleCounts[childId];
-                      }
-                      sampleCounts[nodeId] = sumSamples;
-                  }
-                  mutBatch.clear();
-              }
-              stats.emptyMutations++;
-              const NodeID missingnessNode =
-                  (currentMissing.first == unmapped.mutation.getPosition()) ? currentMissing.second : INVALID_NODE_ID;
-              grg->addMutation(unmapped.mutation, INVALID_NODE_ID, missingnessNode);
-              api_exc_check(!unmapped.mutation.isMissing(), "Missing data rows cannot have no samples");
-          }
+                const int ploidy = grg->getPloidy();
+
+                const NodeID mutNodeId = grg->makeNode(1, true);
+                if (!unmapped.mutation.isMissing()) {
+                    grg->addMutation(unmapped.mutation, mutNodeId, missingnessNode);
+                } else {
+                    currentMissing = {unmapped.mutation.getPosition(), mutNodeId};
+                }
+
+                // Coalescence is always 0 for singletons
+                if (ploidy == 2) {
+                    grg->setNumIndividualCoals(mutNodeId, 0);
+                }
+
+                stats.numWithSingletons++;
+                stats.maxSingletons = std::max<size_t>(1, stats.maxSingletons);
+                stats.singletonSampleEdges++;
+                grg->connect(mutNodeId, sampleNodeId);
+
+                NodeIDList singletonAdded{mutNodeId};
+                updateSampleCounts(singletonAdded);
+            } else {
+                mutBatch.addMutation(unmapped.mutation, mutSamples);
+
+                if (mutBatch.numMutations() == mutationBatchSize) {
+                    NodeIDList addedNodes =
+                        greedyAddMutation(grg, sampleCounts, mutBatch, stats, shapeNodeIdMax, currentMissing);
+
+                    // Update sample counts for newly added nodes.
+                    updateSampleCounts(addedNodes);
+                    mutBatch.clear();
+                }
+            }
+        } else {
+            if (mutBatch.numMutations() > 0) {
+                NodeIDList addedNodes =
+                    greedyAddMutation(grg, sampleCounts, mutBatch, stats, shapeNodeIdMax, currentMissing);
+
+                updateSampleCounts(addedNodes);
+                mutBatch.clear();
+            }
+            stats.emptyMutations++;
+            const NodeID missingnessNode =
+                (currentMissing.first == unmapped.mutation.getPosition()) ? currentMissing.second : INVALID_NODE_ID;
+            grg->addMutation(unmapped.mutation, INVALID_NODE_ID, missingnessNode);
+            api_exc_check(!unmapped.mutation.isMissing(), "Missing data rows cannot have no samples");
+        }
         completed++;
         const size_t percentCompleted = (completed / onePercent);
         if (verbose) {
@@ -804,28 +827,20 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
                 std::cout << "GRG edges: " << grg->numEdges() << std::endl;
                 stats.print(std::cout);
             }
-              if ((completed % (COMPACT_EDGES_AT_PERCENT * onePercent) == 0)) {
-                  START_TIMING_OPERATION();
-                  grg->compact();
-                  EMIT_TIMING_MESSAGE("Compacting GRG edges took ");
-              }
-          }
-      }
-      if (mutBatch.numMutations() > 0) {
-          NodeIDList addedNodes =
-              greedyAddMutation(grg, sampleCounts, mutBatch, stats, shapeNodeIdMax, currentMissing);
+            if ((completed % (COMPACT_EDGES_AT_PERCENT * onePercent) == 0)) {
+                START_TIMING_OPERATION();
+                grg->compact();
+                EMIT_TIMING_MESSAGE("Compacting GRG edges took ");
+            }
+        }
+    }
+    if (mutBatch.numMutations() > 0) {
+        NodeIDList addedNodes = greedyAddMutation(grg, sampleCounts, mutBatch, stats, shapeNodeIdMax, currentMissing);
 
-          sampleCounts.resize(sampleCounts.size() + addedNodes.size());
-          for (const auto& nodeId : addedNodes) {
-              NodeIDSizeT sumSamples = 0;
-              for (const auto& childId : grg->getDownEdges(nodeId)) {
-                  release_assert(sampleCounts[childId] > 0);
-                  sumSamples += sampleCounts[childId];
-              }
-              sampleCounts[nodeId] = sumSamples;
-          }
-      }
-      return stats;
-  }
+        updateSampleCounts(addedNodes);
+    }
+    return stats;
+}
 
 }; // namespace grgl
+
