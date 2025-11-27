@@ -340,9 +340,8 @@ private:
 
 class TopoCandidateCollectorVisitor : public grgl::ParallelGRGVisitor {
 public:
-    explicit TopoCandidateCollectorVisitor(const std::vector<NodeIDSizeT>& sampleCounts, const MutationBatch& mutBatch)
-        : m_sampleCounts(sampleCounts),
-          m_sampleBatchMembership(mutBatch.m_sampleMembership) {}
+    explicit TopoCandidateCollectorVisitor(const MutationBatch& mutBatch)
+        : m_sampleBatchMembership(mutBatch.m_sampleMembership) {}
 
     void parallelVisit(const grgl::GRGPtr& grg,
                        const grgl::NodeIDList& nodes,
@@ -438,7 +437,6 @@ private:
     bool safeVisit(const grgl::GRGPtr& grg, grgl::NodeID nodeId);
     std::mutex m_collectedNodesMutex;
     // These are the _total_ samples beneath each node (not restricted to current samples being searched)
-    const std::vector<NodeIDSizeT>& m_sampleCounts;
 #if CLEANUP_SAMPLE_SETS_MAPPING
     std::vector<NodeIDSizeT> m_refCounts;
 #endif
@@ -457,7 +455,13 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
     size_t individualCoalCount = 0;
     NodeIDList candidateNodes;
 
-    size_t sampleCount = m_sampleCounts[nodeId];
+    size_t sampleCount = 0;
+    for (const auto& childId : grg->getDownEdges(nodeId)) {
+        const auto& childSample = m_sampleCoverage[childId];
+        if (childSample) {
+            sampleCount += childSample->numSamplesCovered();
+        }
+    }
 
     std::unique_ptr<SampleCoverageSet> samplesBeneathSet;
     std::unique_ptr<BitVecCoverageSet> coalTrackerSet;
@@ -502,16 +506,9 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
         }
     }
 
-    // Check if we had a mismatch in expected vs. total sample sets.
-    release_assert(nodeId < m_sampleCounts.size());
-    release_assert(m_sampleCounts[nodeId] <= grg->numSamples());
-    NodeIDSizeT missing = (m_sampleCounts[nodeId] - samplesBeneathSet->numSamplesCovered());
     // We can only record coalescence counts if there are no samples missing.
     // TODO: make this work with our batched
-    if (missing == 0 && computeCoals) {
-        grg->setNumIndividualCoals(nodeId, individualCoalCount);
-    }
-
+    
     // If we've reached the root of the graph or have missing samples beneath us, we need to stop the search
     // and emit candidate nodes to map the mutation to.
     const uint64_t membership = samplesBeneathSet->getBatchMembership();
@@ -700,7 +697,6 @@ static NodeIDList processCandidateSet(const MutableGRGPtr& grg,
 }
 
 static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
-                                    const std::vector<NodeIDSizeT>& sampleCounts,
                                     const MutationBatch& mutBatch,
                                     MutationMappingStats& stats,
                                     const NodeID shapeNodeIdMax,
@@ -710,7 +706,7 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     release_assert(grg->nodesAreOrdered());
     const NodeIDList& mutSamples = mutBatch.seedList();
 
-    TopoCandidateCollectorVisitor collector(sampleCounts, mutBatch);
+    TopoCandidateCollectorVisitor collector(mutBatch);
     grg->visitTopo(collector, grgl::TraversalDirection::DIRECTION_UP, mutSamples);
     NodeIDList totalAdded{};
     std::array<CandidateList, 64>& candidateList = collector.m_collectedNodes;
@@ -750,21 +746,6 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
     stats.totalMutations = mutations.countMutations();
 
     // For the whole graph, count the number of samples under each node.
-    DfsSampleCountVisitor countVisitor;
-    fastCompleteDFS(grg, countVisitor);
-    std::vector<NodeIDSizeT>& sampleCounts = countVisitor.m_sampleCounts;
-    auto updateSampleCounts = [&](const NodeIDList& addedNodes) {
-        sampleCounts.resize(sampleCounts.size() + addedNodes.size());
-        for (const auto& nodeId : addedNodes) {
-            NodeIDSizeT sumSamples = 0;
-            for (const auto& childId : grg->getDownEdges(nodeId)) {
-                release_assert(sampleCounts[childId] > 0);
-                sumSamples += sampleCounts[childId];
-            }
-            sampleCounts[nodeId] = sumSamples;
-        }
-    };
-
     if (verbose) {
         std::cout << "Mapping " << stats.totalMutations << " mutations\n";
     }
@@ -815,25 +796,19 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
                 grg->connect(mutNodeId, sampleNodeId);
 
                 NodeIDList singletonAdded{mutNodeId};
-                updateSampleCounts(singletonAdded);
             } else {
                 mutBatch.addMutation(unmapped.mutation, mutSamples);
 
                 if (mutBatch.numMutations() == mutationBatchSize) {
-                    NodeIDList addedNodes =
-                        greedyAddMutation(grg, sampleCounts, mutBatch, stats, shapeNodeIdMax, currentMissing);
+                    NodeIDList addedNodes = greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
 
                     // Update sample counts for newly added nodes.
-                    updateSampleCounts(addedNodes);
                     mutBatch.clear();
                 }
             }
         } else {
             if (mutBatch.numMutations() > 0) {
-                NodeIDList addedNodes =
-                    greedyAddMutation(grg, sampleCounts, mutBatch, stats, shapeNodeIdMax, currentMissing);
-
-                updateSampleCounts(addedNodes);
+                NodeIDList addedNodes = greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
                 mutBatch.clear();
             }
             stats.emptyMutations++;
@@ -862,9 +837,7 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
         }
     }
     if (mutBatch.numMutations() > 0) {
-        NodeIDList addedNodes = greedyAddMutation(grg, sampleCounts, mutBatch, stats, shapeNodeIdMax, currentMissing);
-
-        updateSampleCounts(addedNodes);
+        NodeIDList addedNodes = greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
     }
     return stats;
 }
