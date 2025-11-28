@@ -59,32 +59,10 @@ static bool cmpNodeSamples(const NodeSamples& ns1, const NodeSamples& ns2) {
 }
 
 // What percentage of total samples must be covered before we switch to dense bitvecs
-#define USE_DENSE_COVERAGE_PERCENT (0.0625f)
+#define USE_DENSE_COVERAGE_PERCENT (0.001f)
 
 class BitVecCoverageSet;
 class SparseCoverageSet;
-struct CoalescenceTracker {
-    friend class BitVecCoverageSet;
-    friend class SparseCoverageSet;
-
-    CoalescenceTracker() = default;
-    CoalescenceTracker(BitVecCoverageSet* seen, size_t* individualCoalCount)
-        : m_seenSet(seen),
-          m_coalsAdded(individualCoalCount) {}
-
-    CoalescenceTracker(std::unordered_map<NodeIDSizeT, NodeIDSizeT>* individualToChild,
-                       NodeID childNode,
-                       size_t* individualCoalCount)
-        : m_individualToChild(individualToChild),
-          m_childNode(childNode),
-          m_coalsAdded(individualCoalCount) {}
-
-private:
-    BitVecCoverageSet* m_seenSet = nullptr;
-    std::unordered_map<NodeIDSizeT, NodeIDSizeT>* m_individualToChild = nullptr;
-    size_t* m_coalsAdded = nullptr;
-    NodeID m_childNode{};
-};
 
 class SampleCoverageSet {
 public:
@@ -96,9 +74,22 @@ public:
 
     virtual bool empty() const = 0;
     virtual void addElem(NodeID sample) = 0;
-    void mergeSampleCoverage(const SampleCoverageSet& other, CoalescenceTracker tracker = {}) {
+    void mergeSampleCoverage(const SampleCoverageSet& other) {
         m_batchMembership &= other.m_batchMembership;
-        mergeSampleCoverageImpl(other, tracker);
+        mergeSampleCoverageImpl(other);
+    }
+
+    void mergeSampleCoverage(const SampleCoverageSet& other, BitVecCoverageSet& seenSet, size_t& coalescences) {
+        m_batchMembership &= other.m_batchMembership;
+        mergeSampleCoverageImpl(other, seenSet, coalescences);
+    }
+
+    void mergeSampleCoverage(const SampleCoverageSet& other,
+                             std::unordered_map<NodeIDSizeT, NodeIDSizeT>& individualToChild,
+                             NodeID childNode,
+                             size_t& coalescences) {
+        m_batchMembership &= other.m_batchMembership;
+        mergeSampleCoverageImpl(other, individualToChild, childNode, coalescences);
     }
 
     uint64_t getBatchMembership() const { return m_batchMembership; }
@@ -112,7 +103,17 @@ public:
     virtual ~SampleCoverageSet() = default;
 
 protected:
-    virtual void mergeSampleCoverageImpl(const SampleCoverageSet& other, CoalescenceTracker) = 0;
+    virtual void mergeSampleCoverageImpl(const SampleCoverageSet& other) = 0;
+    virtual void
+    mergeSampleCoverageImpl(const SampleCoverageSet& other, BitVecCoverageSet& seenSet, size_t& coalescences) {
+        mergeSampleCoverageImpl(other);
+    }
+    virtual void mergeSampleCoverageImpl(const SampleCoverageSet& other,
+                                         std::unordered_map<NodeIDSizeT, NodeIDSizeT>& individualToChild,
+                                         NodeID childNode,
+                                         size_t& coalescences) {
+        mergeSampleCoverageImpl(other);
+    }
 
 private:
     uint64_t m_batchMembership = ~0ULL;
@@ -133,25 +134,30 @@ public:
     void addElem(NodeID sample) override { m_sampleIdxs.push_back(sample); }
 
 protected:
-    void mergeSampleCoverageImpl(const SampleCoverageSet& other, CoalescenceTracker tracker = {}) override {
-        // we can't merge a bitvec coverage set into a non-bitvec coverage set
+    void mergeSampleCoverageImpl(const SampleCoverageSet& other) override {
         const auto* otherSparse = dynamic_cast<const SparseCoverageSet*>(&other);
         if (otherSparse == nullptr || otherSparse->m_sampleIdxs.empty()) {
             return;
         }
 
-        // quick append when coalescence isn't tracked
-        if (tracker.m_individualToChild == nullptr) {
-            m_sampleIdxs.insert(m_sampleIdxs.end(), otherSparse->m_sampleIdxs.begin(), otherSparse->m_sampleIdxs.end());
+        appendSamples(*otherSparse);
+    }
+
+    void mergeSampleCoverageImpl(const SampleCoverageSet& other,
+                                 std::unordered_map<NodeIDSizeT, NodeIDSizeT>& individualToChild,
+                                 NodeID childNode,
+                                 size_t& coalescences) override {
+        const auto* otherSparse = dynamic_cast<const SparseCoverageSet*>(&other);
+        if (otherSparse == nullptr || otherSparse->m_sampleIdxs.empty()) {
+            mergeSampleCoverageImpl(other);
             return;
         }
 
-        auto& individualToChild = tracker.m_individualToChild;
         for (const NodeID sampleId : otherSparse->m_sampleIdxs) {
             m_sampleIdxs.emplace_back(sampleId);
-            const auto insertPair = individualToChild->emplace(sampleId / 2, tracker.m_childNode);
-            if (!insertPair.second && insertPair.first->second != tracker.m_childNode) {
-                (*tracker.m_coalsAdded)++;
+            const auto insertPair = individualToChild.emplace(sampleId / 2, childNode);
+            if (!insertPair.second && insertPair.first->second != childNode) {
+                coalescences++;
             }
         }
     }
@@ -159,6 +165,10 @@ protected:
     friend class BitVecCoverageSet;
 
 private:
+    void appendSamples(const SparseCoverageSet& other) {
+        m_sampleIdxs.insert(m_sampleIdxs.end(), other.m_sampleIdxs.begin(), other.m_sampleIdxs.end());
+    }
+
     NodeIDList m_sampleIdxs;
     size_t m_totalSampleCount;
 };
@@ -166,6 +176,7 @@ private:
 /// A BitVec-backed set for coverage
 class BitVecCoverageSet : public SampleCoverageSet {
 public:
+    friend class CoalescenceVisitor;
     explicit BitVecCoverageSet(size_t totalSamples)
         : m_totalSampleCount(totalSamples),
           m_elems((totalSamples + m_blockSize - 1) / m_blockSize) {}
@@ -226,63 +237,71 @@ public:
     }
 
 protected:
-    void mergeSampleCoverageImpl(const SampleCoverageSet& other, CoalescenceTracker tracker = {}) override {
+    void mergeSampleCoverageImpl(const SampleCoverageSet& other) override {
         release_assert(totalSamples() == other.totalSamples());
-        // todo: add asserts to make sure CoalescenceTracker bitvecs (if present) are sized correctly.
         if (const BitVecCoverageSet* other_v = dynamic_cast<const BitVecCoverageSet*>(&other)) {
             m_numSampleCoverage += other.numSamplesCovered();
             uint64_t* __restrict data = m_elems.data();
             const uint64_t* __restrict otherData = other_v->m_elems.data();
             const size_t len = m_elems.size();
-            // The fast-path just ORs in each 64-bit word; when coalescence tracking is enabled we also keep
-            // per-individual seen state in a sibling bitvec to count collisions.
-            if (tracker.m_seenSet == nullptr) {
-                for (int i = 0; i < len; i++) {
-                    m_numSamplesNonOverlapping += __builtin_popcountll(otherData[i] & ~data[i]);
-                    data[i] |= otherData[i];
-                }
-            } else {
-                auto* seenBV = tracker.m_seenSet;
-                uint64_t* __restrict seen_d = seenBV->m_elems.data();
-
-                for (size_t i = 0; i < len; ++i) {
-                    uint64_t word = otherData[i];
-                    m_numSamplesNonOverlapping += __builtin_popcountll(word & ~data[i]);
-                    data[i] |= word;
-                    // We track "individual seen" bits in even positions so that adjacent haplotypes share a bucket.
-                    constexpr uint64_t EVEN = 0x5555555555555555ULL; // all even bits
-                    const uint64_t coalesced =
-                        (word | (word >> 1ULL)) & EVEN; // pack two consecutive haplotype bits into one individual slot
-                    // if it's already present from another child, we coalesce at this node
-                    uint64_t new_coals = coalesced & seen_d[i];
-                    *tracker.m_coalsAdded += __builtin_popcountll(new_coals);
-                    seen_d[i] |= coalesced;
-                }
+            for (size_t i = 0; i < len; ++i) {
+                m_numSamplesNonOverlapping += __builtin_popcountll(otherData[i] & ~data[i]);
+                data[i] |= otherData[i];
             }
 
         } else if (const SparseCoverageSet* other_v = dynamic_cast<const SparseCoverageSet*>(&other)) {
             for (const uint32_t sample : other_v->m_sampleIdxs) {
                 addElem(sample);
             }
-
-            if (tracker.m_seenSet != nullptr) {
-                auto* seenBV = tracker.m_seenSet;
-                auto& seenWords = seenBV->m_elems;
-
-                for (const uint32_t sample : other_v->m_sampleIdxs) {
-                    // Collapse the two haplotypes for an individual down to their even slot in the bitset.
-                    const size_t base = (static_cast<size_t>(sample) / 2) * 2; // even index per individual
-                    const size_t vecIdx = base / m_blockSize;
-                    const size_t offset = base % m_blockSize;
-                    const uint64_t mask = (uint64_t{1} << offset);
-
-                    if ((seenWords[vecIdx] & mask) != 0) {
-                        (*tracker.m_coalsAdded)++;
-                    }
-                    seenWords[vecIdx] |= mask;
-                }
-            }
         }
+    }
+
+    void
+    mergeSampleCoverageImpl(const SampleCoverageSet& other, BitVecCoverageSet& seenSet, size_t& coalescences) override {
+        release_assert(totalSamples() == other.totalSamples());
+        if (const BitVecCoverageSet* other_v = dynamic_cast<const BitVecCoverageSet*>(&other)) {
+            m_numSampleCoverage += other.numSamplesCovered();
+            uint64_t* __restrict data = m_elems.data();
+            const uint64_t* __restrict otherData = other_v->m_elems.data();
+            uint64_t* __restrict seen_d = seenSet.m_elems.data();
+            const size_t len = m_elems.size();
+            constexpr uint64_t EVEN = 0x5555555555555555ULL; // all even bits
+            for (size_t i = 0; i < len; ++i) {
+                const uint64_t word = otherData[i];
+                m_numSamplesNonOverlapping += __builtin_popcountll(word & ~data[i]);
+                data[i] |= word;
+                const uint64_t coalesced =
+                    (word | (word >> 1ULL)) & EVEN; // pack two consecutive haplotype bits into one individual slot
+                const uint64_t new_coals = coalesced & seen_d[i];
+                coalescences += __builtin_popcountll(new_coals);
+                seen_d[i] |= coalesced;
+            }
+
+        } else if (const SparseCoverageSet* other_v = dynamic_cast<const SparseCoverageSet*>(&other)) {
+            auto& seenWords = seenSet.m_elems;
+            for (const uint32_t sample : other_v->m_sampleIdxs) {
+                addElem(sample);
+                // Collapse the two haplotypes for an individual down to their even slot in the bitset.
+                const size_t base = (static_cast<size_t>(sample) / 2) * 2; // even index per individual
+                const size_t vecIdx = base / m_blockSize;
+                const size_t offset = base % m_blockSize;
+                const uint64_t mask = (uint64_t{1} << offset);
+
+                if ((seenWords[vecIdx] & mask) != 0) {
+                    coalescences++;
+                }
+                seenWords[vecIdx] |= mask;
+            }
+        } else {
+            mergeSampleCoverageImpl(other);
+        }
+    }
+
+    void mergeSampleCoverageImpl(const SampleCoverageSet& other,
+                                 std::unordered_map<NodeIDSizeT, NodeIDSizeT>& individualToChild,
+                                 NodeID childNode,
+                                 size_t& coalescences) override {
+        mergeSampleCoverageImpl(other);
     }
 
 private:
@@ -491,24 +510,24 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
             if (childSample->numSamplesCovered() > 1) {
                 candidateNodes.emplace_back(childId);
             }
-
-            CoalescenceTracker tracker{};
             if (computeCoals) {
                 if (dense) {
-                    tracker = CoalescenceTracker(coalTrackerSet.get(), &individualCoalCount);
+                    samplesBeneathSet->mergeSampleCoverage(*childSample, *coalTrackerSet, individualCoalCount);
                 } else {
-                    tracker = CoalescenceTracker(&coalTrackerMap, childId, &individualCoalCount);
+                    samplesBeneathSet->mergeSampleCoverage(*childSample, coalTrackerMap, childId, individualCoalCount);
                 }
+            } else {
+                samplesBeneathSet->mergeSampleCoverage(*childSample);
             }
-            samplesBeneathSet->mergeSampleCoverage(*childSample, tracker);
         } else {
             samplesBeneathSet->setBatchMembership(0ULL);
         }
     }
 
     // We can only record coalescence counts if there are no samples missing.
-    // TODO: make this work with our batched
-    
+    if (samplesBeneathSet->getBatchMembership() != 0 && computeCoals) {
+        grg->setNumIndividualCoals(nodeId, individualCoalCount);
+    }
     // If we've reached the root of the graph or have missing samples beneath us, we need to stop the search
     // and emit candidate nodes to map the mutation to.
     const uint64_t membership = samplesBeneathSet->getBatchMembership();
@@ -556,8 +575,6 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
         }
     }
     if (keepGoing) {
-        // Concurrent writing requires that we don't modify the hashmap itself
-        // Note that this requires us to have added a nullptr to m_sampleCoverage
         m_sampleCoverage.at(nodeId).swap(samplesBeneathSet);
     }
 
@@ -640,8 +657,7 @@ static NodeIDList processCandidateSet(const MutableGRGPtr& grg,
         // with our already-covered set.
         if (!coverageSet.overlapsWith(*candidateSet)) {
             // Mark all the sample nodes as covered.
-            CoalescenceTracker tracker = CoalescenceTracker(&coalTrackingSet, &individualCoalCount);
-            coverageSet.mergeSampleCoverage(*candidateSet, tracker);
+            coverageSet.mergeSampleCoverage(*candidateSet, coalTrackingSet, individualCoalCount);
             if (candidateId >= shapeNodeIdMax) {
                 stats.reusedMutNodes++;
             }
