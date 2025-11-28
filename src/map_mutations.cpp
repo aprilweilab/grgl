@@ -716,14 +716,20 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
                                     const MutationBatch& mutBatch,
                                     MutationMappingStats& stats,
                                     const NodeID shapeNodeIdMax,
-                                    std::pair<BpPosition, NodeID>& currentMissing) {
+                                    std::pair<BpPosition, NodeID>& currentMissing,
+                                    size_t numThreads) {
     // The topological order of nodeIDs is maintained through-out this algorithm, because newly added
     // nodes are only ever _root nodes_ (at the time they are added).
     release_assert(grg->nodesAreOrdered());
     const NodeIDList& mutSamples = mutBatch.seedList();
 
     TopoCandidateCollectorVisitor collector(mutBatch);
-    grg->visitTopo(collector, grgl::TraversalDirection::DIRECTION_UP, mutSamples);
+    if (numThreads == 1) {
+        grg->visitTopo(collector, grgl::TraversalDirection::DIRECTION_UP, mutSamples);
+    } else {
+        grg->visitTopoParallel(collector, grgl::TraversalDirection::DIRECTION_UP, mutSamples, numThreads);
+    }
+
     NodeIDList totalAdded{};
     std::array<CandidateList, 64>& candidateList = collector.m_collectedNodes;
     for (int i = 0; i < mutBatch.numMutations(); i++) {
@@ -740,7 +746,8 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     return totalAdded;
 }
 
-MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose) {
+MutationMappingStats
+mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose, size_t numThreads) {
     auto operationStartTime = std::chrono::high_resolution_clock::now();
 #define START_TIMING_OPERATION() operationStartTime = std::chrono::high_resolution_clock::now();
 #define EMIT_TIMING_MESSAGE(msg)                                                                                       \
@@ -816,7 +823,8 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
                 mutBatch.addMutation(unmapped.mutation, mutSamples);
 
                 if (mutBatch.numMutations() == mutationBatchSize) {
-                    NodeIDList addedNodes = greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
+                    NodeIDList addedNodes =
+                        greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing, numThreads);
 
                     // Update sample counts for newly added nodes.
                     mutBatch.clear();
@@ -824,7 +832,8 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
             }
         } else {
             if (mutBatch.numMutations() > 0) {
-                NodeIDList addedNodes = greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
+                NodeIDList addedNodes =
+                    greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing, numThreads);
                 mutBatch.clear();
             }
             stats.emptyMutations++;
@@ -853,7 +862,7 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mu
         }
     }
     if (mutBatch.numMutations() > 0) {
-        NodeIDList addedNodes = greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
+        NodeIDList addedNodes = greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing, numThreads);
     }
     return stats;
 }
