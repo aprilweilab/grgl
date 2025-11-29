@@ -396,77 +396,104 @@ void GRG::visitTopoParallel(ParallelGRGVisitor& visitor,
                             TraversalDirection direction,
                             const NodeIDList& seedList,
                             size_t numThreads) {
+
     if (!this->nodesAreOrdered()) {
         throw ApiMisuseFailure("Parallel visit only supported when nodes are topologically ordered!");
     }
 
-    GRGPtr sharedThis = shared_from_this();
-
-    static std::vector<bool> seen;
-    seen.clear();
-    seen.resize(numNodes(), false);
-
-    std::vector<NodeID> currentBatch;
-    std::vector<NodeID> nextBatch;
-    currentBatch.reserve(seedList.size());
-    nextBatch.reserve(seedList.size());
-
-    for (NodeID seed : seedList) {
-        if (!seen[seed]) {
-            seen[seed] = true;
-            currentBatch.push_back(seed);
-        }
-    }
-
-    if (currentBatch.empty()) {
+    const NodeIDSizeT totalNodes = this->numNodes();
+    if (totalNodes == 0 || seedList.empty()) {
         return;
     }
 
-    std::vector<bool> nodeResults;
+    GRGPtr sharedThis = shared_from_this();
+
+    // height[node] = max distance (in down-edges) to any descendant.
+    // Assumes node IDs are in a topological order compatible with down edges.
+    static std::vector<NodeIDSizeT> height;
+    height.assign(totalNodes, 0);
+
+    NodeIDSizeT maxHeight = 0;
+    for (NodeID nodeId = 0; nodeId < static_cast<NodeID>(totalNodes); ++nodeId) {
+        NodeIDSizeT best = 0;
+        const auto& children = this->getDownEdges(nodeId);
+        for (NodeID child : children) {
+            NodeIDSizeT childHeight = height[child];
+            best = std::max(childHeight + 1, best);
+        }
+        height[nodeId] = best;
+        maxHeight = std::max(best, maxHeight);
+    }
+
+    // active[node] == true means "reachable from some seed and not yet processed at its level".
+    static std::vector<bool> active;
+    active.assign(totalNodes, false);
+    for (NodeID seed : seedList) {
+        active[seed] = true;
+    }
+
+    std::vector<NodeID> batch;
+    std::vector<bool> batchResults;
 
     if (direction == DIRECTION_UP) {
-        while (!currentBatch.empty()) {
-            nodeResults.assign(currentBatch.size(), false);
-            visitor.parallelVisit(sharedThis, currentBatch, nodeResults, direction, numThreads);
-            nextBatch.clear();
+        for (NodeIDSizeT level = 0; level <= maxHeight; ++level) {
+            batch.clear();
 
-            // Build next frontier: parents of nodes that want to keepGoing
-            for (size_t i = 0; i < currentBatch.size(); ++i) {
-                if (!nodeResults[i]) {
-                    continue;
-                }
-
-                NodeID node = currentBatch[i];
-                for (NodeID parent : this->getUpEdges(node)) {
-                    if (!seen[parent]) {
-                        seen[parent] = true;
-                        nextBatch.push_back(parent);
-                    }
+            // Gather all active nodes at this height.
+            for (NodeID nodeId = 0; nodeId < static_cast<NodeID>(totalNodes); ++nodeId) {
+                if (active[nodeId] && height[nodeId] == level) {
+                    batch.push_back(nodeId);
                 }
             }
 
-            currentBatch.swap(nextBatch);
+            if (batch.empty()) {
+                continue;
+            }
+
+            batchResults.assign(batch.size(), false);
+            visitor.parallelVisit(sharedThis, batch, batchResults, direction, numThreads);
+
+            // Propagate to parents only from nodes that "keepGoing".
+            for (size_t i = 0; i < batch.size(); ++i) {
+                if (!batchResults[i]) {
+                    continue;
+                }
+                NodeID nodeId = batch[i];
+                const auto& parents = this->getUpEdges(nodeId);
+                for (NodeID parent : parents) {
+                    active[parent] = true;
+                }
+            }
         }
     } else {
-        while (!currentBatch.empty()) {
-            nodeResults.assign(currentBatch.size(), false);
-            visitor.parallelVisit(sharedThis, currentBatch, nodeResults, direction, numThreads);
-            nextBatch.clear();
+        for (NodeIDSizeT levelRev = maxHeight + 1; levelRev > 0; --levelRev) {
+            NodeIDSizeT level = levelRev - 1;
+            batch.clear();
 
-            for (size_t i = 0; i < currentBatch.size(); ++i) {
-                if (!nodeResults[i]) {
-                    continue;
-                }
-
-                NodeID node = currentBatch[i];
-                for (NodeID child : this->getDownEdges(node)) {
-                    if (!seen[child]) {
-                        seen[child] = true;
-                        nextBatch.push_back(child);
-                    }
+            for (NodeID nodeId = 0; nodeId < static_cast<NodeID>(totalNodes); ++nodeId) {
+                if (active[nodeId] && height[nodeId] == level) {
+                    batch.push_back(nodeId);
                 }
             }
-            currentBatch.swap(nextBatch);
+
+            if (batch.empty()) {
+                continue;
+            }
+
+            batchResults.assign(batch.size(), false);
+            visitor.parallelVisit(sharedThis, batch, batchResults, direction, numThreads);
+
+            // Propagate to children only from nodes that "keepGoing".
+            for (size_t i = 0; i < batch.size(); ++i) {
+                if (!batchResults[i]) {
+                    continue;
+                }
+                NodeID nodeId = batch[i];
+                const auto& children = this->getDownEdges(nodeId);
+                for (NodeID child : children) {
+                    active[child] = true;
+                }
+            }
         }
     }
 }
