@@ -392,103 +392,81 @@ void GRG::visitTopoNodeOrderedDense(GRGVisitor& visitor,
     }
 }
 
-void GRG::visitTopoParallel(ParallelGRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList, size_t numThreads) {
+void GRG::visitTopoParallel(ParallelGRGVisitor& visitor,
+                            TraversalDirection direction,
+                            const NodeIDList& seedList,
+                            size_t numThreads) {
     if (!this->nodesAreOrdered()) {
         throw ApiMisuseFailure("Parallel visit only supported when nodes are topologically ordered!");
     }
 
     GRGPtr sharedThis = shared_from_this();
-    static std::vector<uint8_t> visitQueue;
-    visitQueue.clear();
-    visitQueue.resize(numNodes());
 
-    size_t layer = 1;
-    ssize_t toVisit = static_cast<ssize_t>(seedList.size());
-    for (const auto& seedId : seedList) {
-        visitQueue.at(seedId) = 1;
+    static std::vector<bool> seen;
+    seen.clear();
+    seen.resize(numNodes(), false);
+
+    std::vector<NodeID> currentBatch;
+    std::vector<NodeID> nextBatch;
+    currentBatch.reserve(seedList.size());
+    nextBatch.reserve(seedList.size());
+
+    for (NodeID seed : seedList) {
+        if (!seen[seed]) {
+            seen[seed] = true;
+            currentBatch.push_back(seed);
+        }
     }
 
-    if (toVisit == 0) {
+    if (currentBatch.empty()) {
         return;
     }
 
-    std::vector<NodeID> nodeBatch;
     std::vector<bool> nodeResults;
-    nodeBatch.reserve(seedList.size());
-    nodeResults.reserve(seedList.size());
 
     if (direction == DIRECTION_UP) {
-        size_t nodeIdx = 0;
-        while (nodeIdx < this->numNodes() && toVisit > 0) {
-            nodeBatch.clear();
-            nodeResults.clear();
-            while (nodeIdx < this->numNodes()) {
-                const uint8_t nodeLayer = visitQueue[nodeIdx];
-                if (nodeLayer == 0 || nodeLayer > layer) {
-                    break;
+        while (!currentBatch.empty()) {
+            nodeResults.assign(currentBatch.size(), false);
+            visitor.parallelVisit(sharedThis, currentBatch, nodeResults, direction, numThreads);
+            nextBatch.clear();
+
+            // Build next frontier: parents of nodes that want to keepGoing
+            for (size_t i = 0; i < currentBatch.size(); ++i) {
+                if (!nodeResults[i]) {
+                    continue;
                 }
-                nodeBatch.push_back(nodeIdx);
-                nodeResults.push_back(false);
-                nodeIdx++;
-            }
 
-            if (nodeBatch.empty()) {
-                layer++;
-                continue;
-            }
-
-            toVisit -= static_cast<ssize_t>(nodeBatch.size());
-            visitor.parallelVisit(sharedThis, nodeBatch, nodeResults, direction, 1);
-            for (int i = 0; i < nodeBatch.size(); i++) {
-                NodeID processedNode = nodeBatch[i];
-                bool keepGoing = nodeResults[i];
-                if (keepGoing) {
-                    for (const NodeID parent : this->getUpEdges(processedNode)) {
-                        if (visitQueue[parent] == 0) {
-                            visitQueue[parent] = layer + 1;
-                            toVisit++;
-                        }
+                NodeID node = currentBatch[i];
+                for (NodeID parent : this->getUpEdges(node)) {
+                    if (!seen[parent]) {
+                        seen[parent] = true;
+                        nextBatch.push_back(parent);
                     }
                 }
             }
-            layer++;
+
+            currentBatch.swap(nextBatch);
         }
     } else {
-        ssize_t nodeIdx = static_cast<ssize_t>(this->numNodes());
-        while (nodeIdx > 0 && toVisit > 0) {
-            nodeBatch.clear();
-            nodeResults.clear();
-            while (nodeIdx > 0) {
-                const NodeID currentId = nodeIdx - 1;
-                const uint8_t nodeLayer = visitQueue[currentId];
-                if (nodeLayer == 0 || nodeLayer > layer) {
-                    break;
+        while (!currentBatch.empty()) {
+            nodeResults.assign(currentBatch.size(), false);
+            visitor.parallelVisit(sharedThis, currentBatch, nodeResults, direction, numThreads);
+            nextBatch.clear();
+
+            for (size_t i = 0; i < currentBatch.size(); ++i) {
+                if (!nodeResults[i]) {
+                    continue;
                 }
-                nodeBatch.push_back(currentId);
-                nodeResults.push_back(false);
-                nodeIdx--;
-            }
 
-            if (nodeBatch.empty()) {
-                layer++;
-                continue;
-            }
-
-            toVisit -= static_cast<ssize_t>(nodeBatch.size());
-            visitor.parallelVisit(sharedThis, nodeBatch, nodeResults, direction, 1);
-            for (int i = 0; i < nodeBatch.size(); i++) {
-                NodeID processedNode = nodeBatch[i];
-                bool keepGoing = nodeResults[i];
-                if (keepGoing) {
-                    for (const NodeID child : this->getDownEdges(processedNode)) {
-                        if (visitQueue[child] == 0) {
-                            visitQueue[child] = layer + 1;
-                            toVisit++;
-                        }
+                NodeID node = currentBatch[i];
+                for (NodeID child : this->getDownEdges(node)) {
+                    if (!seen[child]) {
+                        seen[child] = true;
+                        nextBatch.push_back(child);
                     }
                 }
             }
-            layer++;
+            currentBatch.swap(nextBatch);
         }
     }
 }
@@ -570,4 +548,3 @@ void MutableGRG::compact(NodeID nodeId) {
 }
 
 } // namespace grgl
-
