@@ -198,8 +198,7 @@ inline MapType loadMapFromTSV(const std::string& filename,
             for (size_t i = 0; i < tokens.size(); i++) {
                 if (tokens[i] == lhsField) {
                     lhsIndex = i;
-                }
-                if (tokens[i] == rhsField) {
+                } else if (tokens[i] == rhsField) {
                     rhsIndex = i;
                 }
             }

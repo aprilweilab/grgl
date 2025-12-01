@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
         parser,
         "lf-no-tree",
         "Ignore variants with frequency less than this threshold, for tree building. If >= 1.0, it is a count."
-        " If <1.0 then it is a frequency. Default: 1.0",
+        " If <1.0 then it is a frequency. Default: 0.0",
         {'f', "lf-no-tree"});
     args::Flag noIndividualIds(
         parser, "no-indiv-ids", "Do not store individual string identifiers in the GRG", {"no-indiv-ids"});
@@ -129,11 +129,12 @@ int main(int argc, char** argv) {
         {"maintain-topo"});
     args::Flag tsComputeCoals(
         parser, "ts-coals", "When converting tree-seq, compute node individual coalescences.", {"ts-coals"});
-    args::ValueFlag<std::string> populationIds(parser,
-                                               "population-ids",
-                                               "Format: \"filename:fieldname\". Read population ids from the given "
-                                               "tab-separate file, using the given fieldname.",
-                                               {"population-ids"});
+    args::ValueFlag<std::string> populationIds(
+        parser,
+        "population-ids",
+        "Format: \"filename:sample_field:pop_field\". Read population ids from the given "
+        "tab-separate file, using the given fieldname.",
+        {"population-ids"});
 
     try {
         parser.ParseCLI(argc, argv);
@@ -205,11 +206,11 @@ int main(int argc, char** argv) {
     std::map<std::string, std::string> indivIdToPop;
     if (populationIds) {
         std::vector<std::string> parts = split(*populationIds, ':');
-        if (parts.size() != 2) {
-            std::cerr << "Must specify \"filename:fieldname\" for --population-ids" << std::endl;
+        if (parts.size() != 3) {
+            std::cerr << "Must specify \"filename:sample_field:pop_field\" for --population-ids" << std::endl;
             return 1;
         }
-        indivIdToPop = loadMapFromTSV(parts[0], "sample", parts[1]);
+        indivIdToPop = loadMapFromTSV(parts[0], parts[1], parts[2]);
     }
 
 #define UNSUPPORTED_FOR_INPUT(parameter, parameterName)                                                                \

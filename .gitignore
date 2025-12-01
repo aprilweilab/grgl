@@ -20,3 +20,4 @@ gperftools-2.15/
 jupyter/.ipynb_checkpoints/
 jupyter/*.trees
 /*.igd
+doc/rtd_html/

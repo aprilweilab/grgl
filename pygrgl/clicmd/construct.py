@@ -78,14 +78,6 @@ def add_options(subparser):
         help="Switch the reference allele with the major allele when they differ",
     )
     subparser.add_argument(
-        "--shape-lf-filter",
-        "-f",
-        type=float,
-        default=10.0,
-        help="During shape construction ignore mutations with counts less than this."
-        "If value is <1.0 then it is treated as a frequency. Defaults to 10 (count).",
-    )
-    subparser.add_argument(
         "--population-ids",
         default=None,
         help='Format: "filename:fieldname". Read population ids from the given '
