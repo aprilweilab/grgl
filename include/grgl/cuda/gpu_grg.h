@@ -35,7 +35,7 @@ public:
 
     CudaBuffer(size_t dim1) {
         // Check for potential overflow before multiplication
-        if (dim1 > SIZE_MAX / sizeof(T)) {
+        if (dim1 > std::numeric_limits<size_t>::max() / sizeof(T)) {
             throw std::runtime_error("CudaBuffer allocation size would overflow");
         }
         const size_t allocSize = dim1 * sizeof(T);
@@ -45,7 +45,7 @@ public:
 
     CudaBuffer(size_t dim1, size_t dim2) {
         // Check for potential overflow before multiplication
-        if (dim1 > 0 && dim2 > SIZE_MAX / sizeof(T) / dim1) {
+        if (dim1 == 0 || dim2 > std::numeric_limits<size_t>::max() / sizeof(T) / dim1) {
             throw std::runtime_error("CudaBuffer allocation size would overflow");
         }
         const size_t allocSize = dim1 * dim2 * sizeof(T);
@@ -202,17 +202,6 @@ public:
     // Will not free the memory, just removes the pointers
     void removeColIndBuffer() { colIndices = nullptr; }
 
-    // This function frees the GPU memory buffer for col indices
-    /*
-    void freeColInd() {
-        if (colIndices == nullptr) {
-            throw ApiMisuseFailure("Col indices buffer is already freed");
-        }
-        cudaFree(colIndices);
-        colIndices = nullptr;
-    }
-    */
-
     // Init vars and allocate GPU memory for all structures
     // This function is blocking
     // If no streamPtr is provided, a new stream will be created
@@ -224,7 +213,6 @@ public:
               bool allocateColIndices = true,
               std::shared_ptr<cudaStream_t> streamPtr = nullptr) {
         free(); // Free any existing memory
-        CHECK_CUDA_LAST_ERROR();
         numRows = rows;
         numSamples = samples;
         numEdges = nonZeros;
@@ -232,21 +220,15 @@ public:
         maxHeight = height;
 
         rowOffsets = std::make_shared<CudaBuffer<NodeIDSizeT>>(numRows + 1);
-        CHECK_CUDA_LAST_ERROR();
         oldToNewMapping = std::make_shared<CudaBuffer<NodeIDSizeT>>(numRows);
-        CHECK_CUDA_LAST_ERROR();
         newToOldMapping = std::make_shared<CudaBuffer<NodeIDSizeT>>(numRows);
-        CHECK_CUDA_LAST_ERROR();
         mutationAndNewMapping = std::make_shared<CudaBuffer<NodeIDSizeT>>(numMutations, 2);
-        CHECK_CUDA_LAST_ERROR();
 
         if (allocateColIndices) {
             colIndices = std::make_shared<CudaBuffer<NodeIDSizeT>>(numEdges);
-            CHECK_CUDA_LAST_ERROR();
         } else {
             colIndices = nullptr;
         }
-        CHECK_CUDA_LAST_ERROR();
 
         hostColIndices.resize(numEdges);
         hostHeightCutoffs.resize(maxHeight + 1);
@@ -319,11 +301,14 @@ public:
         CHECK_CUDA_LAST_ERROR();
 
         // cpu memcpy just use normal memcpys
+        release_assert(this->hostHeightCutoffs.size() == maxHeight + 1);
         memcpy(this->hostHeightCutoffs.data(), heightCutoffs, (maxHeight + 1) * sizeof(NodeIDSizeT));
+        release_assert(this->hostHeavyCutoffs.size() == maxHeight + 1);
         memcpy(this->hostHeavyCutoffs.data(), heavyCutoffs, (maxHeight + 1) * sizeof(NodeIDSizeT));
+        release_assert(this->hostAvgChildCounts.size() == maxHeight + 1);
         memcpy(this->hostAvgChildCounts.data(), avgChildCounts, (maxHeight + 1) * sizeof(double));
+        release_assert(this->hostColIndices.size() == numEdges);
         memcpy(this->hostColIndices.data(), colIndices, numEdges * sizeof(NodeIDSizeT));
-        CHECK_CUDA_LAST_ERROR();
 
         if (copyColIndicesToDevice) {
             if (!this->colIndices) {
@@ -370,7 +355,7 @@ public:
         CHECK_CUDA_LAST_ERROR();
 
         CudaBuffer<T> d_buffer(numRows, this->numRows);
-        size_t bufferSizeByte = numRows * this->numRows * sizeof(T);
+        const size_t bufferSizeByte = numRows * this->numRows * sizeof(T);
 
         CHECK_CUDA_LAST_ERROR();
 
@@ -415,14 +400,21 @@ public:
         CHECK_CUDA_LAST_ERROR();
 
         CudaBuffer<T> d_buffer(numRows, this->numRows);
-        size_t bufferSizeByte = numRows * this->numRows * sizeof(T);
+        const size_t bufferSizeByte = numRows * this->numRows * sizeof(T);
 
         CHECK_CUDA_LAST_ERROR();
 
         auto start = std::chrono::high_resolution_clock::now();
         for (int it = 0; it < iterations; it++) {
-            this->matrixMultiplication<T>(
-                d_inputMatrix, numCols, numRows, direction, d_outputMatrix, outSize, false, d_buffer, bufferSizeByte);
+            this->matrixMultiplication<T>(d_inputMatrix.get(),
+                                          numCols,
+                                          numRows,
+                                          direction,
+                                          d_outputMatrix.get(),
+                                          outSize,
+                                          false,
+                                          d_buffer.get(),
+                                          bufferSizeByte);
             this->wait();
             CHECK_CUDA_LAST_ERROR();
         }
@@ -512,7 +504,7 @@ bool cmp(const nodes& a, const nodes& b) { return a.childCounts > b.childCounts;
 // then, in the epilogue function, we can use the information to have a new GPUGRG
 class GPUCsrVisitor : public GRGVisitor {
 public:
-    explicit GPUCsrVisitor(size_t num_nodes, size_t num_elements) {
+    explicit GPUCsrVisitor(const size_t num_nodes, const size_t num_elements) {
         h_maxHeight = 0;
         h_numNodes = num_nodes;
         h_numEdges = num_elements;
@@ -538,10 +530,10 @@ public:
         if (nodeId < grg->numSamples()) {
             height = 0;
         } else {
-            auto downEdges = grg->getDownEdges(nodeId);
+            const auto downEdges = grg->getDownEdges(nodeId);
             for (const auto& child : downEdges) {
                 release_assert(child < grg->numNodes());
-                auto childHeight = h_newID[child].first;
+                const auto childHeight = h_newID[child].first;
                 height = std::max(height, childHeight + 1);
             }
         }
@@ -553,7 +545,7 @@ public:
         }
 
         // auto id_in_group = m_idCounters[height]++;
-        auto idInGroup = h_oldId[height].size();
+        const auto idInGroup = h_oldId[height].size();
         h_oldId[height].push_back(nodeId);
         h_newID[nodeId] = std::make_pair(height, idInGroup);
         return true;
@@ -565,7 +557,7 @@ public:
         for (const auto& vec : h_oldId) {
             flatOldID.insert(flatOldID.end(), vec.begin(), vec.end());
         }
-        return flatOldID;
+        return std::move(flatOldID);
     }
 
     // Flattened mapping from old_id to new_id
@@ -581,7 +573,7 @@ public:
             }
             baseID += h_oldId[height].size();
         }
-        return flatNewID;
+        return std::move(flatNewID);
     }
 
     // this function rearranges nodes at each height by their child counts
@@ -592,14 +584,14 @@ public:
 #endif
             std::vector<nodes> nodeList;
             for (size_t i = 0; i < h_oldId[h].size(); i++) {
-                NodeID oldID = h_oldId[h][i];
-                NodeIDSizeT childCount = grg->numDownEdges(oldID);
+                const NodeID oldID = h_oldId[h][i];
+                const NodeIDSizeT childCount = grg->numDownEdges(oldID);
                 nodeList.push_back({oldID, childCount});
             }
             std::sort(nodeList.begin(), nodeList.end(), cmp);
             for (size_t i = 0; i < nodeList.size(); i++) {
                 h_oldId[h][i] = nodeList[i].id;
-                NodeID old_id = nodeList[i].id;
+                const NodeID old_id = nodeList[i].id;
                 h_newID[old_id] = std::make_pair(h, i);
             }
         }
@@ -612,7 +604,7 @@ public:
         std::vector<NodeIDSizeT> h_heightCutoffs;
         h_heightCutoffs.resize(h_maxHeight + 1, 0);
         for (int i = 1; i <= h_maxHeight; i++) {
-            h_heightCutoffs[i] = h_heightCutoffs[i - 1] + h_oldId[i - 1].size();
+            h_heightCutoffs.at(i) = h_heightCutoffs.at(i - 1) + h_oldId.at(i - 1).size();
         }
 
         std::vector<NodeIDSizeT> h_heavyCutoffs;
@@ -631,18 +623,18 @@ public:
         NodeIDSizeT currrentColIndex = 0;
         for (int h = 0; h < h_maxHeight; h++) {
             for (size_t i = 0; i < h_oldId[h].size(); i++) {
-                NodeID oldID = h_oldId[h][i];
-                NodeIDSizeT newID = h_heightCutoffs[h] + i;
+                const NodeID oldID = h_oldId[h][i];
+                const NodeIDSizeT newID = h_heightCutoffs[h] + i;
                 h_rowOffsets[newID] = currrentColIndex;
                 currrentColIndex += grg->numDownEdges(oldID);
 
                 // for each down edge, we need to find its new id
-                auto downEdges = grg->getDownEdges(oldID);
+                const auto downEdges = grg->getDownEdges(oldID);
                 h_childCounts[h] += downEdges.size();
                 for (const auto& child : downEdges) {
                     release_assert(child < grg->numNodes());
-                    auto childNewID = h_newID[child];
-                    NodeIDSizeT childNewFlatID = h_heightCutoffs[childNewID.first] + childNewID.second;
+                    const auto childNewID = h_newID[child];
+                    const NodeIDSizeT childNewFlatID = h_heightCutoffs[childNewID.first] + childNewID.second;
                     h_colIndices.push_back(childNewFlatID);
                 }
             }
@@ -655,13 +647,13 @@ public:
         constexpr double HEAVY_RATIO = 8.0; // TODO: define this in another place
 
         for (int h = 1; h < h_maxHeight; h++) {
-            NodeIDSizeT heavyCutoffValue = HEAVY_RATIO * h_childCounts[h] / h_oldId[h].size();
-            h_avgChildCounts[h] = static_cast<double>(h_childCounts[h]) / h_oldId[h].size();
+            const NodeIDSizeT heavyCutoffValue = HEAVY_RATIO * h_childCounts.at(h) / h_oldId.at(h).size();
+            h_avgChildCounts.at(h) = static_cast<double>(h_childCounts.at(h)) / h_oldId.at(h).size();
             for (size_t i = 0; i < h_oldId[h].size(); i++) {
-                NodeID oldID = h_oldId[h][i];
-                NodeIDSizeT childCount = grg->numDownEdges(oldID);
+                const NodeID oldID = h_oldId[h][i];
+                const NodeIDSizeT childCount = grg->numDownEdges(oldID);
                 if (childCount < heavyCutoffValue) {
-                    h_heavyCutoffs[h] = i;
+                    h_heavyCutoffs.at(h) = i;
                     break;
                 }
             }
@@ -674,7 +666,7 @@ public:
         h_rowOffsets[h_numNodes] = currrentColIndex;
         release_assert(currrentColIndex == h_numEdges);
 
-        auto oldToNewFlat = getNewId();
+        const auto oldToNewFlat = getNewId();
 
         // calculate the mutation and new id pairs
         release_assert(sizeof(NodeIDSizeT) >= sizeof(MutationId));
@@ -697,7 +689,7 @@ public:
             mutationNewPairs.push_back((NodeIDSizeT)newID);
         }
 
-        size_t numValidMutations = mutationNewPairs.size() / 2;
+        const size_t numValidMutations = mutationNewPairs.size() / 2;
 
 #ifdef GRGL_GPU_DEBUG
         std::cout << "Mutation and new id pairs constructed with size: " << mutationNewPairs.size() << std::endl;
