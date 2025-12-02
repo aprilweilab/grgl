@@ -1,6 +1,8 @@
 ![](https://github.com/aprilweilab/grgl/actions/workflows/cmake-multi-platform.yml/badge.svg)
 ![](https://readthedocs.org/projects/grgl/badge/?version=latest)
 
+[![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](http://bioconda.github.io/recipes/pygrgl/README.html)
+
 # Genotype Representation Graphs
 
 A Genotype Representation Graph (GRG) is a compact way to store reference-aligned genotype data for large
@@ -39,6 +41,10 @@ pip install pygrgl
 ```
 
 This will use prebuilt packages for most modern Linux situations, and will build from source for MacOS. In order to build from source it will require CMake (at least v3.14), zlib development headers, and a clang or GCC compiler that supports C++11.
+
+## Installing from conda
+
+You can also install the [conda package](https://bioconda.github.io/recipes/pygrgl/README.html) via the [bioconda](https://bioconda.github.io/) channel: `conda install pygrgl`.
 
 ## Building (Python)
 
