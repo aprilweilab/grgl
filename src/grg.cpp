@@ -210,11 +210,12 @@ void MutableGRG::connect(const NodeID srcId, const NodeID tgtId) {
     }
 }
 
-void MutableGRG::disconnect(const NodeID srcId, const NodeID tgtId) {
-    m_nodes.at(srcId)->deleteDownEdge(tgtId);
+bool MutableGRG::disconnect(const NodeID srcId, const NodeID tgtId) {
+    bool result = m_nodes.at(srcId)->deleteDownEdge(tgtId);
     if (m_hasUpEdges) {
-        m_nodes.at(tgtId)->deleteUpEdge(srcId);
+        result = result && m_nodes.at(tgtId)->deleteUpEdge(srcId);
     }
+    return result;
 }
 
 class TopoOrderVisitor : public grgl::GRGVisitor {

@@ -170,6 +170,7 @@ set(GRGL_CORE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/mut_iterator.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/mutation.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/serialize.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/transform.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/ts2grg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/windowing.cpp
   )
