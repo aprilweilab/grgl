@@ -30,8 +30,8 @@
 #define PERFORM_DUP_EDGE_CHECKS 0
 
 #if PERFORM_DUP_EDGE_CHECKS
-#include "util.h"
 #include <algorithm>
+#include <iostream>
 
 #define CHECK_DUP_EDGES(edge_list)                                                                                     \
     do {                                                                                                               \

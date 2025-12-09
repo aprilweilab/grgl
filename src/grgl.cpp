@@ -27,9 +27,11 @@
 #include "fast_build.h"
 #include "grg_helpers.h"
 #include "grgl/grg.h"
+#include "grgl/grgnode.h"
 #include "grgl/map_mutations.h"
 #include "grgl/mut_iterator.h"
 #include "grgl/serialize.h"
+#include "grgl/transform.h"
 #include "grgl/ts2grg.h"
 #include "grgl/windowing.h"
 #include "pooled_jobs.h"
@@ -135,6 +137,10 @@ int main(int argc, char** argv) {
         "Format: \"filename:sample_field:pop_field\". Read population ids from the given "
         "tab-separate file, using the given fieldname.",
         {"population-ids"});
+    args::Flag reduce(parser,
+                      "reduce",
+                      "Reduce the GRG into a smaller graph by repeated application of simple transformations",
+                      {"reduce"});
 
     try {
         parser.ParseCLI(argc, argv);
@@ -235,7 +241,7 @@ int main(int argc, char** argv) {
             return 2;
         }
     } else if (ends_with(*infile, ".grg")) {
-        const bool mutableNeeded = (bool)mapMutations;
+        const bool mutableNeeded = (bool)mapMutations || (bool)reduce;
         if (mutableNeeded) {
             theGRG = grgl::loadMutableGRG(*infile);
         } else {
@@ -244,6 +250,16 @@ int main(int argc, char** argv) {
         if (!theGRG) {
             std::cerr << "Failed to load " << *infile << std::endl;
             return 2;
+        }
+        if (reduce) {
+            grgl::MutableGRGPtr mutGRG = std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG);
+            constexpr size_t maxIter = 15;
+            constexpr size_t minDropped = 1000;
+            constexpr double fracDropped = 0.7;
+            const size_t iterations = reduceGRGUntil(mutGRG, maxIter, minDropped, fracDropped);
+            if (verbose) {
+                std::cout << "Reduced GRG for " << iterations << " iterations" << std::endl;
+            }
         }
         if (countVariants) {
             std::cout << theGRG->numMutations() << std::endl;
@@ -291,14 +307,22 @@ int main(int argc, char** argv) {
             }
         }
 
-        theGRG = grgl::fastGRGFromSamples(outfile ? *outfile : *infile,
-                                          *infile,
-                                          restrictRange,
-                                          buildFlags,
-                                          itFlags,
-                                          treeCount,
-                                          lfNoTree ? *lfNoTree : 0.0,
-                                          indivIdToPop);
+        grgl::MutableGRGPtr createdGRG = grgl::fastGRGFromSamples(outfile ? *outfile : *infile,
+                                                                  *infile,
+                                                                  restrictRange,
+                                                                  buildFlags,
+                                                                  itFlags,
+                                                                  treeCount,
+                                                                  lfNoTree ? *lfNoTree : 0.0,
+                                                                  indivIdToPop);
+        constexpr size_t maxIter = 10;
+        constexpr size_t minDropped = 1000;
+        constexpr double fracDropped = 0.7;
+        const size_t iterations = grgl::reduceGRGUntil(createdGRG, maxIter, minDropped, fracDropped);
+        if (verbose) {
+            std::cout << "Ran graph reduction for " << iterations << " iterations" << std::endl;
+        }
+        theGRG = createdGRG;
     } else {
         std::cerr << "Unsupported/undetected filetype for " << *infile << std::endl;
         std::cerr << "Only .trees and .grg files are supported currently." << std::endl;
