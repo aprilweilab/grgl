@@ -315,12 +315,14 @@ int main(int argc, char** argv) {
                                                                   treeCount,
                                                                   lfNoTree ? *lfNoTree : 0.0,
                                                                   indivIdToPop);
-        constexpr size_t maxIter = 10;
-        constexpr size_t minDropped = 1000;
-        constexpr double fracDropped = 0.7;
-        const size_t iterations = grgl::reduceGRGUntil(createdGRG, maxIter, minDropped, fracDropped);
-        if (verbose) {
-            std::cout << "Ran graph reduction for " << iterations << " iterations" << std::endl;
+        if (reduce) {
+            constexpr size_t maxIter = 10;
+            constexpr size_t minDropped = 1000;
+            constexpr double fracDropped = 0.7;
+            const size_t iterations = grgl::reduceGRGUntil(createdGRG, maxIter, minDropped, fracDropped);
+            if (verbose) {
+                std::cout << "Ran graph reduction for " << iterations << " iterations" << std::endl;
+            }
         }
         theGRG = createdGRG;
     } else {
