@@ -365,7 +365,7 @@ MutableGRGPtr convertTreeSeqToGRG(
                     TSKIT_OK_OR_THROW(tsk_tree_get_time(&currentTree, tsMutNode, &mutTime), "Failed to get node time");
                 }
                 const Mutation theMutation =
-                    Mutation((uint64_t)site->position, std::move(derivedState), ancestralState, (float)mutTime);
+                    Mutation((uint64_t)site->position, std::move(derivedState), ancestralState, (uint32_t)mutTime);
                 // Clients can pass a predicate that only includes certain mutations.
                 const auto nodeAndCoals =
                     addMutationFromTree(constructionContext, grg, treeSeq, &currentTree, tsMutNode, computeCoals);
