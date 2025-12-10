@@ -129,7 +129,7 @@ size_t reduceGRGUntil(const grgl::MutableGRGPtr& mutGRG,
         it++;
     } while ((it < iterations) && (totalRemoved < ((size_t)(fractionDropped * (double)origEdges))) &&
              (lastRemoved > minDropped));
-    
+
     // Calculate the coalescence counts for new nodes and nodes that we modified, above.
     calculateMissingCoals(mutGRG);
 
