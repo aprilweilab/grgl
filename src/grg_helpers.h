@@ -302,6 +302,47 @@ inline MutableGRGPtr grgFromTrees(const std::string& filename,
     return grgl::convertTreeSeqToGRG(&treeSeq, binaryMutations, useNodeTimes, maintainTopology, computeCoals);
 }
 
+inline NodeIDSizeT getCoalsForParent(const MutableGRGPtr& grg,
+                                     std::unordered_map<NodeID, NodeIDList>& nodeToIndivs,
+                                     const NodeIDList& children,
+                                     std::unordered_set<NodeIDSizeT>& seenIndivs,
+                                     bool cleanup) {
+    constexpr NodeIDSizeT ploidy = 2;
+    NodeIDSizeT coalCount = 0;
+
+    // Collect all "individuals below" each child and whenever we see one twice, count
+    // it as a coalescence and remove it from the list of seen individuals.
+    for (const NodeID child : children) {
+        if (grg->isSample(child)) {
+            const NodeIDSizeT indiv = child / ploidy;
+            auto insertIt = seenIndivs.insert(indiv);
+            if (!insertIt.second) {
+                seenIndivs.erase(insertIt.first);
+                coalCount++;
+            }
+        } else {
+            auto findIt = nodeToIndivs.find(child);
+            if (findIt == nodeToIndivs.end()) {
+                std::cout << "COULD NOT FIND: " << child << "\n";
+            }
+            release_assert(findIt != nodeToIndivs.end());
+            const NodeIDList& rightIndividuals = findIt->second;
+            for (const NodeID indiv : findIt->second) {
+                auto insertIt = seenIndivs.insert(indiv);
+                if (!insertIt.second) {
+                    seenIndivs.erase(insertIt.first);
+                    coalCount++;
+                }
+            }
+            if (cleanup) {
+                nodeToIndivs.erase(findIt);
+            }
+        }
+    }
+    return coalCount;
+}
+
+
 } // namespace grgl
 
 #endif /* GRG_HELPERS_H */
