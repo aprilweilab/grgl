@@ -403,19 +403,6 @@ NodeID RenumberAndWriteVisitor::getOldID(const NodeID nodeId) const {
     return m_revIdMap[nodeId];
 }
 
-// Maps new NodeID to old NodeID (so the order is new NodeID acscending)
-std::vector<NodeIDSizeT> m_revIdMap;
-std::vector<bool> m_keepBeneath;
-std::vector<bool> m_keepMutations;
-// True if the node is a missingness node, false otherwise.
-std::vector<bool> m_isMissingnessNode;
-
-// Updated node data
-NodeDataContainer m_newNodeData;
-
-EagerCSREdges32 m_edgeCSR;
-size_t m_bytesWritten{};
-
 bool RenumberAndWriteVisitor::hasIndividualIds(const GRGPtr& grg) {
     if (m_filteredIndivIds) {
         return m_filteredIndivIds->numNodes() > 0;
