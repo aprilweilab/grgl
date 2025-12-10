@@ -1,6 +1,9 @@
 #include "grgl/transform.h"
+#include "grg_helpers.h"
 #include "grgl/common.h"
 #include "grgl/grgnode.h"
+#include "grgl/node_data.h"
+#include "grgl/visitor.h"
 #include "util.h"
 
 #include <unordered_map>
@@ -74,6 +77,11 @@ size_t reduceGRG(const MutableGRGPtr& mutGRG) {
                 }
                 mutGRG->connect(node, newNode);
                 mutGRG->connect(bestSibling, newNode);
+
+                mutGRG->setNumIndividualCoalsGrow(newNode, COAL_COUNT_NOT_SET);
+                mutGRG->setNumIndividualCoals(node, COAL_COUNT_NOT_SET);
+                mutGRG->setNumIndividualCoals(bestSibling, COAL_COUNT_NOT_SET);
+
                 removedEdges += (sharedList.size() - 2);
             } else {
                 release_assert(bestCount == target); // They are equal
@@ -86,6 +94,16 @@ size_t reduceGRG(const MutableGRGPtr& mutGRG) {
                     release_assert(mutGRG->disconnect(bestSibling, child));
                 }
                 mutGRG->connect(bestSibling, node);
+                // node's coalescence is unchanged, but bestSibling no longer coalesces the children that
+                // are beneath node now.
+                const NodeIDSizeT nodeCoals = mutGRG->getNumIndividualCoals(node);
+                const NodeIDSizeT existingCoals = mutGRG->getNumIndividualCoals(bestSibling);
+                if (nodeCoals == COAL_COUNT_NOT_SET || existingCoals == COAL_COUNT_NOT_SET) {
+                    mutGRG->setNumIndividualCoals(bestSibling, COAL_COUNT_NOT_SET);
+                } else {
+                    release_assert(existingCoals >= nodeCoals);
+                    mutGRG->setNumIndividualCoals(bestSibling, existingCoals - nodeCoals);
+                }
                 removedEdges += sharedList.size();
             }
         }
@@ -111,7 +129,90 @@ size_t reduceGRGUntil(const grgl::MutableGRGPtr& mutGRG,
         it++;
     } while ((it < iterations) && (totalRemoved < ((size_t)(fractionDropped * (double)origEdges))) &&
              (lastRemoved > minDropped));
+    
+    // Calculate the coalescence counts for new nodes and nodes that we modified, above.
+    calculateMissingCoals(mutGRG);
+
     return it;
+}
+
+/**
+ * Visitor that marks nodes which need to propagate individual information to their parents.
+ */
+class GRGCoalMarkVisitor : public GRGVisitor {
+public:
+    GRGCoalMarkVisitor() = default;
+
+    bool visit(const GRGPtr& grg, NodeID node, TraversalDirection direction, DfsPass dfsPass = DFS_PASS_NONE) override {
+        if (m_marked.empty()) {
+            release_assert(direction == TraversalDirection::DIRECTION_UP);
+            m_marked.resize(grg->numNodes(), false);
+        }
+        if (dfsPass == DFS_PASS_BACK_AGAIN) {
+            bool mark = (grg->getNumIndividualCoals(node) == COAL_COUNT_NOT_SET);
+            if (!mark) {
+                for (const NodeID parent : grg->getUpEdges(node)) {
+                    if (m_marked[parent]) {
+                        mark = true;
+                        break;
+                    }
+                }
+            }
+            m_marked[node] = mark;
+        }
+        return true;
+    }
+
+    std::vector<bool> m_marked;
+};
+
+/**
+ * Visitor that recalculates coalescence information for particular nodes.
+ */
+class GRGCoalCalcVisitor : public GRGVisitor {
+public:
+    explicit GRGCoalCalcVisitor(const std::vector<bool>& marked)
+        : m_marked(marked) {}
+
+    bool visit(const GRGPtr& grg, NodeID node, TraversalDirection direction, DfsPass dfsPass = DFS_PASS_NONE) override {
+        if (m_nodeToIndivs.uninitialized()) {
+            release_assert(direction == TraversalDirection::DIRECTION_DOWN);
+            m_nodeToIndivs = RefCountedNodeData<NodeIDList>(grg->numNodes(), flipDir(direction));
+        }
+        if (dfsPass == DFS_PASS_BACK_AGAIN) {
+            const auto children = grg->getDownEdges(node);
+            std::unordered_set<NodeIDSizeT> uncoalesced;
+            NodeIDSizeT coals = getCoalsForParent(grg, m_nodeToIndivs.m_nodeData, children, uncoalesced, false);
+            m_nodeToIndivs.decr_children(children);
+            m_nodeToIndivs.add(grg, node, nodeSetToList(uncoalesced));
+            const NodeIDSizeT existingCoals = grg->getNumIndividualCoals(node);
+            if (existingCoals == COAL_COUNT_NOT_SET) {
+                grg->setNumIndividualCoalsGrow(node, coals);
+                m_updated++;
+            } else {
+                release_assert(existingCoals == coals);
+            }
+            return m_marked[node];
+        }
+        return true;
+    }
+
+    size_t m_updated{};
+
+private:
+    const std::vector<bool>& m_marked;
+    RefCountedNodeData<NodeIDList> m_nodeToIndivs;
+};
+
+size_t calculateMissingCoals(const GRGPtr& grg) {
+    // Mark the relevant nodes.
+    GRGCoalMarkVisitor markVisitor;
+    grg->visitDfs(markVisitor, TraversalDirection::DIRECTION_UP, grg->getSampleNodes());
+
+    // Traverse them and recalculate coalescence information.
+    GRGCoalCalcVisitor visitor(markVisitor.m_marked);
+    fastCompleteDFS(grg, visitor);
+    return visitor.m_updated;
 }
 
 } // namespace grgl
