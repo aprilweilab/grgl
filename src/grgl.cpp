@@ -26,6 +26,7 @@
 #include "calculations.h"
 #include "fast_build.h"
 #include "grg_helpers.h"
+#include "grgl/common.h"
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
 #include "grgl/map_mutations.h"
@@ -137,10 +138,11 @@ int main(int argc, char** argv) {
         "Format: \"filename:sample_field:pop_field\". Read population ids from the given "
         "tab-separate file, using the given fieldname.",
         {"population-ids"});
-    args::Flag reduce(parser,
-                      "reduce",
-                      "Reduce the GRG into a smaller graph by repeated application of simple transformations",
-                      {"reduce"});
+    args::ValueFlag<size_t> reduce(
+        parser,
+        "reduce",
+        "Reduce the GRG into a smaller graph by performing (up to) this many iterations of simple transformations",
+        {"reduce"});
 
     try {
         parser.ParseCLI(argc, argv);
@@ -227,6 +229,9 @@ int main(int argc, char** argv) {
         }                                                                                                              \
     } while (0)
 
+    constexpr size_t REDUCE_MIN_DROP = 1000; // Stop reducing if we drop fewer than 1000 edges
+    constexpr double REDUCE_FRAC_DROP = 0.8; // Stop reducing if we cumulatively have dropped 80% of edges
+
     grgl::GRGPtr theGRG;
     START_TIMING_OPERATION();
     if (ends_with(*infile, ".trees")) {
@@ -252,11 +257,9 @@ int main(int argc, char** argv) {
             return 2;
         }
         if (reduce) {
+            api_exc_check(*reduce > 0 && *reduce <= 100, "--reduce must be between 1 and 100 (iterations)");
             grgl::MutableGRGPtr mutGRG = std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG);
-            constexpr size_t maxIter = 15;
-            constexpr size_t minDropped = 1000;
-            constexpr double fracDropped = 0.7;
-            const size_t iterations = reduceGRGUntil(mutGRG, maxIter, minDropped, fracDropped);
+            const size_t iterations = reduceGRGUntil(mutGRG, *reduce, REDUCE_MIN_DROP, REDUCE_FRAC_DROP);
             if (verbose) {
                 std::cout << "Reduced GRG for " << iterations << " iterations" << std::endl;
             }
@@ -316,10 +319,8 @@ int main(int argc, char** argv) {
                                                                   lfNoTree ? *lfNoTree : 0.0,
                                                                   indivIdToPop);
         if (reduce) {
-            constexpr size_t maxIter = 10;
-            constexpr size_t minDropped = 1000;
-            constexpr double fracDropped = 0.7;
-            const size_t iterations = grgl::reduceGRGUntil(createdGRG, maxIter, minDropped, fracDropped);
+            api_exc_check(*reduce > 0 && *reduce <= 100, "--reduce must be between 1 and 100 (iterations)");
+            const size_t iterations = reduceGRGUntil(createdGRG, *reduce, REDUCE_MIN_DROP, REDUCE_FRAC_DROP);
             if (verbose) {
                 std::cout << "Ran graph reduction for " << iterations << " iterations" << std::endl;
             }

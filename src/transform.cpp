@@ -104,6 +104,8 @@ size_t reduceGRG(const MutableGRGPtr& mutGRG) {
                     release_assert(existingCoals >= nodeCoals);
                     mutGRG->setNumIndividualCoals(bestSibling, existingCoals - nodeCoals);
                 }
+                // Since we didn't create a node, we need to tell the GRG explicitly that we broke node ordering.
+                mutGRG->nodesAreOrdered() = false;
                 removedEdges += sharedList.size();
             }
         }

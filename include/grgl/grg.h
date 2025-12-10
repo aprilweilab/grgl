@@ -842,6 +842,8 @@ public:
 
     bool nodesAreOrdered() const override { return m_nodesAreOrdered; }
 
+    bool& nodesAreOrdered() { return m_nodesAreOrdered; }
+
     size_t numNodes() const override { return m_nodes.size(); }
 
     size_t numEdges() const override {
