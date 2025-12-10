@@ -655,32 +655,42 @@ MutableGRGPtr buildTree(HapWindowContext& context,
         std::pair<BpPosition, NodeID> currentMissing = {INVALID_POSITION, INVALID_NODE_ID};
         BpPosition currentPosition = INVALID_POSITION;
         for (size_t mutIdx = 0; mutIdx < mutIndexToNodes.size(); mutIdx++) {
-            const NodeID newNode = result->makeNode();
+            const auto& nodeList = mutIndexToNodes[mutIdx];
+            if (nodeList.empty()) {
+                continue;
+            }
+            NodeID mutNode = INVALID_NODE_ID;
+            bool needNewNode = false;
+            if (!nodeList.empty()) {
+                needNewNode = nodeList.size() > 1;
+                mutNode = needNewNode ? result->makeNode() : nodeList.front();
+            }
             const Mutation& mut = context.allMutations.at(mutIdx);
             const auto pos = mut.getPosition();
             if (mut.isMissing()) {
                 // Any missing Mutation must be the _first_ Mutation at the given bp position.
                 release_assert(currentPosition != pos);
-                currentMissing = {pos, newNode};
+                currentMissing = {pos, mutNode};
                 DEBUG_PRINT("Adding missingness node " << mut.getPosition() << " to ");
             } else {
                 const NodeID missNode = (currentMissing.first == pos) ? currentMissing.second : INVALID_NODE_ID;
-                result->addMutation(mut, newNode, missNode);
+                result->addMutation(mut, mutNode, missNode);
                 DEBUG_PRINT("Adding mutation " << mut.getPosition() << ", " << mut.getAllele() << " to ");
             }
-            const auto& nodeList = mutIndexToNodes[mutIdx];
-            for (const NodeID childNode : nodeList) {
-                DEBUG_PRINT(childNode << ", ");
-                result->connect(newNode, childNode);
-            }
-            DEBUG_PRINT("\n");
+            if (needNewNode && mutNode != INVALID_NODE_ID) {
+                for (const NodeID childNode : nodeList) {
+                    DEBUG_PRINT(childNode << ", ");
+                    result->connect(mutNode, childNode);
+                }
+                DEBUG_PRINT("\n");
 
-            // Update the coalescence information for the newly create mutation node.
-            if (ploidy == 2) {
-                std::unordered_set<NodeIDSizeT> uncoalescedIndividuals;
-                NodeIDSizeT mutNodeCoals =
-                    getCoalsForParent(result, nodeToIndivs, nodeList, uncoalescedIndividuals, false);
-                result->setNumIndividualCoalsGrow(newNode, mutNodeCoals);
+                // Update the coalescence information for the newly create mutation node.
+                if (ploidy == 2) {
+                    std::unordered_set<NodeIDSizeT> uncoalescedIndividuals;
+                    NodeIDSizeT mutNodeCoals =
+                        getCoalsForParent(result, nodeToIndivs, nodeList, uncoalescedIndividuals, false);
+                    result->setNumIndividualCoalsGrow(mutNode, mutNodeCoals);
+                }
             }
             currentPosition = mut.getPosition();
         }
