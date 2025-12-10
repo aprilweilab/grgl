@@ -147,6 +147,11 @@ def add_options(subparser):
         action="store_true",
         help="Ignore any warning conditions that cause execution to stop.",
     )
+    subparser.add_argument(
+        "--reduce",
+        action="store_true",
+        help="Reduce graph after merge.",
+    )
 
 
 grgl_exe = which("grgl")
@@ -221,6 +226,8 @@ def build_shape(
         command.append("--ignore-missing")
     if args.force:
         command.append("--force")
+    if args.reduce:
+        command.append("--reduce")
     shape_filename = out_filename(output_file, part)
     command.extend(
         [
