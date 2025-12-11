@@ -47,11 +47,12 @@ inline bool supportedInputFormat(const std::string& filename) {
 }
 
 int main(int argc, char** argv) {
+    grgl::setProcessUniqueID();
     auto operationStartTime = std::chrono::high_resolution_clock::now();
 #define START_TIMING_OPERATION() operationStartTime = std::chrono::high_resolution_clock::now();
 #define EMIT_TIMING_MESSAGE(msg)                                                                                       \
     do {                                                                                                               \
-        std::cerr << msg                                                                                               \
+        std::cerr << STREAM_PUID << msg                                                  \
                   << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - \
                                                                            operationStartTime)                         \
                          .count()                                                                                      \
@@ -258,10 +259,15 @@ int main(int argc, char** argv) {
         }
         if (reduce) {
             api_exc_check(*reduce > 0 && *reduce <= 100, "--reduce must be between 1 and 100 (iterations)");
+            const auto reduceStartTime = std::chrono::high_resolution_clock::now();
             grgl::MutableGRGPtr mutGRG = std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG);
             const size_t iterations = reduceGRGUntil(mutGRG, *reduce, REDUCE_MIN_DROP, REDUCE_FRAC_DROP);
             if (verbose) {
-                std::cout << "Reduced GRG for " << iterations << " iterations" << std::endl;
+                std::cout << STREAM_PUID << "Reduced GRG for " << iterations << " iterations in "
+                          << std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::high_resolution_clock::now() - reduceStartTime)
+                                 .count()
+                          << " ms\n";
             }
         }
         if (countVariants) {
@@ -320,9 +326,14 @@ int main(int argc, char** argv) {
                                                                   indivIdToPop);
         if (reduce) {
             api_exc_check(*reduce > 0 && *reduce <= 100, "--reduce must be between 1 and 100 (iterations)");
+            const auto reduceStartTime = std::chrono::high_resolution_clock::now();
             const size_t iterations = reduceGRGUntil(createdGRG, *reduce, REDUCE_MIN_DROP, REDUCE_FRAC_DROP);
             if (verbose) {
-                std::cout << "Ran graph reduction for " << iterations << " iterations" << std::endl;
+                std::cout << STREAM_PUID << "Reduced GRG for " << iterations << " iterations in "
+                          << std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::high_resolution_clock::now() - reduceStartTime)
+                                 .count()
+                          << " ms\n";
             }
         }
         theGRG = createdGRG;
@@ -481,9 +492,9 @@ int main(int argc, char** argv) {
         START_TIMING_OPERATION();
         auto counts = saveGRG(theGRG, *outfile, !noSimplify);
         if (verbose) {
-            std::cout << "Wrote simplified GRG with:" << std::endl;
-            std::cout << "  Nodes: " << counts.first << std::endl;
-            std::cout << "  Edges: " << counts.second << std::endl;
+            std::cout << STREAM_PUID << "Wrote simplified GRG with:" << std::endl;
+            std::cout << STREAM_PUID << "  Nodes: " << counts.first << std::endl;
+            std::cout << STREAM_PUID << "  Edges: " << counts.second << std::endl;
             EMIT_TIMING_MESSAGE("Wrote GRG to " << *outfile << " in ");
         }
     }
