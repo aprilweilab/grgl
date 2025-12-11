@@ -36,9 +36,22 @@
 #include <sstream>
 #include <vector>
 
+#include <unistd.h>
+
 #include "grgl/serialize.h"
 
 namespace grgl {
+
+extern char PROCESS_UNIQUE[8];
+
+inline void setProcessUniqueID() {
+    release_assert(snprintf(&PROCESS_UNIQUE[0], sizeof(PROCESS_UNIQUE), "%d", getpid()) > 0);
+    PROCESS_UNIQUE[7] = 0;
+}
+
+inline const char* getProcessUniqueID() { return (const char*)&PROCESS_UNIQUE[0]; }
+
+#define STREAM_PUID "[" << grgl::getProcessUniqueID() << "] "
 
 inline void fastCompleteDFS(const GRGPtr& grg, GRGVisitor& visitor) {
     if (grg->nodesAreOrdered()) {

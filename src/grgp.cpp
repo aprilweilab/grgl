@@ -26,6 +26,7 @@
 #include "util.h"
 
 int main(int argc, char** argv) {
+    grgl::setProcessUniqueID();
     auto operationStartTime = std::chrono::high_resolution_clock::now();
 #define START_TIMING_OPERATION() operationStartTime = std::chrono::high_resolution_clock::now();
 #define EMIT_TIMING_MESSAGE(msg)                                                                                       \
