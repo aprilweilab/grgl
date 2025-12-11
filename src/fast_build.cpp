@@ -445,7 +445,7 @@ MutableGRGPtr buildTree(HapWindowContext& context,
         levelNodes.push_back(nodeId);
     }
     if (hasBSFlag(buildFlags, GBF_VERBOSE_OUTPUT)) {
-        std::cout << "** Building index took "
+        std::cout << STREAM_PUID << "** Building index took "
                   << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() -
                                                                            operationStartTime)
                          .count()
@@ -471,8 +471,9 @@ MutableGRGPtr buildTree(HapWindowContext& context,
     size_t level = 0;
     bool createdNodes = true;
     while (createdNodes) {
+        auto passStartTime = std::chrono::high_resolution_clock::now();
         if (hasBSFlag(buildFlags, GBF_VERBOSE_OUTPUT)) {
-            std::cout << "Pass " << level << " -- " << levelNodes.size() << std::endl;
+            std::cout << STREAM_PUID << "Pass " << level << " -- " << levelNodes.size() << std::endl;
         }
         NodeIDList nextLevelNodes;
 
@@ -617,6 +618,14 @@ MutableGRGPtr buildTree(HapWindowContext& context,
         if (hasBSFlag(buildFlags, GBF_VERBOSE_OUTPUT)) {
             hashIndex.emitStats(std::cerr);
         }
+
+        if (hasBSFlag(buildFlags, GBF_VERBOSE_OUTPUT)) {
+            std::cout << STREAM_PUID << "Pass took "
+                      << std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::high_resolution_clock::now() - passStartTime)
+                             .count()
+                      << " ms\n";
+        }
     }
 
     size_t totalHaps = 0;
@@ -624,8 +633,8 @@ MutableGRGPtr buildTree(HapWindowContext& context,
         totalHaps += context.windowInfo[i].hapMap.size();
     }
     if (hasBSFlag(buildFlags, GBF_VERBOSE_OUTPUT)) {
-        std::cout << "Unique haplotype segments: " << totalHaps << "\n";
-        std::cout << "** Constructing tree took "
+        std::cout << STREAM_PUID << "Unique haplotype segments: " << totalHaps << "\n";
+        std::cout << STREAM_PUID << "** Constructing tree took "
                   << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() -
                                                                            operationStartTime)
                          .count()
@@ -636,6 +645,7 @@ MutableGRGPtr buildTree(HapWindowContext& context,
     // Unless requested not to, perform tree-based mutation mapping. This is cheaper than calling
     // MapMutations(), but does not create as good of hierarchy.
     if (!hasBSFlag(buildFlags, GBF_NO_TREE_MAP)) {
+        const auto mutStartTime = std::chrono::high_resolution_clock::now();
 
         // Collect the mapping from mutation to the root nodes needing it.
         std::vector<NodeIDList> mutIndexToNodes(context.allMutations.size());
@@ -693,6 +703,13 @@ MutableGRGPtr buildTree(HapWindowContext& context,
                 }
             }
             currentPosition = mut.getPosition();
+        }
+        if (hasBSFlag(buildFlags, GBF_VERBOSE_OUTPUT)) {
+            std::cout << STREAM_PUID << "Adding mutations took "
+                      << std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::high_resolution_clock::now() - mutStartTime)
+                             .count()
+                      << " ms\n";
         }
     }
     return result;
@@ -782,7 +799,7 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
 #define FAST_GRG_OUTPUT(msg)                                                                                           \
     do {                                                                                                               \
         if (hasBSFlag(buildFlags, GBF_VERBOSE_OUTPUT)) {                                                               \
-            std::cerr << msg;                                                                                          \
+            std::cerr << STREAM_PUID << msg;                                                                           \
         }                                                                                                              \
     } while (0)
 #if 0
@@ -836,6 +853,7 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
             hasBSFlag(buildFlags, GBF_TREES_FASTER1) ? 0.75 : (hasBSFlag(buildFlags, GBF_TREES_FASTER2) ? 0.5 : 1.0);
         const size_t targetHapSegSum = static_cast<size_t>(getOptimalHapSegSum(numSamples, hapSumMultiplier));
         HapWindowContext hapContext;
+        auto readStartTime = std::chrono::high_resolution_clock::now();
         getHapSegments(*mutIterator,
                        hapLength,
                        numSamples,
@@ -844,6 +862,10 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
                        /*stopAfterIsMutCount=*/false,
                        hapContext);
         FAST_GRG_OUTPUT("Windows: " << hapContext.windowInfo.size() << "\n");
+        FAST_GRG_OUTPUT("Read input data in " << std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                     std::chrono::high_resolution_clock::now() - readStartTime)
+                                                     .count()
+                                              << " ms\n");
         DUMP_HAP_SEG(hapContext);
 
         const size_t handledSoFar = hapContext.allMutations.size() + hapContext.directMap.size();
@@ -868,6 +890,7 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
         (remainingMuts == 0) ? 0 : roundUpToMultiple<size_t>(remainingMuts, treeCount) / treeCount;
     for (size_t i = 1; i <= treeCount; i++) {
         HapWindowContext hapContext;
+        auto readStartTime = std::chrono::high_resolution_clock::now();
         getHapSegments(*mutIterator,
                        hapLength,
                        numSamples,
@@ -876,6 +899,10 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
                        /*stopAfterIsMutCount=*/true,
                        hapContext);
         FAST_GRG_OUTPUT("Windows: " << hapContext.windowInfo.size() << "\n");
+        FAST_GRG_OUTPUT("Read input data in " << std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                     std::chrono::high_resolution_clock::now() - readStartTime)
+                                                     .count()
+                                              << " ms\n");
         DUMP_HAP_SEG(hapContext);
 
         MutableGRGPtr tree = buildTree(hapContext, numSamples, ploidy, isPhased, buildFlags, rebuildProportion);
@@ -900,6 +927,7 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
     }
 #endif
 
+    const auto mergeStartTime = std::chrono::high_resolution_clock::now();
     MutableGRGPtr result;
     if (treeFiles.empty()) {
         result = std::make_shared<MutableGRG>(numSamples, ploidy, isPhased);
@@ -917,7 +945,17 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
     for (const auto& filename : treeFiles) {
         deleteFile(filename);
     }
+    FAST_GRG_OUTPUT("Merged trees in " << std::chrono::duration_cast<std::chrono::milliseconds>(
+                                              std::chrono::high_resolution_clock::now() - mergeStartTime)
+                                              .count()
+                                       << " ms\n");
+
+    const auto infoStartTime = std::chrono::high_resolution_clock::now();
     addExtraInfoToGRG(result, *mutIterator, buildFlags, indivIdToPop);
+    FAST_GRG_OUTPUT("Added GRG metadata (info) in " << std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                           std::chrono::high_resolution_clock::now() - infoStartTime)
+                                                           .count()
+                                                    << " ms\n");
 
 #undef FAST_GRG_OUTPUT
     return result;

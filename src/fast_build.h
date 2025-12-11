@@ -43,7 +43,7 @@ enum {
 using GrgBuildFlags = uint64_t;
 
 // See TODO in fast_build.cpp
-constexpr size_t FIXED_HAP_LENGTH = 128;
+constexpr size_t FIXED_HAP_LENGTH = 254;
 
 /**
  * Add the non-genotype information (if any) to the GRG, such as the base-pair range, individuals,
