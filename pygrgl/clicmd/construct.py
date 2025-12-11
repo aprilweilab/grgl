@@ -344,7 +344,7 @@ def from_tabular(args):
     if args.level1:
         auto_tree = "faster2"
     # 2: use FASTER1 to determine # of trees, direct map LF muts (<10)
-    elif args.level3:
+    elif args.level2:
         auto_tree = "faster1"
     # 3: use OPTIMAL to determine # of trees, direct map LF muts (<10)
     elif args.level3:
