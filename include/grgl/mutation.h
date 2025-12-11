@@ -274,6 +274,35 @@ struct MutationLtPosAllele {
     }
 };
 
+/**
+ * Is the base-pair position within the range provided? All ranges in GRGL are left inclusive, right
+ * exclusive (i.e., partially open).
+ */
+inline bool bpInRange(const std::pair<BpPosition, BpPosition>& range, const BpPosition position) {
+    return (position >= range.first && position < range.second);
+}
+
+/**
+ * Is the base-pair position within the range provided, but not exactly matching one of the boundaries?
+ * All ranges in GRGL are left inclusive, right exclusive (i.e., partially open).
+ */
+inline bool bpInRangeExceptEdges(const std::pair<BpPosition, BpPosition>& range, const BpPosition position) {
+    const BpPosition lastInRangePos = range.second - 1;
+    const BpPosition firstInRangePos = range.first;
+    return bpInRange(range, position) && (position != lastInRangePos) && (position != firstInRangePos);
+}
+
+/**
+ * Do the two base-pair ranges overlap? They are not considered overlapping if the edges are identical.
+ * I.e., in a multi-allelic dataset you can have two ranges that both include position P as the very
+ * last and first positions in the range, and those ranges are considered non-overlapping.
+ */
+inline bool bpOverlap(const std::pair<BpPosition, BpPosition>& range1,
+                      const std::pair<BpPosition, BpPosition>& range2) {
+    return bpInRangeExceptEdges(range2, range1.first) || bpInRangeExceptEdges(range2, range1.second - 1) ||
+           bpInRangeExceptEdges(range1, range2.first) || bpInRangeExceptEdges(range1, range2.second - 1);
+}
+
 } // namespace grgl
 
 /**
