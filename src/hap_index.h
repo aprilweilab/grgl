@@ -43,14 +43,11 @@ using NodeToHapVect = std::vector<HaplotypeVector>;
 class HaplotypeIndex {
 public:
     explicit HaplotypeIndex(std::function<size_t(const NodeID&, const NodeID&)> distFunc,
-                            const double rebuildProportion = 2.0,
-                            const size_t maxComparisons = std::numeric_limits<size_t>::max())
+                            const double rebuildProportion = 2.0)
         : m_bkTree(std::move(distFunc)),
           m_rebuildProportion(rebuildProportion),
-          m_maxComparisons(maxComparisons),
-          // We give an initial budget of 5 times the average, so the first couple queries can
-          // work harder if needed.
-          m_comparisonBudget(std::max(maxComparisons, maxComparisons * 5)) {}
+          m_maxComparisons(std::numeric_limits<size_t>::max()),
+          m_comparisonBudget(std::numeric_limits<size_t>::max()) {}
 
     virtual ~HaplotypeIndex() = default;
 
@@ -58,6 +55,13 @@ public:
     HaplotypeIndex(HaplotypeIndex&&) = default;
     HaplotypeIndex& operator=(HaplotypeIndex&) = delete;
     HaplotypeIndex& operator=(HaplotypeIndex&&) = delete;
+
+    void setMaxComparePerQuery(const size_t maxCompare) {
+        m_maxComparisons = maxCompare;
+        // We give an initial budget of 5 times the average, so the first couple queries can
+        // work harder if needed.
+        m_comparisonBudget = std::max(maxCompare, maxCompare * 5);
+    }
 
     /**
      * Add a new (hash, node) pair to the index.
@@ -92,7 +96,7 @@ private:
     // How many comparison we're allowed, while maintaining the per-query average.
     size_t m_comparisonBudget = std::numeric_limits<size_t>::max();
     // Max comparisons allowed per query
-    const size_t m_maxComparisons;
+    size_t m_maxComparisons;
 
     size_t m_queries{};
     size_t m_trunc{};
