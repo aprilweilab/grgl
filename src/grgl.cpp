@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
 #define START_TIMING_OPERATION() operationStartTime = std::chrono::high_resolution_clock::now();
 #define EMIT_TIMING_MESSAGE(msg)                                                                                       \
     do {                                                                                                               \
-        std::cerr << STREAM_PUID << msg                                                  \
+        std::cerr << STREAM_PUID << msg                                                                                \
                   << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - \
                                                                            operationStartTime)                         \
                          .count()                                                                                      \

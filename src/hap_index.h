@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <limits>
 #include <list>
 #include <unordered_map>
 #include <vector>
@@ -42,9 +43,14 @@ using NodeToHapVect = std::vector<HaplotypeVector>;
 class HaplotypeIndex {
 public:
     explicit HaplotypeIndex(std::function<size_t(const NodeID&, const NodeID&)> distFunc,
-                            const double rebuildProportion = 2.0)
+                            const double rebuildProportion = 2.0,
+                            const size_t maxComparisons = std::numeric_limits<size_t>::max())
         : m_bkTree(std::move(distFunc)),
-          m_rebuildProportion(rebuildProportion) {}
+          m_rebuildProportion(rebuildProportion),
+          m_maxComparisons(maxComparisons),
+          // We give an initial budget of 5 times the average, so the first couple queries can
+          // work harder if needed.
+          m_comparisonBudget(std::max(maxComparisons, maxComparisons * 5)) {}
 
     virtual ~HaplotypeIndex() = default;
 
@@ -72,14 +78,24 @@ public:
     void emitStats(std::ostream& stream) const {
         stream << " -- Index Stats --" << std::endl;
         stream << "  -> Comparisons: " << m_comparisons << std::endl;
+        stream << "  -> Queries: " << m_queries << std::endl;
+        stream << "  -> Truncated Queries: " << m_trunc << std::endl;
         m_bkTree.dumpStats(stream);
     }
 
 private:
+    std::vector<std::shared_ptr<LeanBKTreeNode<NodeID>>> m_nodeToBKNode;
     LeanBKTree<NodeID> m_bkTree;
     const double m_rebuildProportion;
     // Keep track of how many comparisons we do.
     size_t m_comparisons{};
+    // How many comparison we're allowed, while maintaining the per-query average.
+    size_t m_comparisonBudget = std::numeric_limits<size_t>::max();
+    // Max comparisons allowed per query
+    const size_t m_maxComparisons;
+
+    size_t m_queries{};
+    size_t m_trunc{};
 };
 
 } // namespace grgl
