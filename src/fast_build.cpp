@@ -331,6 +331,14 @@ void getHapSegments(MutationIterator& mutIterator,
     }
 }
 
+size_t countUniqueHaps(HapWindowContext& hapContext) {
+    size_t result = 0;
+    for (size_t i = 0; i < hapContext.windowInfo.size(); i++) {
+        result += hapContext.windowInfo.back().orderedHaps.size();
+    }
+    return result;
+}
+
 // A GRG stores information about coalescences, in order to compute X^T*X efficiently for GWAS
 // calculations. This information is pretty cheap to calculate, since we construct the graph
 // bottom-up and only use each node once.
@@ -418,7 +426,7 @@ MutableGRGPtr buildTree(HapWindowContext& context,
                         const size_t ploidy,
                         const bool isPhased,
                         GrgBuildFlags buildFlags,
-                        double rebuildProportion = 0.25) {
+                        double rebuildProportion = 0.10) {
     // Lambda that does hamming distance between nodes. Instead of passing around the vectors contains the
     // bloom filters / hashes, we use a BK-tree that has a distance callback between elements.
     auto compareNodeIds = [&](const NodeID& node1, const NodeID& node2) {
@@ -432,7 +440,11 @@ MutableGRGPtr buildTree(HapWindowContext& context,
         }
         return dist;
     };
-    HaplotypeIndex hashIndex(compareNodeIds, rebuildProportion);
+    const size_t maxComparePerQuery = std::max<size_t>(20, 5 * std::log2(numSamples));
+    if (hasBSFlag(buildFlags, GBF_VERBOSE_OUTPUT)) {
+        std::cout << "Restricting to " << maxComparePerQuery << " comparisons per query" << std::endl;
+    }
+    HaplotypeIndex hashIndex(compareNodeIds, rebuildProportion, maxComparePerQuery);
 
     NodeIDSet covered;
     NodeIDList levelNodes;
@@ -633,7 +645,7 @@ MutableGRGPtr buildTree(HapWindowContext& context,
         totalHaps += context.windowInfo[i].hapMap.size();
     }
     if (hasBSFlag(buildFlags, GBF_VERBOSE_OUTPUT)) {
-        std::cout << STREAM_PUID << "Unique haplotype segments: " << totalHaps << "\n";
+        std::cout << STREAM_PUID << "Unique haplotype segments AFTER buildTree: " << totalHaps << "\n";
         std::cout << STREAM_PUID << "** Constructing tree took "
                   << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() -
                                                                            operationStartTime)
@@ -844,14 +856,15 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
     const size_t totalMuts = mutIterator->countMutations();
     size_t remainingMuts = totalMuts;
 
+    const double hapSumMultiplier =
+        hasBSFlag(buildFlags, GBF_TREES_FASTER1) ? 0.75 : (hasBSFlag(buildFlags, GBF_TREES_FASTER2) ? 0.5 : 1.0);
+    const size_t targetHapSegSum = static_cast<size_t>(getOptimalHapSegSum(numSamples, hapSumMultiplier));
+
     std::list<std::string> treeFiles;
     // Read in the haplotypes for the first tree, and then estimate the number of trees by looking at
     // the span (in number of variants) that the first tree covered vs. the total range we need all trees
     // to cover.
     if (treeCount == 0 && remainingMuts > 0) {
-        const double hapSumMultiplier =
-            hasBSFlag(buildFlags, GBF_TREES_FASTER1) ? 0.75 : (hasBSFlag(buildFlags, GBF_TREES_FASTER2) ? 0.5 : 1.0);
-        const size_t targetHapSegSum = static_cast<size_t>(getOptimalHapSegSum(numSamples, hapSumMultiplier));
         HapWindowContext hapContext;
         auto readStartTime = std::chrono::high_resolution_clock::now();
         getHapSegments(*mutIterator,
@@ -862,6 +875,8 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
                        /*stopAfterIsMutCount=*/false,
                        hapContext);
         FAST_GRG_OUTPUT("Windows: " << hapContext.windowInfo.size() << "\n");
+        FAST_GRG_OUTPUT("Unique hap segments: " << countUniqueHaps(hapContext) << " (target=" << targetHapSegSum
+                                                << ")");
         FAST_GRG_OUTPUT("Read input data in " << std::chrono::duration_cast<std::chrono::milliseconds>(
                                                      std::chrono::high_resolution_clock::now() - readStartTime)
                                                      .count()
@@ -899,6 +914,8 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
                        /*stopAfterIsMutCount=*/true,
                        hapContext);
         FAST_GRG_OUTPUT("Windows: " << hapContext.windowInfo.size() << "\n");
+        FAST_GRG_OUTPUT("Unique hap segments: " << countUniqueHaps(hapContext) << " (target=" << targetHapSegSum
+                                                << ")");
         FAST_GRG_OUTPUT("Read input data in " << std::chrono::duration_cast<std::chrono::milliseconds>(
                                                      std::chrono::high_resolution_clock::now() - readStartTime)
                                                      .count()
