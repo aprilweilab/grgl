@@ -351,27 +351,34 @@ def from_tabular(args):
         pass
     # 4: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 1
     elif args.level4:
-        auto_args.extend(["--reduce", str(1)])
+        if args.reduce is None:
+            auto_args.extend(["--reduce", str(1)])
     # 5: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 5
     elif args.level5:
-        auto_args.extend(["--reduce", str(5)])
+        if args.reduce is None:
+            auto_args.extend(["--reduce", str(5)])
     # 6: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 10
     elif args.level6:
-        auto_args.extend(["--reduce", str(10)])
+        if args.reduce is None:
+            auto_args.extend(["--reduce", str(10)])
     # 7: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 15
     elif args.level7:
-        auto_args.extend(["--reduce", str(15)])
+        if args.reduce is None:
+            auto_args.extend(["--reduce", str(15)])
     # 8: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 15, slow merge (--use-samples)
     elif args.level8:
-        auto_args.extend(["--reduce", str(15)])
+        if args.reduce is None:
+            auto_args.extend(["--reduce", str(15)])
         slow_merge = True
     # 9: use OPTIMAL to determine # of trees, --reduce 15, slow merge (--use-samples)
     elif args.level9:
-        auto_args = ["--reduce", str(15)]  # overwrite "--lf-no-tree" args above
+        if args.reduce is None:
+            auto_args = ["--reduce", str(15)]  # overwrite "--lf-no-tree" args above
         slow_merge = True
     # Default is level5: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 5
     else:
-        auto_args.extend(["--reduce", str(5)])
+        if args.reduce is None:
+            auto_args.extend(["--reduce", str(5)])
 
     if args.trees is None:
         print(f"Auto-calculating number of trees per part.", file=sys.stderr)

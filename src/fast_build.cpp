@@ -440,11 +440,7 @@ MutableGRGPtr buildTree(HapWindowContext& context,
         }
         return dist;
     };
-    const size_t maxComparePerQuery = std::max<size_t>(20, 5 * std::log2(numSamples));
-    if (hasBSFlag(buildFlags, GBF_VERBOSE_OUTPUT)) {
-        std::cout << "Restricting to " << maxComparePerQuery << " comparisons per query" << std::endl;
-    }
-    HaplotypeIndex hashIndex(compareNodeIds, rebuildProportion, maxComparePerQuery);
+    HaplotypeIndex hashIndex(compareNodeIds, rebuildProportion);
 
     NodeIDSet covered;
     NodeIDList levelNodes;
@@ -480,7 +476,7 @@ MutableGRGPtr buildTree(HapWindowContext& context,
      */
 
     std::unordered_map<NodeID, NodeIDList> nodeToIndivs;
-    size_t level = 0;
+    size_t level = 1;
     bool createdNodes = true;
     while (createdNodes) {
         auto passStartTime = std::chrono::high_resolution_clock::now();
@@ -488,6 +484,14 @@ MutableGRGPtr buildTree(HapWindowContext& context,
             std::cout << STREAM_PUID << "Pass " << level << " -- " << levelNodes.size() << std::endl;
         }
         NodeIDList nextLevelNodes;
+
+        // For each "level", we increase the number of comparisons that can be done per query, because
+        // the total number of comparisons should be shrinking each pass.
+        const size_t maxComparePerQuery = std::max<size_t>(50, level * 50 * std::log2(numSamples));
+        hashIndex.setMaxComparePerQuery(maxComparePerQuery);
+        if (hasBSFlag(buildFlags, GBF_VERBOSE_OUTPUT)) {
+            std::cout << "Restricting to " << maxComparePerQuery << " comparisons per query" << std::endl;
+        }
 
         createdNodes = false;
         while (levelNodes.size() > 1) {
