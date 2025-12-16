@@ -178,7 +178,7 @@ def compute_parts(input_file: str, threads: int):
         # 100 is obviously not optimal for small datasets, but oh well!
         max_parts = 100
     best_parts = max(threads, round_up_to(100, threads))
-    return min(max_parts, best_parts)
+    return max(min(max_parts, best_parts), 1)
 
 
 def log_v(msg, verbose):
