@@ -45,6 +45,9 @@
 
 namespace grgl {
 
+// We only propagate coalescence information for ploidy=2 datasets.
+constexpr size_t PLOIDY_COAL_PROP = 2;
+
 inline bool hasBSFlag(GrgBuildFlags flags, GrgBuildFlags flag) { return (bool)(flags & flag); }
 
 void addExtraInfoToGRG(MutableGRGPtr& grg,
@@ -246,8 +249,10 @@ struct HapWindowContext {
 
 /**
  * Use the MutationIterator to get all hap segments of the given length.
+ *
+ * @return true if the MutationIterator has more mutations.
  */
-void getHapSegments(MutationIterator& mutIterator,
+bool getHapSegments(MutationIterator& mutIterator,
                     const size_t hapLength,
                     const size_t numSamples,
                     const double dropBelowThreshold,
@@ -281,7 +286,8 @@ void getHapSegments(MutationIterator& mutIterator,
     // Mutation also has missing data.
     size_t lastPositionWithMissing = std::numeric_limits<size_t>::max();
 
-    while (!done && mutIterator.next(mutAndSamples, _ignore)) {
+    bool hasMoreMuts = false;
+    while (!done && (hasMoreMuts = mutIterator.next(mutAndSamples, _ignore))) {
         // Stopping when we reach a certain mutation threshold.
         if (stopAfterIsMutCount) {
             soFar += 1;
@@ -329,6 +335,7 @@ void getHapSegments(MutationIterator& mutIterator,
         hapContext.windowInfo.push_back(createWindow(lastMutStart, windex, window, hapContext.sampleHapVects));
         windows++;
     }
+    return hasMoreMuts;
 }
 
 size_t countUniqueHaps(HapWindowContext& hapContext) {
@@ -351,8 +358,7 @@ void propagateCoalInformation(MutableGRGPtr& grg,
                               const NodeIDList& rightNodes) {
     // We only track coalescences for diploids right now. Haploids don't need it, and polyploids are
     // tricky because we have to track more than just a list below (we need a map).
-    constexpr NodeID ploidy = 2;
-    if (grg->getPloidy() != ploidy) {
+    if (grg->getPloidy() != PLOIDY_COAL_PROP) {
         return;
     }
     release_assert(intersectionParent != INVALID_NODE_ID);
@@ -387,7 +393,7 @@ void propagateCoalInformation(MutableGRGPtr& grg,
     // There are never any coalescences in the left parent, because it has a single child.
     NodeIDSizeT intersectCoalCount = 0;
     if (grg->isSample(leftNode)) {
-        const NodeIDSizeT indiv = leftNode / ploidy;
+        const NodeIDSizeT indiv = leftNode / PLOIDY_COAL_PROP;
         auto insertIt = nextIndivs.insert(indiv);
         if (!insertIt.second) {
             nextIndivs.erase(insertIt.first);
@@ -667,7 +673,7 @@ MutableGRGPtr buildTree(HapWindowContext& context,
         std::vector<NodeIDList> mutIndexToNodes(context.allMutations.size());
         for (const NodeID rootId : result->getRootNodes()) {
             size_t haps = 0;
-            assert(nodeToIndivs.find(rootId) != nodeToIndivs.end() || rootId < numSamples);
+            assert(result->getPloidy() != PLOIDY_COAL_PROP || nodeToIndivs.find(rootId) != nodeToIndivs.end() || rootId < numSamples);
             std::vector<size_t> mutIndices = hapsToMutIndices(context.sampleHapVects[rootId], context.windowInfo);
             DEBUG_PRINT("Root " << rootId << " has " << mutIndices.size() << " mutations\n");
             for (const size_t mutIndex : mutIndices) {
@@ -800,7 +806,7 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
                                  FloatRange& genomeRange,
                                  GrgBuildFlags buildFlags,
                                  MutationIteratorFlags itFlags,
-                                 size_t treeCount,
+                                 const size_t treeCount,
                                  double noTreeBelowThreshold,
                                  const std::map<std::string, std::string>& indivIdToPop,
                                  const double rebuildProportion) {
@@ -815,7 +821,7 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
 #define FAST_GRG_OUTPUT(msg)                                                                                           \
     do {                                                                                                               \
         if (hasBSFlag(buildFlags, GBF_VERBOSE_OUTPUT)) {                                                               \
-            std::cerr << STREAM_PUID << msg;                                                                           \
+            std::cerr << STREAM_PUID << msg << std::flush;                                                             \
         }                                                                                                              \
     } while (0)
 #if 0
@@ -864,20 +870,22 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
         hasBSFlag(buildFlags, GBF_TREES_FASTER1) ? 0.75 : (hasBSFlag(buildFlags, GBF_TREES_FASTER2) ? 0.5 : 1.0);
     const size_t targetHapSegSum = static_cast<size_t>(getOptimalHapSegSum(numSamples, hapSumMultiplier));
 
+    bool hasMoreMuts = true;
     std::list<std::string> treeFiles;
+    size_t treeNum = 0;
     // Read in the haplotypes for the first tree, and then estimate the number of trees by looking at
     // the span (in number of variants) that the first tree covered vs. the total range we need all trees
     // to cover.
     if (treeCount == 0 && remainingMuts > 0) {
         HapWindowContext hapContext;
         auto readStartTime = std::chrono::high_resolution_clock::now();
-        getHapSegments(*mutIterator,
-                       hapLength,
-                       numSamples,
-                       noTreeBelowThreshold,
-                       /*stopAfter=*/targetHapSegSum,
-                       /*stopAfterIsMutCount=*/false,
-                       hapContext);
+        hasMoreMuts = getHapSegments(*mutIterator,
+                                     hapLength,
+                                     numSamples,
+                                     noTreeBelowThreshold,
+                                     /*stopAfter=*/targetHapSegSum,
+                                     /*stopAfterIsMutCount=*/false,
+                                     hapContext);
         FAST_GRG_OUTPUT("Windows: " << hapContext.windowInfo.size() << "\n");
         FAST_GRG_OUTPUT("Unique hap segments: " << countUniqueHaps(hapContext) << " (target=" << targetHapSegSum
                                                 << ")");
@@ -890,9 +898,8 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
         const size_t handledSoFar = hapContext.allMutations.size() + hapContext.directMap.size();
         release_assert(handledSoFar <= totalMuts);
         // We've already processed the first tree, so subtract 1
-        treeCount = (roundUpToMultiple<size_t>(totalMuts, handledSoFar) / handledSoFar) - 1;
-        release_assert(treeCount <= totalMuts); // Int underflow sanity check (should not be possible)
-        FAST_GRG_OUTPUT("Auto-detected a total tree count of " << treeCount + 1 << "\n");
+        const size_t treeCountApprox = (roundUpToMultiple<size_t>(totalMuts, handledSoFar) / handledSoFar);
+        FAST_GRG_OUTPUT("Auto-detected a total tree count of approximately " << treeCountApprox << "\n");
 
         MutableGRGPtr tree = buildTree(hapContext, numSamples, ploidy, isPhased, buildFlags, rebuildProportion);
         directMap(tree, hapContext.directMap);
@@ -902,21 +909,20 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
         treeFiles.push_back(treeFilename);
 
         remainingMuts = totalMuts - handledSoFar;
+        treeNum++;
     }
-    release_assert(treeCount != 0 || remainingMuts == 0);
 
-    const size_t mutsPerTree =
-        (remainingMuts == 0) ? 0 : roundUpToMultiple<size_t>(remainingMuts, treeCount) / treeCount;
-    for (size_t i = 1; i <= treeCount; i++) {
+    const bool stopAfterIsMutCount = (treeCount > 0);
+    size_t stopAfter = stopAfterIsMutCount ? ((remainingMuts + (treeCount - 1)) / treeCount) : targetHapSegSum;
+    while (hasMoreMuts) {
         HapWindowContext hapContext;
         auto readStartTime = std::chrono::high_resolution_clock::now();
-        getHapSegments(*mutIterator,
-                       hapLength,
-                       numSamples,
-                       noTreeBelowThreshold,
-                       /*stopAfter=*/mutsPerTree,
-                       /*stopAfterIsMutCount=*/true,
-                       hapContext);
+        // If we are on the last tree, always consume any remaining mutations.
+        if (treeCount > 0 && treeNum == (treeCount - 1)) {
+            stopAfter = std::numeric_limits<size_t>::max();
+        }
+        hasMoreMuts = getHapSegments(
+            *mutIterator, hapLength, numSamples, noTreeBelowThreshold, stopAfter, stopAfterIsMutCount, hapContext);
         FAST_GRG_OUTPUT("Windows: " << hapContext.windowInfo.size() << "\n");
         FAST_GRG_OUTPUT("Unique hap segments: " << countUniqueHaps(hapContext) << " (target=" << targetHapSegSum
                                                 << ")");
@@ -928,11 +934,12 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
 
         MutableGRGPtr tree = buildTree(hapContext, numSamples, ploidy, isPhased, buildFlags, rebuildProportion);
         directMap(tree, hapContext.directMap);
-        const std::string treeFilename = getTreeGRGName(filePrefix, i);
+        const std::string treeFilename = getTreeGRGName(filePrefix, treeNum++);
         CANNOT_EXIST(treeFilename);
         saveGRG(tree, treeFilename);
         treeFiles.push_back(treeFilename);
     }
+    FAST_GRG_OUTPUT("Final tree count of " << treeNum << "\n");
 
 #ifndef NDEBUG
     size_t _ignore_debug = 0;
