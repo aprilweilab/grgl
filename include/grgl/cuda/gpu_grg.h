@@ -74,61 +74,78 @@ private:
 
 typedef std::shared_ptr<CudaBuffer<NodeIDSizeT>> CudaNodeIDBufferPtr;
 
-constexpr uint64_t GPUGRG_MAGIC = 0x4752474C47505501ULL; // "GRGLGPU" + version byte 01
+constexpr uint64_t GPUGRG_MAGIC = 0x4752474C47505502ULL; // "GRGLGPU" + version byte 02
 
 class GPUGRG {
 public:
-    // friend GPUGRG loadGPUGRGFromDisk(const std::string& filename);
-    // friend void storeGPUGRGToDisk(const GPUGRG& gpu_grg, const std::string& filename);
-    // Constructor
+    friend class GPUCsrVisitor;
+    friend void storeGPUGRGToDisk(GPUGRG& gpuGRG, const std::string& filename);
+    friend GPUGRG loadGPUGRGFromDisk(const std::string& filename);
+
     GPUGRG()
         : rowOffsets(nullptr),
           colIndices(nullptr),
           oldToNewMapping(nullptr),
           newToOldMapping(nullptr),
           mutationAndNewMapping(nullptr),
-          numRows(0),
-          numSamples(0),
-          numEdges(0),
-          maxHeight(0),
-          numMutations(0),
+          m_numNodes(0),
+          m_numSamples(0),
+          m_numEdges(0),
+          m_maxHeight(0),
+          m_numMutations(0),
+          m_ploidy(0),
           workStreamPtr(nullptr) {}
 
-    // Destructor
     ~GPUGRG() { free(); }
+
+    NodeIDSizeT numNodes() const { return m_numNodes; }
+
+    NodeIDSizeT numSamples() const { return m_numSamples; }
+
+    size_t numEdges() const { return m_numEdges; }
+
+    NodeIDSizeT numMutations() const { return m_numMutations; }
+
+    NodeIDSizeT maxHeight() const { return m_maxHeight; }
+
+    NodeIDSizeT numIndividuals() const { return m_numSamples * m_ploidy; }
+
+    uint16_t getPloidy() const { return m_ploidy; }
 
     // Init vars and allocate GPU memory for all structures
     // This function is blocking
     // If no streamPtr is provided, a new stream will be created
-    void init(size_t rows,
-              size_t samples,
+    void init(NodeIDSizeT rows,
+              NodeIDSizeT samples,
               size_t nonZeros,
-              size_t mutations,
-              size_t height,
+              NodeIDSizeT mutations,
+              NodeIDSizeT height,
+              uint16_t ploidy,
               bool allocateColIndices = true,
               std::shared_ptr<cudaStream_t> streamPtr = nullptr) {
         free(); // Free any existing memory
-        numRows = rows;
-        numSamples = samples;
-        numEdges = nonZeros;
-        numMutations = mutations;
-        maxHeight = height;
+        m_numNodes = rows;
+        m_numSamples = samples;
+        m_numEdges = nonZeros;
+        m_numMutations = mutations;
+        m_maxHeight = height;
+        m_ploidy = ploidy;
 
-        rowOffsets = std::make_shared<CudaBuffer<NodeIDSizeT>>(numRows + 1);
-        oldToNewMapping = std::make_shared<CudaBuffer<NodeIDSizeT>>(numRows);
-        newToOldMapping = std::make_shared<CudaBuffer<NodeIDSizeT>>(numRows);
-        mutationAndNewMapping = std::make_shared<CudaBuffer<NodeIDSizeT>>(numMutations, 2);
+        rowOffsets = std::make_shared<CudaBuffer<NodeIDSizeT>>(m_numNodes + 1);
+        oldToNewMapping = std::make_shared<CudaBuffer<NodeIDSizeT>>(m_numNodes);
+        newToOldMapping = std::make_shared<CudaBuffer<NodeIDSizeT>>(m_numNodes);
+        mutationAndNewMapping = std::make_shared<CudaBuffer<NodeIDSizeT>>(m_numMutations, 2);
 
         if (allocateColIndices) {
-            colIndices = std::make_shared<CudaBuffer<NodeIDSizeT>>(numEdges);
+            colIndices = std::make_shared<CudaBuffer<NodeIDSizeT>>(m_numEdges);
         } else {
             colIndices = nullptr;
         }
 
-        hostColIndices.resize(numEdges);
-        hostHeightCutoffs.resize(maxHeight + 1);
-        hostHeavyCutoffs.resize(maxHeight + 1);
-        hostAvgChildCounts.resize(maxHeight + 1);
+        hostColIndices.resize(m_numEdges);
+        hostHeightCutoffs.resize(m_maxHeight + 1);
+        hostHeavyCutoffs.resize(m_maxHeight + 1);
+        hostAvgChildCounts.resize(m_maxHeight + 1);
 
         if (streamPtr) {
             workStreamPtr = streamPtr;
@@ -155,33 +172,35 @@ public:
             throw ApiMisuseFailure("Device memory not allocated yet!");
         }
         CHECK_CUDA_LAST_ERROR();
-        cudaMemcpy(this->getRowOffsets(), rowOffsets, (numRows + 1) * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
+        cudaMemcpy(this->getRowOffsets(), rowOffsets, (m_numNodes + 1) * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
         CHECK_CUDA_LAST_ERROR();
-        cudaMemcpy(this->getOldToNewMapping(), oldToNewMapping, numRows * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
+        cudaMemcpy(
+            this->getOldToNewMapping(), oldToNewMapping, m_numNodes * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
         CHECK_CUDA_LAST_ERROR();
-        cudaMemcpy(this->getNewToOldMapping(), newToOldMapping, numRows * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
+        cudaMemcpy(
+            this->getNewToOldMapping(), newToOldMapping, m_numNodes * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
         CHECK_CUDA_LAST_ERROR();
         cudaMemcpy(this->getMutationAndNewMapping(),
                    mutationAndNewMapping,
-                   numMutations * 2 * sizeof(NodeIDSizeT),
+                   m_numMutations * 2 * sizeof(NodeIDSizeT),
                    cudaMemcpyHostToDevice);
         CHECK_CUDA_LAST_ERROR();
 
         // cpu memcpy just use normal memcpys
-        release_assert(this->hostHeightCutoffs.size() == maxHeight + 1);
-        memcpy(this->hostHeightCutoffs.data(), heightCutoffs, (maxHeight + 1) * sizeof(NodeIDSizeT));
-        release_assert(this->hostHeavyCutoffs.size() == maxHeight + 1);
-        memcpy(this->hostHeavyCutoffs.data(), heavyCutoffs, (maxHeight + 1) * sizeof(NodeIDSizeT));
-        release_assert(this->hostAvgChildCounts.size() == maxHeight + 1);
-        memcpy(this->hostAvgChildCounts.data(), avgChildCounts, (maxHeight + 1) * sizeof(double));
-        release_assert(this->hostColIndices.size() == numEdges);
-        memcpy(this->hostColIndices.data(), colIndices, numEdges * sizeof(NodeIDSizeT));
+        release_assert(this->hostHeightCutoffs.size() == m_maxHeight + 1);
+        memcpy(this->hostHeightCutoffs.data(), heightCutoffs, (m_maxHeight + 1) * sizeof(NodeIDSizeT));
+        release_assert(this->hostHeavyCutoffs.size() == m_maxHeight + 1);
+        memcpy(this->hostHeavyCutoffs.data(), heavyCutoffs, (m_maxHeight + 1) * sizeof(NodeIDSizeT));
+        release_assert(this->hostAvgChildCounts.size() == m_maxHeight + 1);
+        memcpy(this->hostAvgChildCounts.data(), avgChildCounts, (m_maxHeight + 1) * sizeof(double));
+        release_assert(this->hostColIndices.size() == m_numEdges);
+        memcpy(this->hostColIndices.data(), colIndices, m_numEdges * sizeof(NodeIDSizeT));
 
         if (copyColIndicesToDevice) {
             if (!this->colIndices) {
                 throw ApiMisuseFailure("Column indices GPU buffer is not allocated");
             }
-            cudaMemcpy(this->getColIndices(), colIndices, numEdges * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
+            cudaMemcpy(this->getColIndices(), colIndices, m_numEdges * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
         }
         CHECK_CUDA_LAST_ERROR();
     }
@@ -189,11 +208,71 @@ public:
     // Debugging: Print CSR structure
     void print() const {
         std::cout << "GPUGRG: " << std::endl;
-        std::cout << "  num_rows: " << numRows << std::endl;
-        std::cout << "  nnz: " << numEdges << std::endl;
-        std::cout << "  max_height: " << maxHeight << std::endl;
-        std::cout << "  num_samples: " << numSamples << std::endl;
-        std::cout << "  num_mutations: " << numMutations << std::endl;
+        std::cout << "  num_rows: " << m_numNodes << std::endl;
+        std::cout << "  nnz: " << m_numEdges << std::endl;
+        std::cout << "  max_height: " << m_maxHeight << std::endl;
+        std::cout << "  num_samples: " << m_numSamples << std::endl;
+        std::cout << "  num_mutations: " << m_numMutations << std::endl;
+    }
+
+    /**
+     * Blocking Matrix multiplication on GPU using the GPUGRG structure.
+     *
+     * @param[in] inputMatrix The input matrix as a pointer, in row-major order. Must be at least
+     * sizeof(T)*numRows*numCols in size.
+     * @param[in] numRows Number of rows in the input matrix
+     * @param[in] numCols Number of columns in the input matrix
+     * @param[in] outCols Number of columns in the output matrix
+     * @param[in] direction Traversal direction (UP or DOWN)
+     * @param[out] outputMatrix The resulting matrix is populated to this buffer. Must be at least
+     * sizeof(T)*numRows*outCols in size.
+     */
+    template <typename T>
+    void matMulBlockingHelper(const T* inputMatrix,
+                              const size_t numRows,
+                              const size_t numCols,
+                              const size_t outCols,
+                              bool byIndividual,
+                              TraversalDirection direction,
+                              T* outputMatrix) {
+        release_assert(numCols > 0);
+        release_assert(numRows > 0);
+        const size_t outputSize = numRows * outCols;
+        validateMatMulInputs<GPUGRG>(this, numCols, numRows, direction, outputSize, false, false, outCols);
+        CHECK_CUDA_LAST_ERROR();
+        if (numRows == 0 || numCols == 0) {
+            throw ApiMisuseFailure("inputMatrix must have non-zero rows and columns");
+        }
+        const size_t outSize =
+            (numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? this->m_numSamples : this->m_numMutations));
+
+        const size_t inputEntries = numRows * numCols; // FIXME
+        CudaBuffer<T> d_inputMatrix(inputEntries);
+        CudaBuffer<T> d_outputMatrix(outSize);
+        cudaMemcpy(d_inputMatrix.get(), inputMatrix, inputEntries * sizeof(T), cudaMemcpyHostToDevice);
+
+        CHECK_CUDA_LAST_ERROR();
+
+        CudaBuffer<T> d_buffer(numRows, this->m_numNodes);
+        const size_t bufferSizeByte = numRows * this->m_numNodes * sizeof(T);
+
+        CHECK_CUDA_LAST_ERROR();
+
+        this->matrixMultiplication<T>(d_inputMatrix.get(),
+                                      numCols,
+                                      numRows,
+                                      direction,
+                                      d_outputMatrix.get(),
+                                      outSize,
+                                      false,
+                                      byIndividual,
+                                      d_buffer.get(),
+                                      bufferSizeByte);
+        this->wait();
+        CHECK_CUDA_LAST_ERROR();
+
+        cudaMemcpy(outputMatrix, d_outputMatrix.get(), outSize * sizeof(T), cudaMemcpyDeviceToHost);
+        CHECK_CUDA_LAST_ERROR();
     }
 
     /**
@@ -205,43 +284,20 @@ public:
      * @return The resulting matrix as a vector
      */
     template <typename T>
-    std::vector<T>
-    matMulBlocking(const std::vector<T>& inputMatrix, const size_t numRows, TraversalDirection direction) {
+    std::vector<T> matMulBlocking(const std::vector<T>& inputMatrix,
+                                  const size_t numRows,
+                                  TraversalDirection direction,
+                                  bool byIndividual) {
         CHECK_CUDA_LAST_ERROR();
         if (numRows == 0 || (inputMatrix.size() % numRows != 0)) {
             throw ApiMisuseFailure("inputMatrix must be divisible by numRows");
         }
+        const size_t outCols =
+            (direction == TraversalDirection::DIRECTION_DOWN) ? this->m_numSamples : this->m_numMutations;
+        const size_t outSize = numRows * outCols;
         const size_t numCols = inputMatrix.size() / numRows;
-        const size_t outSize =
-            (numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? this->numSamples : this->numMutations));
-
-        CudaBuffer<T> d_inputMatrix(inputMatrix.size());
-        CudaBuffer<T> d_outputMatrix(outSize);
-        cudaMemcpy(d_inputMatrix.get(), inputMatrix.data(), inputMatrix.size() * sizeof(T), cudaMemcpyHostToDevice);
-
-        CHECK_CUDA_LAST_ERROR();
-
-        CudaBuffer<T> d_buffer(numRows, this->numRows);
-        const size_t bufferSizeByte = numRows * this->numRows * sizeof(T);
-
-        CHECK_CUDA_LAST_ERROR();
-
-        this->matrixMultiplication<T>(d_inputMatrix.get(),
-                                      numCols,
-                                      numRows,
-                                      direction,
-                                      d_outputMatrix.get(),
-                                      outSize,
-                                      false,
-                                      d_buffer.get(),
-                                      bufferSizeByte);
-        this->wait();
-        CHECK_CUDA_LAST_ERROR();
-
         std::vector<T> result(outSize);
-        cudaMemcpy(result.data(), d_outputMatrix.get(), outSize * sizeof(T), cudaMemcpyDeviceToHost);
-        CHECK_CUDA_LAST_ERROR();
-
+        matMulBlockingHelper<T>(inputMatrix.data(), numRows, numCols, outCols, byIndividual, direction, result.data());
         return std::move(result);
     }
 
@@ -258,7 +314,7 @@ public:
         }
         const size_t numCols = inputMatrix.size() / numRows;
         const size_t outSize =
-            (numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? this->numSamples : this->numMutations));
+            (numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? this->m_numSamples : this->m_numMutations));
 
         CudaBuffer<T> d_inputMatrix(inputMatrix.size());
         CudaBuffer<T> d_outputMatrix(outSize);
@@ -266,8 +322,8 @@ public:
 
         CHECK_CUDA_LAST_ERROR();
 
-        CudaBuffer<T> d_buffer(numRows, this->numRows);
-        const size_t bufferSizeByte = numRows * this->numRows * sizeof(T);
+        CudaBuffer<T> d_buffer(numRows, this->m_numNodes);
+        const size_t bufferSizeByte = numRows * this->m_numNodes * sizeof(T);
 
         CHECK_CUDA_LAST_ERROR();
 
@@ -279,6 +335,7 @@ public:
                                           direction,
                                           d_outputMatrix.get(),
                                           outSize,
+                                          false,
                                           false,
                                           d_buffer.get(),
                                           bufferSizeByte);
@@ -333,8 +390,15 @@ public:
         return colIndices->get();
     }
 
+    NodeIDSizeT getHostHeightCutoff(size_t level) const { return hostHeightCutoffs.at(level); }
+
+    NodeIDSizeT getHostHeavyCutoff(size_t level) const { return hostHeavyCutoffs.at(level); }
+
+    double getHostAvgChildCount(size_t level) const { return hostAvgChildCounts.at(level); }
+
+protected:
     // return the size of GPU memory needed by col indices in bytes
-    size_t queryColIndSize() { return numEdges * sizeof(NodeIDSizeT); }
+    size_t queryColIndSize() { return m_numEdges * sizeof(NodeIDSizeT); }
 
     // This function sets existing GPU memory pointers for col indices
     // will not allocate new memory
@@ -356,7 +420,7 @@ public:
         if (colIndices) {
             cudaMemcpyAsync(getColIndices(),
                             hostColIndices.data(),
-                            numEdges * sizeof(NodeIDSizeT),
+                            m_numEdges * sizeof(NodeIDSizeT),
                             cudaMemcpyHostToDevice,
                             *workStreamPtr);
         } else {
@@ -392,9 +456,9 @@ public:
         hostHeavyCutoffs.clear();
         hostAvgChildCounts.clear();
 
-        numRows = numSamples = numEdges = 0;
-        numMutations = 0;
-        maxHeight = 0;
+        m_numNodes = m_numSamples = m_numEdges = 0;
+        m_numMutations = 0;
+        m_maxHeight = 0;
 
         if (workStreamPtr) {
             // This may not work if we are multithreading
@@ -420,6 +484,7 @@ public:
                               data_t* outputMatrix,
                               size_t outputSize,
                               bool emitAllNodes,
+                              bool byIndividual,
                               data_t* buffer,
                               size_t buffer_size);
 
@@ -430,14 +495,15 @@ public:
     std::vector<NodeIDSizeT> hostHeavyCutoffs;
     std::vector<double> hostAvgChildCounts;
 
-    size_t numRows;      // Number of rows, i.e. number of nodes
-    size_t numSamples;   // Number of samples, i.e. number of leaf nodes
-    size_t numMutations; // Number of mutations. may NOT correspond to number of non-leaf nodes
-    size_t numEdges;     // Number of non-zero elements, i.e. number of edges
-    size_t maxHeight;
+    NodeIDSizeT m_numNodes;     // Number of rows, i.e. number of nodes
+    NodeIDSizeT m_numSamples;   // Number of samples, i.e. number of leaf nodes
+    NodeIDSizeT m_numMutations; // Number of mutations. may NOT correspond to number of non-leaf nodes
+    size_t m_numEdges;          // Number of non-zero elements, i.e. number of edges
+    NodeIDSizeT m_maxHeight;
+    uint16_t m_ploidy;
 
     std::shared_ptr<cudaStream_t> workStreamPtr; // CUDA stream for asynchronous operations
-private:
+
     // these are resident GPU pointers
     CudaNodeIDBufferPtr rowOffsets; // Device pointer to row offsets (size: num_rows + 1)
     CudaNodeIDBufferPtr oldToNewMapping;
@@ -701,7 +767,7 @@ public:
         std::cout << "Constructing GPUGRG with " << h_numNodes << " nodes, " << h_numEdges << " elements, max height "
                   << h_maxHeight << std::endl;
 #endif
-        gpu_grg.init(h_numNodes, grg->numSamples(), h_numEdges, numValidMutations, h_maxHeight);
+        gpu_grg.init(h_numNodes, grg->numSamples(), h_numEdges, numValidMutations, h_maxHeight, grg->getPloidy());
 
         gpu_grg.copyToDevice(h_rowOffsets.data(),
                              getNewId().data(),

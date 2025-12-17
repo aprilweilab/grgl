@@ -61,7 +61,7 @@ if(ENABLE_CUDA)
             message(FATAL_ERROR "CUDA requested but CUDAToolkit not found")
         endif()
     else()
-        message(WARNING "CUDA requested but no CUDA compiler found. Building without CUDA support.")
+        message(FATAL_ERROR "CUDA requested but no CUDA compiler found. Install a CUDA compiler or build with -DENABLE_CUDA=OFF")
         set(ENABLE_CUDA OFF)
     endif()
 endif()
@@ -159,6 +159,22 @@ set(GRGL_PUBLIC_HEADERS
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/grgnode.h
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/mutation.h
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/ts2grg.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/common.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/csr_storage.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/file_vector.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/internal_mult.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/map_mutations.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/mut_iterator.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/mutation.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/node_data.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/serialize.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/transform.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/ts2grg.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/version.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/visitor.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/windowing.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/cuda/gpu_grg.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/cuda/cuda_kernels.cuh
   )
 
 set(GRGL_CORE_SOURCES
@@ -317,9 +333,6 @@ if(ENABLE_TESTS)
       set(GRGL_CUDA_TEST_SOURCES
           ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_cuda_support.cpp
           ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_cuda_matmul.cpp
-          # ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_cuda_grg.cpp
-          # ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_cuda_traversal.cpp
-          # ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_cuda_matmul.cpp
       )
       list(APPEND GRGL_TEST_SOURCES ${GRGL_CUDA_TEST_SOURCES})
   endif()

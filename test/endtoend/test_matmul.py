@@ -5,8 +5,15 @@ import numpy as np
 import os
 import pygrgl
 import subprocess
-import time
 import unittest
+import pytest
+
+try:
+    import torch
+
+    HAVE_CUDA = torch.cuda.is_available()
+except ImportError:
+    HAVE_CUDA = False
 
 JOBS = 4
 CLEANUP = True
@@ -321,6 +328,32 @@ class TestMatrixMultiplication(unittest.TestCase):
         split_result = multi_down(grgs, in_vector)
 
         np.testing.assert_allclose(full_result, split_result)
+
+    @pytest.mark.skipif(
+        not HAVE_CUDA,
+        reason="WARNING: No CUDA detected (requires pytorch + installed CUDA drivers), skipping relevant tests",
+    )
+    def test_cuda_matmul(self):
+        K = 10
+        in_vector = np.random.standard_normal((K, self.grg.num_mutations))
+        cpu_result = pygrgl.matmul(self.grg, in_vector, pygrgl.TraversalDirection.DOWN)
+        gpu_grg = pygrgl.grg_to_gpu(self.grg)
+        gpu_result = gpu_grg.matmul(in_vector, pygrgl.TraversalDirection.DOWN)
+        np.testing.assert_allclose(cpu_result, gpu_result)
+
+        cpu_result = pygrgl.matmul(
+            self.grg,
+            in_vector,
+            pygrgl.TraversalDirection.DOWN,
+            by_individual=True,
+        )
+        gpu_grg = pygrgl.grg_to_gpu(self.grg)
+        gpu_result = gpu_grg.matmul(
+            in_vector,
+            pygrgl.TraversalDirection.DOWN,
+            by_individual=True,
+        )
+        np.testing.assert_allclose(cpu_result, gpu_result)
 
     @classmethod
     def tearDownClass(cls):

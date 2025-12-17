@@ -42,11 +42,11 @@ TEST(GPUGRG, Construction) {
     CHECK_CUDA_LAST_ERROR();
     GPUGRG gpu_grg = convertGRGToGPUGRG(grg);
 
-    ASSERT_EQ(gpu_grg.numRows, grg->numNodes());
-    ASSERT_EQ(gpu_grg.numEdges, grg->numEdges());
-    ASSERT_EQ(gpu_grg.numSamples, grg->numSamples());
-    ASSERT_EQ(gpu_grg.numMutations, grg->numMutations());
-    ASSERT_GE(gpu_grg.maxHeight, 3);
+    ASSERT_EQ(gpu_grg.numNodes(), grg->numNodes());
+    ASSERT_EQ(gpu_grg.numEdges(), grg->numEdges());
+    ASSERT_EQ(gpu_grg.numSamples(), grg->numSamples());
+    ASSERT_EQ(gpu_grg.numMutations(), grg->numMutations());
+    ASSERT_GE(gpu_grg.maxHeight(), 3);
 
     CHECK_CUDA_LAST_ERROR();
 
@@ -79,22 +79,22 @@ TEST(GPUGRG, StoreAndLoad) {
 
     GPUGRG gpu_grg = convertGRGToGPUGRG(grg);
     CHECK_CUDA_LAST_ERROR();
-    ASSERT_EQ(gpu_grg.numRows, grg->numNodes());
-    ASSERT_EQ(gpu_grg.numEdges, grg->numEdges());
-    ASSERT_EQ(gpu_grg.numSamples, grg->numSamples());
-    ASSERT_EQ(gpu_grg.numMutations, grg->numMutations());
-    ASSERT_GE(gpu_grg.maxHeight, 3);
+    ASSERT_EQ(gpu_grg.numNodes(), grg->numNodes());
+    ASSERT_EQ(gpu_grg.numEdges(), grg->numEdges());
+    ASSERT_EQ(gpu_grg.numSamples(), grg->numSamples());
+    ASSERT_EQ(gpu_grg.numMutations(), grg->numMutations());
+    ASSERT_GE(gpu_grg.maxHeight(), 3);
 
     const char * const gpuGrgFile = "test.gpu_grg.storeload.gpugrg";
     storeGPUGRGToDisk(gpu_grg, gpuGrgFile);
     GPUGRG loaded_gpu_grg = loadGPUGRGFromDisk(gpuGrgFile);
 
     CHECK_CUDA_LAST_ERROR();
-    ASSERT_EQ(loaded_gpu_grg.numRows, gpu_grg.numRows);
-    ASSERT_EQ(loaded_gpu_grg.numEdges, gpu_grg.numEdges);
-    ASSERT_EQ(loaded_gpu_grg.numSamples, gpu_grg.numSamples);
-    ASSERT_EQ(loaded_gpu_grg.numMutations, gpu_grg.numMutations);
-    ASSERT_EQ(loaded_gpu_grg.maxHeight, gpu_grg.maxHeight);
+    ASSERT_EQ(loaded_gpu_grg.numNodes(), gpu_grg.numNodes());
+    ASSERT_EQ(loaded_gpu_grg.numEdges(), gpu_grg.numEdges());
+    ASSERT_EQ(loaded_gpu_grg.numSamples(), gpu_grg.numSamples());
+    ASSERT_EQ(loaded_gpu_grg.numMutations(), gpu_grg.numMutations());
+    ASSERT_EQ(loaded_gpu_grg.maxHeight(), gpu_grg.maxHeight());
 
     CHECK_CUDA_LAST_ERROR();
 }
@@ -132,22 +132,22 @@ TEST(GPUGRG, MatMult) {
         throw std::runtime_error("CUDA kernel launch failed");
     }
 
-    ASSERT_EQ(gpu_grg.numRows, grg->numNodes());
-    ASSERT_EQ(gpu_grg.numEdges, grg->numEdges());
-    ASSERT_EQ(gpu_grg.numSamples, grg->numSamples());
-    ASSERT_EQ(gpu_grg.numMutations, grg->numMutations());
-    ASSERT_GE(gpu_grg.maxHeight, 3);
+    ASSERT_EQ(gpu_grg.numNodes(), grg->numNodes());
+    ASSERT_EQ(gpu_grg.numEdges(), grg->numEdges());
+    ASSERT_EQ(gpu_grg.numSamples(), grg->numSamples());
+    ASSERT_EQ(gpu_grg.numMutations(), grg->numMutations());
+    ASSERT_GE(gpu_grg.maxHeight(), 3);
 
     std::vector<double> mutValues(3, 1.0); // Input vector [1, 2, 1]
     mutValues[1] = 2.0;
-    auto result1 = gpu_grg.matMulBlocking(mutValues, 1, TraversalDirection::DIRECTION_DOWN);
+    auto result1 = gpu_grg.matMulBlocking(mutValues, 1, TraversalDirection::DIRECTION_DOWN, false);
     ASSERT_EQ(result1.size(), grg->numSamples());
     std::vector<double> expect = {1.0, 2.0, 3.0, 3.0};
     ASSERT_EQ(result1, expect);
 
     // Bottom-up dot-product (this is just allele freq counts)
     std::vector<double> sampleValues(4, 1.0); 
-    auto result2 = gpu_grg.matMulBlocking(sampleValues, 1, TraversalDirection::DIRECTION_UP);
+    auto result2 = gpu_grg.matMulBlocking(sampleValues, 1, TraversalDirection::DIRECTION_UP, false);
     ASSERT_EQ(result2.size(), grg->numMutations());
     expect = {1.0, 2.0, 4.0};
     ASSERT_EQ(result2, expect);
@@ -156,7 +156,7 @@ TEST(GPUGRG, MatMult) {
     std::vector<double> mutValues2(6, 1.0);
     mutValues2.at(1) = 2.0;
     mutValues2.at(3) = 0.0;
-    auto result3 = gpu_grg.matMulBlocking(mutValues2, 2, TraversalDirection::DIRECTION_DOWN);
+    auto result3 = gpu_grg.matMulBlocking(mutValues2, 2, TraversalDirection::DIRECTION_DOWN, false);
     ASSERT_EQ(result3.size(), 2*grg->numSamples());
     expect = {1.0, 2.0, 3.0, 3.0, 1.0, 1.0, 2.0, 2.0};
     ASSERT_EQ(result3, expect);
@@ -168,7 +168,7 @@ TEST(GPUGRG, MatMult) {
     for (size_t i = 4; i < sampleValues2.size(); i++) {
         sampleValues2[i] /= (double)grg->numSamples();
     }
-    auto result4 = gpu_grg.matMulBlocking(sampleValues2, 2, TraversalDirection::DIRECTION_UP);
+    auto result4 = gpu_grg.matMulBlocking(sampleValues2, 2, TraversalDirection::DIRECTION_UP, false);
     ASSERT_EQ(result4.size(), 2*grg->numMutations());
     expect = {1.0, 2.0, 4.0, 0.25, 0.5, 1.0};
     for (size_t i = 0; i < result4.size(); i++) {
@@ -195,7 +195,7 @@ TEST(GPUGRG, MatMulEnvVar) {
     mutValues[0] = 2.0; // make sure input vector is not all ones
     mutValues[1] = 3.0;
     mutValues[grg->numMutations() - 1] = 4.0;
-    auto result0 = gpu_grg.matMulBlocking(mutValues, 1, TraversalDirection::DIRECTION_DOWN);
+    auto result0 = gpu_grg.matMulBlocking(mutValues, 1, TraversalDirection::DIRECTION_DOWN, false);
     auto result1 = grg->matMul(mutValues, 1, TraversalDirection::DIRECTION_DOWN);
     ASSERT_EQ(result0.size(), result1.size());
     ASSERT_EQ(result0, result1);
@@ -206,7 +206,7 @@ TEST(GPUGRG, MatMulEnvVar) {
     sampleValues[0] = 2.0; // make sure input vector is not all ones
     sampleValues[1] = 3.0;
     sampleValues[grg->numSamples() - 1] = 4.0;
-    auto result2 = gpu_grg.matMulBlocking(sampleValues, 1, TraversalDirection::DIRECTION_UP);
+    auto result2 = gpu_grg.matMulBlocking(sampleValues, 1, TraversalDirection::DIRECTION_UP, false);
     auto result3 = grg->matMul(sampleValues, 1, TraversalDirection::DIRECTION_UP);
     ASSERT_EQ(result2.size(), result3.size());
     // manually compare all elements and print any differences
@@ -259,7 +259,7 @@ TEST(GPUGRG, MatMulEnvVarMultiRow) {
     mutValues[1] = 3.0;
     mutValues[grg->numMutations() - 1] = 4.0;
     mutValues[grg->numMutations() * rowCount - 1] = 5.0;
-    auto result0 = gpu_grg.matMulBlocking(mutValues, rowCount, TraversalDirection::DIRECTION_DOWN);
+    auto result0 = gpu_grg.matMulBlocking(mutValues, rowCount, TraversalDirection::DIRECTION_DOWN, false);
     auto result1 = grg->matMul(mutValues, rowCount, TraversalDirection::DIRECTION_DOWN);
     ASSERT_EQ(result0.size(), result1.size());
     /*
@@ -280,7 +280,7 @@ TEST(GPUGRG, MatMulEnvVarMultiRow) {
     sampleValues[1] = 3.0;
     sampleValues[grg->numSamples() - 1] = 4.0;
     sampleValues[grg->numSamples() * rowCount - 1] = 5.0;
-    auto result2 = gpu_grg.matMulBlocking(sampleValues, rowCount, TraversalDirection::DIRECTION_UP);
+    auto result2 = gpu_grg.matMulBlocking(sampleValues, rowCount, TraversalDirection::DIRECTION_UP, false);
     auto result3 = grg->matMul(sampleValues, rowCount, TraversalDirection::DIRECTION_UP);
     ASSERT_EQ(result2.size(), result3.size());
     // manually compare all elements and print any differences

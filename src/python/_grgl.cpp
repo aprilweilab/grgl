@@ -32,6 +32,10 @@
 #include "grgl/version.h"
 #include "grgl/visitor.h"
 
+#ifdef GRGL_CUDA_ENABLED
+#include "grgl/cuda/gpu_grg.h"
+#endif
+
 namespace py = pybind11;
 
 #include <iostream>
@@ -208,6 +212,55 @@ py::array matMul(grgl::GRGPtr& grg,
     api_exc_check(false, "Unsupported numpy dtype: " << arr.dtype());
 }
 
+#ifdef GRGL_CUDA_ENABLED
+template <typename IOType>
+inline py::array_t<IOType> gpuDispatchMult(grgl::GPUGRG& gpuGRG,
+                                           py::buffer_info& buffer,
+                                           size_t rows,
+                                           size_t inCols,
+                                           size_t outCols,
+                                           bool byIndividual,
+                                           grgl::TraversalDirection direction) {
+    const size_t outSize = rows * outCols;
+    py::array_t<IOType> result({rows, outCols});
+    py::buffer_info resultBuf = result.request();
+    memset(resultBuf.ptr, 0, outSize * sizeof(IOType));
+    gpuGRG.matMulBlockingHelper<IOType>((const IOType*)buffer.ptr,
+                                        rows,
+                                        inCols,
+                                        outCols,
+                                        byIndividual,
+                                        direction,
+                                        (IOType*)resultBuf.ptr); // TODO: add outSize as double check
+    return std::move(result);
+}
+
+py::array
+gpuMatMul(grgl::GPUGRG& grg, py::handle input, grgl::TraversalDirection direction, bool byIndividual = false) {
+    py::array arr = py::array::ensure(input, py::array::c_style | py::array::forcecast);
+    py::buffer_info buffer = arr.request();
+    api_exc_check(buffer.ndim == 2, "matmul() only support two dimensional numpy arrays as input.");
+    const size_t rows = buffer.shape.at(0);
+    const size_t cols = buffer.shape.at(1);
+    api_exc_check(rows != 0 && cols != 0, "matmul() requires non-zero dimensions.");
+    const size_t numSamples = grg.numSamples();
+    const size_t outCols = (direction == grgl::TraversalDirection::DIRECTION_DOWN) ? numSamples : grg.numMutations();
+
+    if (py::isinstance<py::array_t<double>>(input)) {
+        return gpuDispatchMult<double>(grg, buffer, rows, cols, outCols, byIndividual, direction);
+    } else if (py::isinstance<py::array_t<float>>(input)) {
+        return gpuDispatchMult<float>(grg, buffer, rows, cols, outCols, byIndividual, direction);
+    } else if (py::isinstance<py::array_t<std::int32_t>>(input)) {
+        return gpuDispatchMult<int32_t>(grg, buffer, rows, cols, outCols, byIndividual, direction);
+    } else if (py::isinstance<py::array_t<std::uint32_t>>(input)) {
+        return gpuDispatchMult<uint32_t>(grg, buffer, rows, cols, outCols, byIndividual, direction);
+    }
+    api_exc_check(
+        false,
+        "GPU matmul only supports float32, float64, int32, and uint32. Unsupported numpy dtype: " << arr.dtype());
+}
+#endif
+
 class NodeNumberingIterator : public grgl::GRGVisitor {
 public:
     NodeNumberingIterator(grgl::DfsPass pass)
@@ -313,6 +366,35 @@ PYBIND11_MODULE(_grgl, m) {
         .def(pybind11::self == pybind11::self)
         .def(pybind11::self < pybind11::self)
         .def("__hash__", &hashMutation);
+
+#ifdef GRGL_CUDA_ENABLED
+    py::class_<grgl::GPUGRG, std::shared_ptr<grgl::GPUGRG>> gpuGrgClass(m, "GPUGRG");
+    gpuGrgClass
+        .def_property_readonly("max_height", &grgl::GPUGRG::maxHeight, R"^(
+                The number of sample nodes in the GRG.
+            )^")
+        .def("matmul",
+             &gpuMatMul,
+             py::arg("input"),
+             py::arg("direction"),
+             py::arg("by_individual") = false,
+             R"^(
+        Same as pygrgl.matmul(), except the matrix multiplication is performed by the GPU.
+        See pygrgl.matmul() for details on input/output to the function.
+
+        :param input: The numpy 2-dimensional array of input values :math:`V`.
+        :type input: numpy.array
+        :param direction: The direction to traverse, up (input is per sample) or down (input is per mutation).
+        :type direction: pygrgl.TraversalDirection
+        :param by_individual: The dimension that is for samples (either the input or output, depending on the
+            direction parameter) uses individuals instead of haploid samples. Instead of outputting vectors
+            of :math:`N` (:py:attr:`num_samples`) columns, it is :math:`N / ploidy` (:py:attr:`num_individuals`)
+            columns.
+        :type by_individual: bool
+        :return: The numpy 2-dimensional array of output values.
+        :rtype: numpy.array
+    )^");
+#endif
 
     py::class_<grgl::GRG, std::shared_ptr<grgl::GRG>> grgClass(m, "GRG");
     grgClass
@@ -1033,6 +1115,21 @@ PYBIND11_MODULE(_grgl, m) {
         :return: A list of node IDs representing the frontier.
         :rtype: List[int]
     )^");
+
+#ifdef GRGL_CUDA_ENABLED
+    m.def("grg_to_gpu",
+          &grgl::convertGRGToGPUGRG,
+          py::arg("grg"),
+          R"^(
+        Load the given GRG into the GPU, so that matrix multiplication can be performed very quickly
+        using GPU instructions.
+
+        :param grg: The GRG, already loaded into regular RAM.
+        :type grg: pygrgl.GRG
+        :return: The GPUGRG object, which is equivalent to the input GRG.
+        :rtype: pygrgl.GPUGRG
+    )^");
+#endif
 
     m.attr("INVALID_NODE") = grgl::INVALID_NODE_ID;
     m.attr("COAL_COUNT_NOT_SET") = grgl::COAL_COUNT_NOT_SET;

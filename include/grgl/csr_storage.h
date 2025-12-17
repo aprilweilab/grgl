@@ -473,7 +473,6 @@ public:
             m_nodeIndexes.ref(m_appendIndex++) = curSize;
         }
         const size_t maxElemSize = m_dispatch.maxElemSize();
-        const size_t inputBytes = inputSize * sizeof(IType);
         // The +1 is for the count
         size_t storageByteEst = (inputSize + 1) * maxElemSize;
         const size_t bucket = curSize;

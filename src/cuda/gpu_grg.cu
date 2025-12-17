@@ -15,12 +15,13 @@ void storeGPUGRGToDisk(GPUGRG& gpuGRG, const std::string& filename) {
 
     // Write header
     const uint64_t magic = GPUGRG_MAGIC;
-    const uint64_t numRows = gpuGRG.numRows;
-    const uint64_t numEdges = gpuGRG.numEdges;
-    const uint64_t maxHeight = gpuGRG.maxHeight;
-    const uint64_t numSamples = gpuGRG.numSamples;
-    const uint64_t numMutations = gpuGRG.numMutations;
+    const uint64_t numRows = gpuGRG.m_numNodes;
+    const uint64_t numEdges = gpuGRG.m_numEdges;
+    const uint64_t maxHeight = gpuGRG.m_maxHeight;
+    const uint64_t numSamples = gpuGRG.m_numSamples;
+    const uint64_t numMutations = gpuGRG.m_numMutations;
     const uint64_t indexSize = sizeof(NodeIDSizeT);
+    const uint64_t ploidy = gpuGRG.m_ploidy;
 
     file.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
     file.write(reinterpret_cast<const char*>(&numRows), sizeof(numRows));
@@ -29,6 +30,7 @@ void storeGPUGRGToDisk(GPUGRG& gpuGRG, const std::string& filename) {
     file.write(reinterpret_cast<const char*>(&numSamples), sizeof(numSamples));
     file.write(reinterpret_cast<const char*>(&numMutations), sizeof(numMutations));
     file.write(reinterpret_cast<const char*>(&indexSize), sizeof(indexSize));
+    file.write(reinterpret_cast<const char*>(&ploidy), sizeof(ploidy));
 
     // Copy data from GPU to CPU for storage
     std::vector<NodeIDSizeT> h_RowOffsets(numRows + 1);
@@ -74,7 +76,7 @@ GPUGRG loadGPUGRGFromDisk(const std::string& filename) {
     }
 
     // Read and validate header
-    uint64_t magic, numRows, numEdges, maxHeight, numSamples, numMutations, indexSize;
+    uint64_t magic, numRows, numEdges, maxHeight, numSamples, numMutations, indexSize, ploidy;
 
     file.read(reinterpret_cast<char*>(&magic), sizeof(magic));
     file.read(reinterpret_cast<char*>(&numRows), sizeof(numRows));
@@ -83,6 +85,7 @@ GPUGRG loadGPUGRGFromDisk(const std::string& filename) {
     file.read(reinterpret_cast<char*>(&numSamples), sizeof(numSamples));
     file.read(reinterpret_cast<char*>(&numMutations), sizeof(numMutations));
     file.read(reinterpret_cast<char*>(&indexSize), sizeof(indexSize));
+    file.read(reinterpret_cast<char*>(&ploidy), sizeof(ploidy));
 
     if (!file.good()) {
         throw std::runtime_error("Error reading file header: " + filename);
@@ -98,7 +101,7 @@ GPUGRG loadGPUGRGFromDisk(const std::string& filename) {
 
     // Create and allocate GPUGRG structure
     GPUGRG gpuGRG;
-    gpuGRG.init(numRows, numSamples, numEdges, numMutations, maxHeight);
+    gpuGRG.init(numRows, numSamples, numEdges, numMutations, maxHeight, ploidy);
 
     // Read data sections
     std::vector<NodeIDSizeT> h_rowOffsets(numRows + 1);

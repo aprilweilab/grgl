@@ -2,16 +2,17 @@
 #ifndef GRGL_CUDA_MATMUL_CU
 #define GRGL_CUDA_MATMUL_CU
 
+#include "grgl/common.h"
 #ifndef GRGL_CUDA_ENABLED
 #error "Cannot build cuda_matmul.cu if CUDA is not enabled; rebuild with GRGL_CUDA_ENABLED defined."
 #endif
 
 #include <chrono>
+#include <cstdint>
 #include <cuda_runtime.h>
 #include <iostream>
 #include <vector>
-// #include "grgl/grg.h"
-// #include "grgl/cuda_matmul.h"
+
 #include "grgl/cuda/cuda_kernels.cuh"
 #include "grgl/cuda/gpu_grg.h"
 #include "grgl/grgnode.h"
@@ -126,11 +127,10 @@ void cudaTraverseUP(GPUGRG& gpuGRG, data_t* d_inoutValues, cudaStream_t& stream,
 #endif
 
     // launch the kernels level by level
-    for (size_t level = 1; level < gpuGRG.maxHeight; level++) {
-        const size_t rowStart = gpuGRG.hostHeightCutoffs.at(level);
-        const size_t rowEnd = gpuGRG.hostHeightCutoffs.at(level + 1);
-        // size_t numRows = rowEnd - rowStart;
-        const NodeIDSizeT heavyCutoff = gpuGRG.hostHeavyCutoffs.at(level);
+    for (size_t level = 1; level < gpuGRG.maxHeight(); level++) {
+        const size_t rowStart = gpuGRG.getHostHeightCutoff(level);
+        const size_t rowEnd = gpuGRG.getHostHeightCutoff(level + 1);
+        const NodeIDSizeT heavyCutoff = gpuGRG.getHostHeavyCutoff(level);
 
         if (unit == 1) {
             cudaTraverseUpSingleElementLauncher<data_t>(gpuGRG.getRowOffsets(),
@@ -139,7 +139,7 @@ void cudaTraverseUP(GPUGRG& gpuGRG, data_t* d_inoutValues, cudaStream_t& stream,
                                                         rowStart,
                                                         rowEnd,
                                                         heavyCutoff,
-                                                        gpuGRG.hostAvgChildCounts.at(level),
+                                                        gpuGRG.getHostAvgChildCount(level),
                                                         stream);
 
         } else {
@@ -186,11 +186,11 @@ void cudaTraverseDOWN(GPUGRG& gpuGRG, data_t* d_inoutValues, cudaStream_t stream
 #endif
 
     // launch the kernels level by level
-    for (int level = gpuGRG.maxHeight - 1; level > 0; level--) {
-        const size_t rowStart = gpuGRG.hostHeightCutoffs.at(level);
-        const size_t rowEnd = gpuGRG.hostHeightCutoffs.at(level + 1);
-        const double avgEdgePerNode = gpuGRG.hostAvgChildCounts.at(level);
-        const size_t heavyCutoff = gpuGRG.hostHeavyCutoffs.at(level);
+    for (int level = gpuGRG.maxHeight() - 1; level > 0; level--) {
+        const size_t rowStart = gpuGRG.getHostHeightCutoff(level);
+        const size_t rowEnd = gpuGRG.getHostHeightCutoff(level + 1);
+        const double avgEdgePerNode = gpuGRG.getHostAvgChildCount(level);
+        const size_t heavyCutoff = gpuGRG.getHostHeavyCutoff(level);
 
         if (unit == 1) {
             cudaTraverseDownSingleElementLauncher<data_t>(gpuGRG.getRowOffsets(),
@@ -245,37 +245,25 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
                                   data_t* outputMatrix,
                                   size_t outputSize,
                                   bool emitAllNodes,
+                                  bool byIndividual,
                                   data_t* buffer,
                                   size_t buffer_size) {
 
     // make sure IOType and NodeValueType are the same type
     // static_assert(std::is_same<IOType, NodeValueType>::value, "IOType and NodeValueType must be the same type for GPU
     // matmul."); make data_t an alias for IOType/NodeValueType
-
-    // using data_t = T;
-    // using NodeIDSizeT = uint32_t;
+    api_exc_check(!byIndividual, "by_individual is not yet supported: TODO");
 
     release_assert(inputCols > 0);
     release_assert(inputRows > 0);
-    release_assert(buffer_size >=
-                   this->numRows * inputRows * sizeof(data_t)); // buffer should be large enough to hold all node values
-    cudaMemsetAsync(buffer, 0, this->numRows * inputRows * sizeof(data_t), *(this->workStreamPtr));
-    // release_assert(useBitVector == false); // Bitvector not supported on GPU yet
-    // cols are num of samples or mutations
-    // rows are num of different input vectors per sample/mutation
     const size_t outputCols = outputSize / inputRows;
-    release_assert(outputSize % inputRows == 0);
-    release_assert(outputCols > 0);
-    // other validations are skipped
+    validateMatMulInputs<GPUGRG>(
+        this, inputCols, inputRows, direction, outputSize, emitAllNodes, byIndividual, outputCols);
 
-    // create cuda streams
-    /*
-    const int num_streams = 4;
-    std::vector<cudaStream_t> streams(num_streams);
-    for (int i = 0; i < num_streams; i++) {
-        cudaStreamCreate(&streams[i]);
-    }
-    */
+    release_assert(buffer_size >= this->numNodes() * inputRows *
+                                      sizeof(data_t)); // buffer should be large enough to hold all node values
+    cudaMemsetAsync(buffer, 0, this->numNodes() * inputRows * sizeof(data_t), *(this->workStreamPtr));
+
     const auto numFeatures = inputRows;
 
     if (direction == DIRECTION_DOWN) {
@@ -284,16 +272,16 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
 
         const int nodePerBlock = 128 / numFeatures;
         const int blockSize = nodePerBlock * numFeatures;
-        int numBlocks = (this->numMutations + nodePerBlock - 1) / nodePerBlock;
+        int numBlocks = (this->numMutations() + nodePerBlock - 1) / nodePerBlock;
 
         cudaReorderPermutationPairKernel<data_t, false, true, true>
             <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(buffer,
                                                                   inputMatrix,
                                                                   this->getMutationAndNewMapping(),
                                                                   0,
-                                                                  this->numMutations,
+                                                                  this->numMutations(),
                                                                   numFeatures,
-                                                                  this->numMutations,
+                                                                  this->numMutations(),
                                                                   nodePerBlock);
         CHECK_CUDA_LAST_ERROR();
 
@@ -301,27 +289,27 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
         CHECK_CUDA_LAST_ERROR();
 
         if (emitAllNodes) {
-            numBlocks = (this->numRows + nodePerBlock - 1) / nodePerBlock;
+            numBlocks = (this->numNodes() + nodePerBlock - 1) / nodePerBlock;
             cudaReorderMapKernel<data_t, true, false>
                 <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(outputMatrix,
                                                                       reinterpret_cast<data_t*>(buffer),
                                                                       this->getOldToNewMapping(),
                                                                       0,
-                                                                      this->numRows,
+                                                                      this->numNodes(),
                                                                       numFeatures,
-                                                                      this->numRows,
+                                                                      this->numNodes(),
                                                                       nodePerBlock);
         } else {
-            cudaMemsetAsync(outputMatrix, 0, this->numSamples * numFeatures * sizeof(data_t), *(this->workStreamPtr));
-            numBlocks = (this->numSamples + nodePerBlock - 1) / nodePerBlock;
+            cudaMemsetAsync(outputMatrix, 0, this->numSamples() * numFeatures * sizeof(data_t), *(this->workStreamPtr));
+            numBlocks = (this->numSamples() + nodePerBlock - 1) / nodePerBlock;
             cudaReorderMapKernel<data_t, true, false>
                 <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(outputMatrix,
                                                                       reinterpret_cast<data_t*>(buffer),
                                                                       this->getOldToNewMapping(),
                                                                       0,
-                                                                      this->numSamples,
+                                                                      this->numSamples(),
                                                                       numFeatures,
-                                                                      this->numSamples,
+                                                                      this->numSamples(),
                                                                       nodePerBlock);
         }
         CHECK_CUDA_LAST_ERROR();
@@ -330,76 +318,48 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
         // Upward, we are calculating "how do the samples impact the mutations?"
         const int nodePerBlock = 128 / numFeatures;
         const int blockSize = nodePerBlock * numFeatures;
-        int numBlocks = (this->numSamples + nodePerBlock - 1) / nodePerBlock;
+        int numBlocks = (this->numSamples() + nodePerBlock - 1) / nodePerBlock;
 
         cudaReorderMapKernel<data_t, false, true>
             <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(reinterpret_cast<data_t*>(buffer),
                                                                   inputMatrix,
                                                                   this->getOldToNewMapping(),
                                                                   0,
-                                                                  this->numSamples,
+                                                                  this->numSamples(),
                                                                   numFeatures,
-                                                                  this->numSamples,
+                                                                  this->numSamples(),
                                                                   nodePerBlock);
 
         CHECK_CUDA_LAST_ERROR();
-
-        /*
-        cudaEvent_t event;
-        cudaEventCreate(&event);
-        cudaEventRecord(event, *(this->work_stream_ptr));
-        // techinically we need to destroy the events
-        // however since it may cause sync problems they're not destroyed for now
-
-        std::vector<cudaStream_t> streams;
-        for (size_t i = 0; i < 2; i++) {
-            cudaStream_t stream;
-            cudaStreamCreate(&stream);
-            streams.push_back(stream);
-            cudaStreamWaitEvent(stream, event, 0);
-
-        }
-
-        CHECK_CUDA_LAST_ERROR();
-        */
 
         cudaTraverseUP<data_t>(*this, buffer, *(this->workStreamPtr), numFeatures);
         CHECK_CUDA_LAST_ERROR();
 
         // Since cudaTraverseUP is currently blocking, we do not need to do stream synchronization here.
-        /*
-        std::vector<cudaEvent_t> end_events;
-        for (size_t i = 0; i < streams.size(); i++) {
-            cudaEvent_t end_event;
-            cudaEventCreate(&end_event);
-            cudaEventRecord(end_event, streams[i]);
-            end_events.push_back(end_event);
-            cudaStreamWaitEvent(*(this->work_stream_ptr), end_event, 0);
-        }
-        */
 
         if (emitAllNodes) {
-            numBlocks = (this->numRows + nodePerBlock - 1) / nodePerBlock;
+            numBlocks = (this->numNodes() + nodePerBlock - 1) / nodePerBlock;
             cudaReorderMapKernel<data_t, true, false>
                 <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(outputMatrix,
                                                                       reinterpret_cast<data_t*>(buffer),
                                                                       this->getOldToNewMapping(),
                                                                       0,
-                                                                      this->numRows,
+                                                                      this->numNodes(),
                                                                       numFeatures,
-                                                                      this->numRows,
+                                                                      this->numNodes(),
                                                                       nodePerBlock);
         } else {
-            cudaMemsetAsync(outputMatrix, 0, this->numMutations * numFeatures * sizeof(data_t), *(this->workStreamPtr));
-            numBlocks = (this->numMutations + nodePerBlock - 1) / nodePerBlock;
+            cudaMemsetAsync(
+                outputMatrix, 0, this->numMutations() * numFeatures * sizeof(data_t), *(this->workStreamPtr));
+            numBlocks = (this->numMutations() + nodePerBlock - 1) / nodePerBlock;
             cudaReorderPermutationPairKernel<data_t, true, false>
                 <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(outputMatrix,
                                                                       reinterpret_cast<data_t*>(buffer),
                                                                       this->getMutationAndNewMapping(),
                                                                       0,
-                                                                      this->numMutations,
+                                                                      this->numMutations(),
                                                                       numFeatures,
-                                                                      this->numMutations,
+                                                                      this->numMutations(),
                                                                       nodePerBlock);
         }
         CHECK_CUDA_LAST_ERROR();
@@ -407,28 +367,23 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
     CHECK_CUDA_LAST_ERROR();
 }
 
-template void GPUGRG::matrixMultiplication<float>(
-    const float*, size_t, size_t, TraversalDirection, float*, size_t, bool, float*, size_t);
+#define MATMUL_TEMPLATE(T)                                                                                             \
+    template void GPUGRG::matrixMultiplication<T>(                                                                     \
+        const T*, size_t, size_t, TraversalDirection, T*, size_t, bool, bool, T*, size_t)
 
-template void GPUGRG::matrixMultiplication<double>(
-    const double*, size_t, size_t, TraversalDirection, double*, size_t, bool, double*, size_t);
+MATMUL_TEMPLATE(float);
+MATMUL_TEMPLATE(double);
+MATMUL_TEMPLATE(uint32_t);
+MATMUL_TEMPLATE(int32_t);
 
-template void
-GPUGRG::matrixMultiplication<int>(const int*, size_t, size_t, TraversalDirection, int*, size_t, bool, int*, size_t);
-
-/*
-template void GPUGRG<uint32_t>::matrixMultiplication<long long>(
-    const long long*, size_t, size_t, TraversalDirection,
-    long long*, size_t, bool, long long*, size_t
-);
-*/
-
-/*
-template void GPUGRG<uint64_t>::matrixMultiplication<long long>(
-    const long long*, size_t, size_t, TraversalDirection,
-    long long*, size_t, bool, long long*, size_t
-);
-*/
+// Current CUDA implementation does not support these types for multiplication, because there is no
+// atomic addition operation for them.
+// MATMUL_TEMPLATE(uint64_t);
+// MATMUL_TEMPLATE(int64_t);
+// MATMUL_TEMPLATE(uint8_t);
+// MATMUL_TEMPLATE(uint16_t);
+// MATMUL_TEMPLATE(int8_t);
+// MATMUL_TEMPLATE(int16_t);
 
 bool hasCudaSupport() {
     int deviceCount;

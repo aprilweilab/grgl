@@ -1078,7 +1078,8 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
     release_assert(inputCols > 0);
     release_assert(inputRows > 0);
     const size_t outputCols = outputSize / inputRows;
-    validateMatMulInputs(this, inputCols, inputRows, direction, outputSize, emitAllNodes, byIndividual, outputCols);
+    validateMatMulInputs<GRG>(
+        this, inputCols, inputRows, direction, outputSize, emitAllNodes, byIndividual, outputCols);
     // When we do bitvector calculations, we must have the number of input rows be a multiple of the
     // element size the bitvector is using.
     const size_t effectiveInputRows =

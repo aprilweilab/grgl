@@ -1,0 +1,70 @@
+# This Dockerfile helps you build Python packages that are CUDA-enabled. Building CUDA-enabled packages
+# with manylinux is non-trivial, so this just uses an Ubuntu LTS instead - the result being that these
+# prebuilt packages may not work on older Linux kernels/glibc versions. However, nvcc only works with
+# GCC versions pre-13, and manylinux has GCC 14.
+#
+# Examples to build with different Python versions:
+#  1. Python 3.9: `docker build . -f Dockerfile.CUDA -t grgl_cuda:latest --build-arg PYTHON_VER=3.9.25
+#  2. Python 3.10: `docker build . -f Dockerfile.CUDA -t grgl_cuda:latest --build-arg PYTHON_VER=3.10.19
+#  3. Python 3.11: `docker build . -f Dockerfile.CUDA -t grgl_cuda:latest --build-arg PYTHON_VER=3.11.14
+#  4. Python 3.12: `docker build . -f Dockerfile.CUDA -t grgl_cuda:latest --build-arg PYTHON_VER=3.12.12
+#  5. Python 3.13: `docker build . -f Dockerfile.CUDA -t grgl_cuda:latest --build-arg PYTHON_VER=3.13.9
+#
+# Example to run:
+#   docker run -v $PWD:/working -it grgl_cuda:latest grg construct --help
+#
+# Example to extract the Python-version-specific wheel, to be used on another machine
+#   docker run -v $PWD:/working -it grgl_cuda:latest bash -c "cp /inst/*.whl /working/"
+#
+# This file uses a multi-stage docker build. The first stage is the one that grabs the source code and
+# builds the GRGL tools and libraries (Python and C++). The results of this build then get copied into
+# the second (clean) stage. The second stage is what users will have access to when they run the
+# container
+
+# Stage 0: build GRGL
+FROM ubuntu:22.04
+
+RUN apt update && \
+    apt install -y python3 python3-setuptools python3-pip git build-essential cmake wget libssl-dev
+
+RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    apt-get update && \
+    apt-get -y install cuda-toolkit-12-6
+# Use `nvcc --list-gpu-code` to see what architectures are supported.
+ENV PATH $PATH:/usr/local/cuda-12.6/bin/
+
+ARG PYTHON_VER="3.10.19"
+RUN wget https://www.python.org/ftp/python/$PYTHON_VER/Python-$PYTHON_VER.tgz && \
+    tar -xf Python-$PYTHON_VER.tgz && \
+    cd Python-$PYTHON_VER && \
+    ./configure --prefix /opt/custompy/ && \
+    make -j 6 && \
+    make install
+
+# Install GRGL command line tools and scripts. Installing the above python package
+# will also build this, but there are some extra tools we might want.
+COPY . /grgl_src
+RUN cd /grgl_src && mkdir cpp_build && cd cpp_build && mkdir /grgl_inst && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/grgl_inst -DENABLE_CUDA=ON && \
+    make -j && \
+    make install
+# Install GRGL python API.
+RUN cd /grgl_src && /opt/custompy/bin/python3 -m pip install wheel && GRGL_CUDA=1 /opt/custompy/bin/python3 setup.py bdist_wheel
+
+## Stage 1: install GRGL and scripts, copy over custom Python installation.
+FROM ubuntu:22.04
+RUN mkdir /inst && mkdir /opt/custompy/
+COPY --from=0 /grgl_inst/bin/ /usr/local/bin/
+COPY --from=0 /grgl_inst/lib/ /usr/local/lib/
+COPY --from=0 /grgl_src/dist/pygrgl*.whl /inst/
+COPY --from=0 /grgl_src/scripts/convertlz4.sh /usr/local/bin/gconvertlz4
+COPY --from=0 /opt/custompy/ /opt/custompy/
+
+ENV PATH="/opt/custompy/bin/:$PATH"
+RUN apt update && \
+    apt install -y lz4 time && \
+    /opt/custompy/bin/python3 -m pip install --force-reinstall /inst/pygrgl*.whl && \
+    chmod +x /usr/local/bin/gconvertlz4 && \
+    /opt/custompy/bin/python3 -m pip install igdtools && \
+    /opt/custompy/bin/python3 -m pip install grapp

@@ -673,7 +673,8 @@ MutableGRGPtr buildTree(HapWindowContext& context,
         std::vector<NodeIDList> mutIndexToNodes(context.allMutations.size());
         for (const NodeID rootId : result->getRootNodes()) {
             size_t haps = 0;
-            assert(result->getPloidy() != PLOIDY_COAL_PROP || nodeToIndivs.find(rootId) != nodeToIndivs.end() || rootId < numSamples);
+            assert(result->getPloidy() != PLOIDY_COAL_PROP || nodeToIndivs.find(rootId) != nodeToIndivs.end() ||
+                   rootId < numSamples);
             std::vector<size_t> mutIndices = hapsToMutIndices(context.sampleHapVects[rootId], context.windowInfo);
             DEBUG_PRINT("Root " << rootId << " has " << mutIndices.size() << " mutations\n");
             for (const size_t mutIndex : mutIndices) {

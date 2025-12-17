@@ -421,7 +421,7 @@ def from_tabular(args):
                             )
                             for r in ranges
                         ],
-                        1, # chunksize - the Python docs are wrong, this is not 1 by default
+                        1,  # chunksize - the Python docs are wrong, this is not 1 by default
                     ),
                     total=len(ranges),
                 )

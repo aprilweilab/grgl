@@ -126,7 +126,8 @@ inline void vectorAdd<uint8_t, true>(
     }
 }
 
-inline void validateMatMulInputs(const GRG* grg,
+template <typename GT>
+inline void validateMatMulInputs(const GT* grg,
                                  const size_t inputCols,
                                  const size_t inputRows,
                                  const TraversalDirection direction,
