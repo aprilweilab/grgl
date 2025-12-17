@@ -77,67 +77,7 @@ typedef std::shared_ptr<CudaBuffer<NodeIDSizeT>> CudaNodeIDBufferPtr;
 constexpr uint64_t GPUGRG_MAGIC = 0x4752474C47505501ULL; // "GRGLGPU" + version byte 01
 
 class GPUGRG {
-private:
-    // these are resident GPU pointers
-    CudaNodeIDBufferPtr rowOffsets; // Device pointer to row offsets (size: num_rows + 1)
-    CudaNodeIDBufferPtr oldToNewMapping;
-    CudaNodeIDBufferPtr newToOldMapping;       // This is not used actually
-    CudaNodeIDBufferPtr mutationAndNewMapping; // Mapping between mutation id and new node id (in pairs)
-
-    // Since col indices may be large, this data may not be resident on GPU
-    CudaNodeIDBufferPtr colIndices; // Device pointer to column indices (size: nnz)
-
 public:
-    NodeIDSizeT* getRowOffsets() {
-        if (!rowOffsets) {
-            throw ApiMisuseFailure("Row offsets GPU buffer is not allocated");
-        }
-        return rowOffsets->get();
-    }
-
-    NodeIDSizeT* getOldToNewMapping() {
-        if (!oldToNewMapping) {
-            throw ApiMisuseFailure("Old to new mapping GPU buffer is not allocated");
-        }
-        return oldToNewMapping->get();
-    }
-
-    NodeIDSizeT* getNewToOldMapping() {
-        if (!newToOldMapping) {
-            throw ApiMisuseFailure("New to old mapping GPU buffer is not allocated");
-        }
-        return newToOldMapping->get();
-    }
-
-    NodeIDSizeT* getMutationAndNewMapping() {
-        if (!mutationAndNewMapping) {
-            throw ApiMisuseFailure("Mutation and new mapping GPU buffer is not allocated");
-        }
-        return mutationAndNewMapping->get();
-    }
-
-    NodeIDSizeT* getColIndices() {
-        if (!colIndices) {
-            throw ApiMisuseFailure("Col indices GPU buffer is not allocated");
-        }
-        return colIndices->get();
-    }
-
-    // This is the corresponding host backup data
-    std::vector<NodeIDSizeT> hostColIndices;
-
-    std::vector<NodeIDSizeT> hostHeightCutoffs;
-    std::vector<NodeIDSizeT> hostHeavyCutoffs;
-    std::vector<double> hostAvgChildCounts;
-
-    size_t numRows;      // Number of rows, i.e. number of nodes
-    size_t numSamples;   // Number of samples, i.e. number of leaf nodes
-    size_t numMutations; // Number of mutations. may NOT correspond to number of non-leaf nodes
-    size_t numEdges;     // Number of non-zero elements, i.e. number of edges
-    size_t maxHeight;
-
-    std::shared_ptr<cudaStream_t> workStreamPtr; // CUDA stream for asynchronous operations
-
     // friend GPUGRG loadGPUGRGFromDisk(const std::string& filename);
     // friend void storeGPUGRGToDisk(const GPUGRG& gpu_grg, const std::string& filename);
     // Constructor
@@ -156,51 +96,6 @@ public:
 
     // Destructor
     ~GPUGRG() { free(); }
-
-    // return the size of GPU memory needed by col indices in bytes
-    size_t queryColIndSize() { return numEdges * sizeof(NodeIDSizeT); }
-
-    // This function sets existing GPU memory pointers for col indices
-    // will not allocate new memory
-    // the size should be in **BYTES**
-    void setColIndBuffer(CudaNodeIDBufferPtr buffer, size_t size) {
-        if (size < queryColIndSize()) {
-            throw ApiMisuseFailure("Provided buffer size is smaller than required col indices size");
-        }
-        if (colIndices) {
-            throw ApiMisuseFailure("Col indices buffer is already set");
-        }
-        colIndices = buffer;
-    }
-
-    // This function copies col indices from Host to GPU
-    // Asynchronous copy is supported
-    // The caller must ensure the memory space is not used by other operations.
-    void copyColIndFromHost() {
-        if (colIndices) {
-            cudaMemcpyAsync(getColIndices(),
-                            hostColIndices.data(),
-                            numEdges * sizeof(NodeIDSizeT),
-                            cudaMemcpyHostToDevice,
-                            *workStreamPtr);
-        } else {
-            throw ApiMisuseFailure("No col indices buffer set for GPUGRG copyColIndFromHost operation");
-        }
-    }
-
-    // This function will block the calling thread
-    // until all preceding operations related to this GRG is done
-    void wait() {
-        if (workStreamPtr) {
-            cudaStreamSynchronize(*workStreamPtr);
-        } else {
-            throw ApiMisuseFailure("No CUDA stream set for GPUGRG wait operation");
-        }
-    }
-
-    // This function removes the GPU memory buffer
-    // Will not free the memory, just removes the pointers
-    void removeColIndBuffer() { colIndices = nullptr; }
 
     // Init vars and allocate GPU memory for all structures
     // This function is blocking
@@ -240,34 +135,6 @@ public:
         } else {
             workStreamPtr = std::make_shared<cudaStream_t>();
             cudaStreamCreate(workStreamPtr.get());
-        }
-        CHECK_CUDA_LAST_ERROR();
-    }
-
-    // Free GPU memory
-    void free() {
-        rowOffsets = nullptr;
-        colIndices = nullptr;
-        oldToNewMapping = nullptr;
-        newToOldMapping = nullptr;
-        mutationAndNewMapping = nullptr;
-        CHECK_CUDA_LAST_ERROR();
-
-        hostColIndices.clear();
-        hostHeightCutoffs.clear();
-        hostHeavyCutoffs.clear();
-        hostAvgChildCounts.clear();
-
-        numRows = numSamples = numEdges = 0;
-        numMutations = 0;
-        maxHeight = 0;
-
-        if (workStreamPtr) {
-            // This may not work if we are multithreading
-            if (workStreamPtr.use_count() == 1) {
-                cudaStreamDestroy(*workStreamPtr);
-            }
-            workStreamPtr = nullptr;
         }
         CHECK_CUDA_LAST_ERROR();
     }
@@ -431,6 +298,114 @@ public:
         return std::move(result);
     }
 
+    NodeIDSizeT* getRowOffsets() {
+        if (!rowOffsets) {
+            throw ApiMisuseFailure("Row offsets GPU buffer is not allocated");
+        }
+        return rowOffsets->get();
+    }
+
+    NodeIDSizeT* getOldToNewMapping() {
+        if (!oldToNewMapping) {
+            throw ApiMisuseFailure("Old to new mapping GPU buffer is not allocated");
+        }
+        return oldToNewMapping->get();
+    }
+
+    NodeIDSizeT* getNewToOldMapping() {
+        if (!newToOldMapping) {
+            throw ApiMisuseFailure("New to old mapping GPU buffer is not allocated");
+        }
+        return newToOldMapping->get();
+    }
+
+    NodeIDSizeT* getMutationAndNewMapping() {
+        if (!mutationAndNewMapping) {
+            throw ApiMisuseFailure("Mutation and new mapping GPU buffer is not allocated");
+        }
+        return mutationAndNewMapping->get();
+    }
+
+    NodeIDSizeT* getColIndices() {
+        if (!colIndices) {
+            throw ApiMisuseFailure("Col indices GPU buffer is not allocated");
+        }
+        return colIndices->get();
+    }
+
+    // return the size of GPU memory needed by col indices in bytes
+    size_t queryColIndSize() { return numEdges * sizeof(NodeIDSizeT); }
+
+    // This function sets existing GPU memory pointers for col indices
+    // will not allocate new memory
+    // the size should be in **BYTES**
+    void setColIndBuffer(CudaNodeIDBufferPtr buffer, size_t size) {
+        if (size < queryColIndSize()) {
+            throw ApiMisuseFailure("Provided buffer size is smaller than required col indices size");
+        }
+        if (colIndices) {
+            throw ApiMisuseFailure("Col indices buffer is already set");
+        }
+        colIndices = buffer;
+    }
+
+    // This function copies col indices from Host to GPU
+    // Asynchronous copy is supported
+    // The caller must ensure the memory space is not used by other operations.
+    void copyColIndFromHost() {
+        if (colIndices) {
+            cudaMemcpyAsync(getColIndices(),
+                            hostColIndices.data(),
+                            numEdges * sizeof(NodeIDSizeT),
+                            cudaMemcpyHostToDevice,
+                            *workStreamPtr);
+        } else {
+            throw ApiMisuseFailure("No col indices buffer set for GPUGRG copyColIndFromHost operation");
+        }
+    }
+
+    // This function will block the calling thread
+    // until all preceding operations related to this GRG is done
+    void wait() {
+        if (workStreamPtr) {
+            cudaStreamSynchronize(*workStreamPtr);
+        } else {
+            throw ApiMisuseFailure("No CUDA stream set for GPUGRG wait operation");
+        }
+    }
+
+    // This function removes the GPU memory buffer
+    // Will not free the memory, just removes the pointers
+    void removeColIndBuffer() { colIndices = nullptr; }
+
+    // Free GPU memory
+    void free() {
+        rowOffsets = nullptr;
+        colIndices = nullptr;
+        oldToNewMapping = nullptr;
+        newToOldMapping = nullptr;
+        mutationAndNewMapping = nullptr;
+        CHECK_CUDA_LAST_ERROR();
+
+        hostColIndices.clear();
+        hostHeightCutoffs.clear();
+        hostHeavyCutoffs.clear();
+        hostAvgChildCounts.clear();
+
+        numRows = numSamples = numEdges = 0;
+        numMutations = 0;
+        maxHeight = 0;
+
+        if (workStreamPtr) {
+            // This may not work if we are multithreading
+            if (workStreamPtr.use_count() == 1) {
+                cudaStreamDestroy(*workStreamPtr);
+            }
+            workStreamPtr = nullptr;
+        }
+        CHECK_CUDA_LAST_ERROR();
+    }
+
     /*
      * Raw matrix multiplication implementation.
      * The output matrix is the full matrix.
@@ -447,6 +422,30 @@ public:
                               bool emitAllNodes,
                               data_t* buffer,
                               size_t buffer_size);
+
+    // This is the corresponding host backup data
+    std::vector<NodeIDSizeT> hostColIndices;
+
+    std::vector<NodeIDSizeT> hostHeightCutoffs;
+    std::vector<NodeIDSizeT> hostHeavyCutoffs;
+    std::vector<double> hostAvgChildCounts;
+
+    size_t numRows;      // Number of rows, i.e. number of nodes
+    size_t numSamples;   // Number of samples, i.e. number of leaf nodes
+    size_t numMutations; // Number of mutations. may NOT correspond to number of non-leaf nodes
+    size_t numEdges;     // Number of non-zero elements, i.e. number of edges
+    size_t maxHeight;
+
+    std::shared_ptr<cudaStream_t> workStreamPtr; // CUDA stream for asynchronous operations
+private:
+    // these are resident GPU pointers
+    CudaNodeIDBufferPtr rowOffsets; // Device pointer to row offsets (size: num_rows + 1)
+    CudaNodeIDBufferPtr oldToNewMapping;
+    CudaNodeIDBufferPtr newToOldMapping;       // This is not used actually
+    CudaNodeIDBufferPtr mutationAndNewMapping; // Mapping between mutation id and new node id (in pairs)
+
+    // Since col indices may be large, this data may not be resident on GPU
+    CudaNodeIDBufferPtr colIndices; // Device pointer to column indices (size: nnz)
 };
 
 /**
