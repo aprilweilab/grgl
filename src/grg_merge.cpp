@@ -314,16 +314,6 @@ private:
     const BpPosition m_adjust;
 };
 
-static inline bool inrange(const std::pair<BpPosition, BpPosition>& range, const BpPosition position) {
-    return (position >= range.first && position < range.second);
-}
-
-static inline bool overlap(const std::pair<BpPosition, BpPosition>& range1,
-                           const std::pair<BpPosition, BpPosition>& range2) {
-    return inrange(range2, range1.first) || inrange(range2, range1.second) || inrange(range1, range2.first) ||
-           inrange(range1, range2.second);
-}
-
 template <typename Hasher, typename Mapper>
 void mergeHelper(MutableGRG& grg,
                  const std::list<std::string>& otherGrgFiles,
@@ -365,7 +355,7 @@ void mergeHelper(MutableGRG& grg,
         mutRange = {mutRange.first + adjust, mutRange.second + adjust};
         if (!ignoreRangeViolations) {
             for (const auto& seen : seenRanges) {
-                api_exc_check(!overlap(seen, mutRange),
+                api_exc_check(!bpOverlap(seen, mutRange),
                               "Cannot merge graphs with overlapping mutation ranges: ("
                                   << seen.first << "-" << seen.second << "), (" << mutRange.first << "-"
                                   << mutRange.second << ")");

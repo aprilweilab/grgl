@@ -28,12 +28,18 @@
 
 namespace grgl {
 
+using BKDistT = size_t;
+constexpr BKDistT MAX_BK_DIST = std::numeric_limits<BKDistT>::max();
+
 template <typename ElementType> class LeanBKTree;
 
 template <typename ElementType> class LeanBKTreeNode {
 public:
-    explicit LeanBKTreeNode(const ElementType& element)
+    using Edge = std::pair<BKDistT, std::shared_ptr<LeanBKTreeNode<ElementType>>>;
+
+    explicit LeanBKTreeNode(const ElementType& element, Edge parent)
         : m_elements({element}),
+          m_parent(std::move(parent)),
           m_isDeleted(false) {}
 
     // Return True if the node was previously deleted.
@@ -55,12 +61,12 @@ public:
     }
 
 private:
-    using ChildPair = std::pair<size_t, std::shared_ptr<LeanBKTreeNode<ElementType>>>;
-
     // The elements (user data) associated with the above vector.
     std::vector<ElementType> m_elements;
     // The child edges. Likely sparse, depending on how many discrete distances are possible.
-    std::vector<ChildPair> m_children;
+    std::vector<Edge> m_children;
+    // Parent edge. Used to search in both directions.
+    Edge m_parent;
 
     bool m_isDeleted;
 
@@ -76,7 +82,8 @@ public:
 
     NodePointer insert(const ElementType& element, size_t& comparisons) {
         if (!m_rootNode) {
-            m_rootNode = std::make_shared<LeanBKTreeNode<ElementType>>(element);
+            std::pair<BKDistT, NodePointer> parent = {MAX_BK_DIST, NodePointer()};
+            m_rootNode = std::make_shared<LeanBKTreeNode<ElementType>>(element, parent);
             release_assert(m_totalNodes == 0);
             m_totalNodes = 1;
             return m_rootNode;
@@ -99,7 +106,8 @@ public:
                 }
             }
             if (!nextNodePtr) {
-                auto newNode = std::make_shared<LeanBKTreeNode<ElementType>>(element);
+                std::pair<BKDistT, NodePointer> parent = {dist, currentNode};
+                auto newNode = std::make_shared<LeanBKTreeNode<ElementType>>(element, parent);
                 currentNode->m_children.emplace_back(dist, newNode);
                 m_totalNodes++;
                 return newNode;
@@ -109,17 +117,25 @@ public:
         abort();
     }
 
-    std::vector<NodePointer>
-    lookup(const ElementType& queryElement, size_t& nearestDistance, size_t& comparisons, bool collectAll = true) {
+    std::vector<NodePointer> lookup(const NodePointer& startNode,
+                                    const ElementType& queryElement,
+                                    size_t& nearestDistance,
+                                    size_t& totalComparisons,
+                                    bool collectAll = true,
+                                    size_t maxComparisons = std::numeric_limits<size_t>::max()) {
+        release_assert(maxComparisons >= 1);
         size_t distBest = std::numeric_limits<size_t>::max();
         if (!m_rootNode) {
             nearestDistance = distBest;
             return {};
         }
-        std::list<NodePointer> workingList = {m_rootNode};
+        std::list<NodePointer> workingList = {startNode};
         std::vector<NodePointer> results;
-        while (!workingList.empty()) {
+        size_t comparisons = 0;
+        std::unordered_set<NodePointer> seen;
+        while (!workingList.empty() && (comparisons < maxComparisons || results.empty())) {
             auto node = workingList.back();
+            seen.emplace(node);
             workingList.pop_back();
             const auto dist = m_distFunc(node->m_elements[0], queryElement);
             comparisons++;
@@ -139,13 +155,24 @@ public:
                 }
             }
             for (auto& pair : node->m_children) {
-                const size_t nextDist = pair.first;
-                const size_t bound = std::abs((ssize_t)nextDist - (ssize_t)dist);
+                if (seen.find(pair.second) == seen.end()) {
+                    const size_t nextDist = pair.first;
+                    const size_t bound = std::abs((ssize_t)nextDist - (ssize_t)dist);
+                    if (bound < distBest || (bound == distBest && collectAll)) {
+                        workingList.push_back(pair.second);
+                    }
+                }
+            }
+            const auto parentDist = node->m_parent.first;
+            const auto& parentNode = node->m_parent.second;
+            if (parentNode && seen.find(parentNode) == seen.end()) {
+                const size_t bound = std::abs((ssize_t)parentDist - (ssize_t)dist);
                 if (bound < distBest || (bound == distBest && collectAll)) {
-                    workingList.push_back(pair.second);
+                    workingList.push_back(parentNode);
                 }
             }
         }
+        totalComparisons += comparisons;
         nearestDistance = distBest;
         return results;
     }

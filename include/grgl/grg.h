@@ -842,6 +842,8 @@ public:
 
     bool nodesAreOrdered() const override { return m_nodesAreOrdered; }
 
+    bool& nodesAreOrdered() { return m_nodesAreOrdered; }
+
     size_t numNodes() const override { return m_nodes.size(); }
 
     size_t numEdges() const override {
@@ -924,7 +926,7 @@ public:
      * @param[in] srcId The ID of the source node.
      * @param[in] tgtId The ID of the target node.
      */
-    void disconnect(NodeID srcId, NodeID tgtId);
+    bool disconnect(NodeID srcId, NodeID tgtId);
 
     /**
      * Merge one or more GRGs into this one. Only succeeds if all GRGs have the same number of

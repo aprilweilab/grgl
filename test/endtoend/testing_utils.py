@@ -8,14 +8,17 @@ INPUT_DIR = os.path.join(THIS_DIR, "input")
 
 
 def construct_grg(
-    input_file: str, output_file: Optional[str] = None, test_input: bool = True
+    input_file: str,
+    output_file: Optional[str] = None,
+    test_input: bool = True,
+    parts: int = 10,
 ) -> str:
     cmd = [
         "grg",
         "construct",
         "--force",  # Ignore that we don't have tabix-indexed files
         "-p",
-        "10",
+        str(parts),
         "-j",
         str(JOBS),
         os.path.join(INPUT_DIR, input_file) if test_input else input_file,

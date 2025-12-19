@@ -43,7 +43,7 @@ enum {
 using GrgBuildFlags = uint64_t;
 
 // See TODO in fast_build.cpp
-constexpr size_t FIXED_HAP_LENGTH = 128;
+constexpr size_t FIXED_HAP_LENGTH = 254;
 
 /**
  * Add the non-genotype information (if any) to the GRG, such as the base-pair range, individuals,
@@ -70,7 +70,7 @@ void addExtraInfoToGRG(MutableGRGPtr& grg,
  *      mapped by creating a Mutation node and one edge per sample.
  * @param[in] indivIdToPop Map from individual identifier to population identifier.
  * @param[in] rebuildProportion When the nearest-neighbor index reached this proportion of deleted
- *      items, rebuild it. Default: 0.25.
+ *      items, rebuild it. Default: 0.10.
  */
 MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
                                  const std::string& sampleFile,
@@ -80,7 +80,7 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
                                  size_t treeCount,
                                  double noTreeBelowThreshold,
                                  const std::map<std::string, std::string>& indivIdToPop,
-                                 double rebuildProportion = 0.25);
+                                 double rebuildProportion = 0.10);
 
 } // namespace grgl
 

@@ -29,6 +29,10 @@
 
 namespace grgl {
 
+// Global (to this process) unique identifier used to disambiguate log messages when performing
+// process-parallel operations.
+char PROCESS_UNIQUE[8] = {0};
+
 // This number needs to be more principled in how it is chosen. I somewhat randomly chose this,
 // as I want the pairwise case to definitely use the sparse topological search, but I don't really
 // know when the switch from dense to sparse is optimal. This only matters for large graphs.
@@ -210,11 +214,12 @@ void MutableGRG::connect(const NodeID srcId, const NodeID tgtId) {
     }
 }
 
-void MutableGRG::disconnect(const NodeID srcId, const NodeID tgtId) {
-    m_nodes.at(srcId)->deleteDownEdge(tgtId);
+bool MutableGRG::disconnect(const NodeID srcId, const NodeID tgtId) {
+    bool result = m_nodes.at(srcId)->deleteDownEdge(tgtId);
     if (m_hasUpEdges) {
-        m_nodes.at(tgtId)->deleteUpEdge(srcId);
+        result = result && m_nodes.at(tgtId)->deleteUpEdge(srcId);
     }
+    return result;
 }
 
 class TopoOrderVisitor : public grgl::GRGVisitor {
