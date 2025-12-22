@@ -66,6 +66,10 @@ int main(int argc, char** argv) {
         parser, "map-muts", "Map the mutations from the provided file", {'m', "map-muts"});
     args::ValueFlag<size_t> mapMutationsThreads(
         parser, "threads", "Use this many threads when mapping mutations", {'t', "threads"});
+    args::ValueFlag<size_t> mapMutationsBatchSize(parser,
+                                                  "mutation-batch-size",
+                                                  "Map this many mutations in a batch (default 64)",
+                                                  {"mutation-batch-size"});
     args::Flag binaryMutations(parser,
                                "binary-muts",
                                "Do not store the allele with the mutation, only that a mutation occurred",
@@ -327,8 +331,16 @@ int main(int argc, char** argv) {
             return 1;
         }
         grgl::MutationMappingStats stats;
-        stats = grgl::mapMutations(
-            std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG), *unmappedMutations, verbose, mapMutThreads);
+        if (mapMutationsBatchSize) {
+            stats = grgl::mapMutations(std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG),
+                                       *unmappedMutations,
+                                       verbose,
+                                       mapMutThreads,
+                                       *mapMutationsBatchSize);
+        } else {
+            stats = grgl::mapMutations(
+                std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG), *unmappedMutations, verbose, mapMutThreads);
+        }
         if (verbose) {
             EMIT_TIMING_MESSAGE("Mapping mutations took");
             std::cerr << std::endl;

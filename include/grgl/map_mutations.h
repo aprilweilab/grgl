@@ -66,8 +66,13 @@ struct MutationMappingStats {
 
 class HaplotypeIndex;
 
-MutationMappingStats mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose = false, size_t numThreads = 1);
+MutationMappingStats mapMutations(const MutableGRGPtr& grg,
+                                  MutationIterator& mutations,
+                                  bool verbose = false,
+                                  size_t numThreads = 1,
+                                  size_t mutationBatchSize = 64);
 
 }; // namespace grgl
 
 #endif /* MAP_MUTATIONS_H */
+
