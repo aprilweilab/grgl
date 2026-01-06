@@ -23,6 +23,7 @@ def grg2X(grg: pygrgl.GRG, individual: bool = False):
     result = np.zeros((num_samples, grg.num_mutations))
     muts_above = {}
     for node_id in reversed(range(grg.num_nodes)):
+        assert grg.num_up_edges(node_id) != pygrgl.NO_UP_EDGES
         muts = grg.get_mutations_for_node(node_id)
         ma = []
         if muts:
@@ -41,7 +42,7 @@ class TestMatrixMultiplication(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.grg_filename = construct_grg("test-200-samples.vcf.gz", "test.matmul.grg")
-        cls.grg = pygrgl.load_immutable_grg(cls.grg_filename)
+        cls.grg = pygrgl.load_immutable_grg(cls.grg_filename, load_up_edges=True)
         np.random.seed(42)
         cls.tp_exec = concurrent.futures.ThreadPoolExecutor(max_workers=JOBS)
 

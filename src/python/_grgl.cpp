@@ -424,6 +424,9 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: The parents of the given node as a list of NodeIDs.
                 :rtype: List[int]
             )^")
+        .def_property_readonly("has_up_edges", &grgl::GRG::hasUpEdges, R"^(
+                Returns true if this graph has loaded up edges. All graphs have down edges.
+            )^")
         .def("get_sample_nodes", &grgl::GRG::getSampleNodes, R"^(
                 Get the NodeIDs for the sample nodes.
 
@@ -728,7 +731,7 @@ PYBIND11_MODULE(_grgl, m) {
     m.def("load_immutable_grg",
           &grgl::loadImmutableGRG,
           py::arg("filename"),
-          py::arg("load_up_edges") = true,
+          py::arg("load_up_edges") = false,
           R"^(
         Load a GRG file from disk. Immutable GRGs are much faster to traverse than mutable
         GRGs and take up less RAM, so this is the preferred method if you are using a GRG
@@ -736,7 +739,7 @@ PYBIND11_MODULE(_grgl, m) {
 
         :param filename: The file to load.
         :type filename: str
-        :param load_up_edges: If False, do not load the graph "up" edges (saves RAM).
+        :param load_up_edges: If True, load both "up" and "down" edges of graph (uses more RAM). Default: False.
         :type load_up_edges: bool
         :return: The GRG.
         :rtype: pygrgl.GRG
@@ -998,6 +1001,7 @@ PYBIND11_MODULE(_grgl, m) {
     m.attr("INVALID_NODE") = grgl::INVALID_NODE_ID;
     m.attr("COAL_COUNT_NOT_SET") = grgl::COAL_COUNT_NOT_SET;
     m.attr("NO_UP_EDGES") = grgl::NO_UP_EDGES;
+    m.attr("POPULATION_UNSPECIFIED") = grgl::POPULATION_UNSPECIFIED;
 
     std::stringstream versionString;
     versionString << GRGL_MAJOR_VERSION << "." << GRGL_MINOR_VERSION;

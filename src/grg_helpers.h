@@ -109,6 +109,13 @@ static inline void dumpStats(const GRGPtr& grg, const bool calculateNaiveEdges =
     std::cout << "======================" << std::endl;
 }
 
+/**
+ * Load the GRG so that it can be modified, by adding/removing nodes and edges.
+ *
+ * @param[in] filename The file to load.
+ * @param[in] loadUpEdges Whether to load the "up" edges (in addition to the down edges). Default: true.
+ * @return A shared_ptr to the MutableGRG object.
+ */
 static inline MutableGRGPtr loadMutableGRG(const std::string& filename, const bool loadUpEdges = true) {
     MutableGRGPtr result;
     IFSPointer inStream = std::make_shared<std::ifstream>(filename, std::ios::binary);
@@ -125,7 +132,15 @@ static inline MutableGRGPtr loadMutableGRG(const std::string& filename, const bo
     return result;
 }
 
-static inline GRGPtr loadImmutableGRG(const std::string& filename, bool loadUpEdges = true) {
+/**
+ * Load the GRG read-only. Edges and nodes cannot be changed, but the Mutations and other auxiliary
+ * information still can be.
+ *
+ * @param[in] filename The file to load.
+ * @param[in] loadUpEdges Whether to load the "up" edges (in addition to the down edges). Default: false.
+ * @return A shared_ptr to the GRG object.
+ */
+static inline GRGPtr loadImmutableGRG(const std::string& filename, bool loadUpEdges = false) {
     GRGPtr result;
     IFSPointer inStream = std::make_shared<std::ifstream>(filename, std::ios::binary);
     if (!inStream->good()) {
@@ -152,6 +167,8 @@ static inline bool saveGRGSubset(const GRGPtr& theGRG,
                                  const TraversalDirection direction,
                                  const NodeIDList& seedList,
                                  std::pair<BpPosition, BpPosition> bpRange = {}) {
+    api_exc_check(direction == TraversalDirection::DIRECTION_DOWN || theGRG->hasUpEdges(),
+                  "Filtering a GRG by samples (individuals) requires loading the GRG with up edges");
     GRGOutputFilter filter(direction, seedList);
     filter.bpRange = bpRange;
     if (seedList.empty()) {

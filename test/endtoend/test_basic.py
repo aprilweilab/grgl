@@ -35,7 +35,7 @@ class TestGrgBasic(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.grg_filename = construct_grg("test-200-samples.vcf.gz")
-        cls.grg = pygrgl.load_immutable_grg(cls.grg_filename)
+        cls.grg = pygrgl.load_immutable_grg(cls.grg_filename, load_up_edges=True)
 
     def test_up_edges(self):
         only_down_grg = pygrgl.load_immutable_grg(
