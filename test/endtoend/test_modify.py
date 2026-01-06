@@ -1,8 +1,6 @@
-import glob
 import numpy
 import os
 import pygrgl
-import subprocess
 import sys
 import unittest
 
@@ -20,7 +18,7 @@ class TestGrgModify(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.grg_filename = construct_grg("test-200-samples.vcf.gz")
-        cls.grg = pygrgl.load_immutable_grg(cls.grg_filename)
+        cls.grg = pygrgl.load_immutable_grg(cls.grg_filename, load_up_edges=True)
 
     @classmethod
     def tearDownClass(cls):
