@@ -88,6 +88,12 @@ public:
         m_nodeData_numCoals = std::move(EagerFileVector<NodeIDSizeT>(inFile, inFile->tellg(), numCoals));
     }
 
+    void clearAllCoalCounts() {
+        const size_t entries = m_nodeData_numCoals.size();
+        m_nodeData_numCoals.clear();
+        m_nodeData_numCoals.resize(entries, COAL_COUNT_NOT_SET);
+    }
+
 private:
     // Node data. This will be replaced by a general purpose store where users can define their
     // own datatypes.

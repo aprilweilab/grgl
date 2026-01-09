@@ -6,6 +6,7 @@
 #include "grgl/visitor.h"
 #include "util.h"
 
+#include <memory>
 #include <unordered_map>
 
 namespace grgl {
@@ -182,11 +183,12 @@ public:
             m_nodeToIndivs = RefCountedNodeData<NodeIDList>(grg->numNodes(), flipDir(direction));
         }
         if (dfsPass == DFS_PASS_BACK_AGAIN) {
-            const auto children = grg->getDownEdges(node);
-            std::unordered_set<NodeIDSizeT> uncoalesced;
-            NodeIDSizeT coals = getCoalsForParent(grg, m_nodeToIndivs.m_nodeData, children, uncoalesced, false);
-            m_nodeToIndivs.decr_children(children);
-            m_nodeToIndivs.add(grg, node, nodeSetToList(uncoalesced));
+            NodeIDListUPtr uncoalesced = NodeIDListUPtr(new NodeIDList());
+            const NodeIDSizeT coals = getCoalsForParent(
+                grg, m_nodeToIndivs, node, grg->getDownEdges(node), *uncoalesced, /*implicitSamples=*/true);
+            if (!uncoalesced->empty()) {
+                m_nodeToIndivs.add(grg, node, std::move(uncoalesced));
+            }
             const NodeIDSizeT existingCoals = grg->getNumIndividualCoals(node);
             if (existingCoals == COAL_COUNT_NOT_SET) {
                 grg->setNumIndividualCoalsGrow(node, coals);

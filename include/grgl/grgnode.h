@@ -88,6 +88,8 @@ using NodeIDSet = NodeIDSetOrdered;
 using NodeIDSet = std::unordered_set<NodeID>;
 #endif
 
+using NodeIDListUPtr = std::unique_ptr<NodeIDList>;
+
 inline NodeID markNodeId(const NodeID nodeId, NodeMark markNum, bool value) {
     if (value) {
         return nodeId | markNum;

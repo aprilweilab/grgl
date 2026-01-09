@@ -23,6 +23,7 @@
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
 #include "grgl/node_data.h"
+#include "grgl/visitor.h"
 #include "util.h"
 
 #include <ios>
@@ -160,7 +161,7 @@ bool RenumberAndWriteVisitor::getChildren(const grgl::GRGPtr& grg,
             // We need to propagate coalescent counts up to parents, when we delete nodes. However, we only want
             // to do this for immediate children that have been deleted (because we are doing this recursively...)
             if (parentCoals != COAL_COUNT_NOT_SET) {
-                const NodeIDSizeT childCoals = grg->getNumIndividualCoals(childId);
+                const NodeIDSizeT childCoals = getAdjustedCoalCount(grg, childId);
                 if (childCoals != COAL_COUNT_NOT_SET) {
                     parentCoals += childCoals;
                 }
@@ -191,6 +192,51 @@ bool RenumberAndWriteVisitor::shouldKeep(const grgl::GRGPtr& grg, const grgl::No
         }
     }
     return false;
+}
+
+/**
+ * Visitor that recalculates coalescence information for particular nodes.
+ */
+class TopoCoalCounter : public GRGVisitor {
+public:
+    explicit TopoCoalCounter(std::vector<NodeIDSizeT>& coalescences)
+        : m_coalescences(coalescences) {}
+
+    template <typename T> using UPTR = std::unique_ptr<T>;
+
+    bool visit(const grgl::GRGPtr& grg,
+               const grgl::NodeID nodeId,
+               const grgl::TraversalDirection direction,
+               const grgl::DfsPass dfsPass = grgl::DfsPass::DFS_PASS_NONE) override {
+
+        release_assert(direction == TraversalDirection::DIRECTION_UP);
+        release_assert(dfsPass == DfsPass::DFS_PASS_NONE);
+        if (m_nodeToIndivs.uninitialized()) {
+            m_nodeToIndivs = RefCountedNodeData<NodeIDList>(grg->numNodes(), direction);
+        }
+
+        NodeIDListUPtr uncoalesced = NodeIDListUPtr(new NodeIDList());
+        NodeIDSizeT coalCount = getCoalsForParent(grg, m_nodeToIndivs, nodeId, grg->getDownEdges(nodeId), *uncoalesced);
+        if (!uncoalesced->empty()) {
+            m_nodeToIndivs.add(grg, nodeId, std::move(uncoalesced));
+        }
+        m_coalescences[nodeId] = coalCount;
+        return true;
+    }
+
+private:
+    std::vector<NodeIDSizeT>& m_coalescences;
+    RefCountedNodeData<NodeIDList> m_nodeToIndivs;
+};
+
+std::vector<NodeIDSizeT> calculateCoalsForSamples(const GRGPtr& grg, const NodeIDList& samples) {
+    api_exc_check(grg->getPloidy() == 2, "Cannot calculate coalescences for non-diploid datasets");
+    std::vector<NodeIDSizeT> coalescences(grg->numNodes());
+    // Perform an upward topological traversal from the samples associated with the individuals,
+    // and collect the coalescence information as per usual.
+    TopoCoalCounter visitor(coalescences);
+    grg->visitTopo(visitor, TraversalDirection::DIRECTION_UP, samples);
+    return std::move(coalescences);
 }
 
 // Set which samples we want to keep; if never called then we keep all samples.
@@ -241,16 +287,35 @@ NodeIDSizeT RenumberAndWriteVisitor::setKeepSamples(const grgl::GRGPtr& grg, grg
         }
         m_filteredIndivIds = std::unique_ptr<CSRStringTable>(new CSRStringTable());
         m_ploidy = 1;
-    } else if (grg->hasIndividualIds()) {
-        m_filteredIndivIds = std::unique_ptr<CSRStringTable>(new CSRStringTable(fullIndividuals.size()));
-        for (const NodeID keptIndiv : fullIndividuals) {
-            std::vector<uint8_t> indivIdChars;
-            grg->m_individualIds.getData(keptIndiv, indivIdChars);
-            m_filteredIndivIds->appendData(indivIdChars.data(), indivIdChars.size());
+        // We also drop all coalescence information in this case, since they no longer make sense.
+        m_newNodeData.clearAllCoalCounts();
+    } else {
+        // Adjust the individual identifiers.
+        if (grg->hasIndividualIds()) {
+            m_filteredIndivIds = std::unique_ptr<CSRStringTable>(new CSRStringTable(fullIndividuals.size()));
+            for (const NodeID keptIndiv : fullIndividuals) {
+                std::vector<uint8_t> indivIdChars;
+                grg->m_individualIds.getData(keptIndiv, indivIdChars);
+                m_filteredIndivIds->appendData(indivIdChars.data(), indivIdChars.size());
+            }
+        }
+        // Adjust the coalescence counts, if diploid data
+        if (grg->getPloidy() == 2) {
+            // Compute the coalescence information for all the samples that we are dropping. We will use
+            // this later to adjust the existing coalescence information.
+            NodeIDList removedSamples = complementSampleList(grg->numSamples(), sampleIDList);
+            std::cout << "COMPUTING NEW COALS FOR " << removedSamples.size() << " DROPPED SAMPLES\n";
+            m_subtractCoals = std::move(calculateCoalsForSamples(grg, removedSamples));
+            size_t total = 0;
+            for (size_t i = 0; i < m_subtractCoals.size(); i++) {
+                total += m_subtractCoals[i];
+            }
+            std::cout << "Saw " << total << " coal adjustments\n";
         }
     }
     m_nodeCounter = numSamples;
     m_newSampleCount = numSamples;
+
     return numSamples;
 }
 
@@ -298,6 +363,16 @@ bool RenumberAndWriteVisitor::keepMutation(const MutationId mutId) {
     return m_keepMutations.empty() || m_keepMutations[mutId];
 }
 
+NodeIDSizeT RenumberAndWriteVisitor::getAdjustedCoalCount(const GRGPtr& grg, NodeID nodeId) {
+    const NodeIDSizeT minusCoals = m_subtractCoals.empty() ? 0 : m_subtractCoals.at(nodeId);
+    NodeIDSizeT nodeCoals = grg->getNumIndividualCoals(nodeId);
+    if (nodeCoals != COAL_COUNT_NOT_SET) {
+        release_assert(minusCoals <= nodeCoals);
+        nodeCoals -= minusCoals;
+    }
+    return nodeCoals;
+}
+
 bool RenumberAndWriteVisitor::visit(const grgl::GRGPtr& grg,
                                     const grgl::NodeID nodeId,
                                     const grgl::TraversalDirection direction,
@@ -343,7 +418,7 @@ bool RenumberAndWriteVisitor::visit(const grgl::GRGPtr& grg,
             release_assert(m_nodeIdMap[nodeId] == INVALID_NODE_ID);
 
             NodeIDList children;
-            NodeIDSizeT parentCoals = grg->getNumIndividualCoals(nodeId);
+            NodeIDSizeT parentCoals = getAdjustedCoalCount(grg, nodeId);
             getChildren(grg, nodeId, children, parentCoals);
             const auto numParents = grg->numUpEdges(nodeId);
             // Nodes meeting these criteria only make the graph larger, so simplify them out.

@@ -104,6 +104,11 @@ public:
         m_data.reserve(numElements - m_flushedItems);
     }
 
+    void clear() {
+        release_assert(m_flushedItems == 0);
+        m_data.clear();
+    }
+
     /**
      * Store a value atomically to the vector.
      * On the architectures we support, just the proper size and alignment of the write will
