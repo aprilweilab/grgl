@@ -745,7 +745,7 @@ void directMap(MutableGRGPtr& grg, const std::vector<MutationAndSamples>& toBeMa
         for (const NodeID sampleId : pair.samples) {
             grg->connect(mutNode, sampleId);
         }
-        if (grg->getPloidy() == 2) {
+        if (grg->getPloidy() == PLOIDY_COAL_PROP) {
             std::unordered_set<NodeIDSizeT> uncoalescedIndividuals;
             NodeIDSizeT mutNodeCoals =
                 getCoalsForParent(grg, nodeToIndivs, pair.samples, uncoalescedIndividuals, false);
