@@ -1139,10 +1139,11 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
             }
             if (missMatrix != nullptr && missingnessNode != INVALID_NODE_ID) {
                 const size_t base = missingnessNode * effectiveInputRows;
-                // Apply the single missing-data value for this mutation to all the node values
-                // associated with the missingness node.
-                matmulPerformIOAddition<NodeValueType, IOType, useBitVector>(
-                    nodeValues.data(), base, missMatrix[mutId], inputRows);
+                for (size_t row = 0; row < inputRows; row++) {
+                    const size_t rowStart = row * inputCols;
+                    matmulPerformIOAddition<NodeValueType, IOType, useBitVector>(
+                        nodeValues.data(), base + row, missMatrix, rowStart + mutId);
+                }
             }
         }
         if (this->nodesAreOrdered()) {
@@ -1214,7 +1215,7 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
                         // Add the missing-data value for this mutation to the output vector position
                         // associated with the mutation.
                         matmulPerformIOAddition<IOType, NodeValueType, useBitVector>(
-                            missMatrix[mutId], nodeValues.data(), base, inputRows);
+                            missMatrix, rowStart + mutId, nodeValues.data(), base + row);
                     }
                 }
             }
