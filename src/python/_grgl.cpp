@@ -466,7 +466,7 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: A list of tuples of (NodeID, MutationID, "missingness" NodeID).
                 :rtype: List[Tuple[int, int, int]]
             )^")
-        .def("get_mutation_node_miss", &grgl::GRG::getMutationsToNodeOrdered<grgl::GRG::MutAndNode>, R"^(
+        .def("get_mutation_node_miss", &grgl::GRG::getMutationsToNodeOrdered<grgl::GRG::MutNodeMiss>, R"^(
                 Get a list of triples (MutationID, NodeID, "missingness" NodeID). Each
                 Mutation typically is associated to a single Node, but rarely it can have
                 more than one Node, in which case it will show up in more than one row.
