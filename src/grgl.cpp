@@ -26,10 +26,13 @@
 #include "calculations.h"
 #include "fast_build.h"
 #include "grg_helpers.h"
+#include "grgl/common.h"
 #include "grgl/grg.h"
+#include "grgl/grgnode.h"
 #include "grgl/map_mutations.h"
 #include "grgl/mut_iterator.h"
 #include "grgl/serialize.h"
+#include "grgl/transform.h"
 #include "grgl/ts2grg.h"
 #include "grgl/windowing.h"
 #include "pooled_jobs.h"
@@ -44,11 +47,12 @@ inline bool supportedInputFormat(const std::string& filename) {
 }
 
 int main(int argc, char** argv) {
+    grgl::setProcessUniqueID();
     auto operationStartTime = std::chrono::high_resolution_clock::now();
 #define START_TIMING_OPERATION() operationStartTime = std::chrono::high_resolution_clock::now();
 #define EMIT_TIMING_MESSAGE(msg)                                                                                       \
     do {                                                                                                               \
-        std::cerr << msg                                                                                               \
+        std::cerr << STREAM_PUID << msg                                                                                \
                   << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - \
                                                                            operationStartTime)                         \
                          .count()                                                                                      \
@@ -135,6 +139,11 @@ int main(int argc, char** argv) {
         "Format: \"filename:sample_field:pop_field\". Read population ids from the given "
         "tab-separate file, using the given fieldname.",
         {"population-ids"});
+    args::ValueFlag<size_t> reduce(
+        parser,
+        "reduce",
+        "Reduce the GRG into a smaller graph by performing (up to) this many iterations of simple transformations",
+        {"reduce"});
 
     try {
         parser.ParseCLI(argc, argv);
@@ -221,6 +230,9 @@ int main(int argc, char** argv) {
         }                                                                                                              \
     } while (0)
 
+    constexpr size_t REDUCE_MIN_DROP = 1000; // Stop reducing if we drop fewer than 1000 edges
+    constexpr double REDUCE_FRAC_DROP = 0.8; // Stop reducing if we cumulatively have dropped 80% of edges
+
     grgl::GRGPtr theGRG;
     START_TIMING_OPERATION();
     if (ends_with(*infile, ".trees")) {
@@ -235,7 +247,7 @@ int main(int argc, char** argv) {
             return 2;
         }
     } else if (ends_with(*infile, ".grg")) {
-        const bool mutableNeeded = (bool)mapMutations;
+        const bool mutableNeeded = (bool)mapMutations || (bool)reduce;
         if (mutableNeeded) {
             theGRG = grgl::loadMutableGRG(*infile);
         } else {
@@ -244,6 +256,19 @@ int main(int argc, char** argv) {
         if (!theGRG) {
             std::cerr << "Failed to load " << *infile << std::endl;
             return 2;
+        }
+        if (reduce) {
+            api_exc_check(*reduce > 0 && *reduce <= 100, "--reduce must be between 1 and 100 (iterations)");
+            const auto reduceStartTime = std::chrono::high_resolution_clock::now();
+            grgl::MutableGRGPtr mutGRG = std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG);
+            const size_t iterations = reduceGRGUntil(mutGRG, *reduce, REDUCE_MIN_DROP, REDUCE_FRAC_DROP);
+            if (verbose) {
+                std::cout << STREAM_PUID << "Reduced GRG for " << iterations << " iterations in "
+                          << std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::high_resolution_clock::now() - reduceStartTime)
+                                 .count()
+                          << " ms\n";
+            }
         }
         if (countVariants) {
             std::cout << theGRG->numMutations() << std::endl;
@@ -291,14 +316,27 @@ int main(int argc, char** argv) {
             }
         }
 
-        theGRG = grgl::fastGRGFromSamples(outfile ? *outfile : *infile,
-                                          *infile,
-                                          restrictRange,
-                                          buildFlags,
-                                          itFlags,
-                                          treeCount,
-                                          lfNoTree ? *lfNoTree : 0.0,
-                                          indivIdToPop);
+        grgl::MutableGRGPtr createdGRG = grgl::fastGRGFromSamples(outfile ? *outfile : *infile,
+                                                                  *infile,
+                                                                  restrictRange,
+                                                                  buildFlags,
+                                                                  itFlags,
+                                                                  treeCount,
+                                                                  lfNoTree ? *lfNoTree : 0.0,
+                                                                  indivIdToPop);
+        if (reduce) {
+            api_exc_check(*reduce > 0 && *reduce <= 100, "--reduce must be between 1 and 100 (iterations)");
+            const auto reduceStartTime = std::chrono::high_resolution_clock::now();
+            const size_t iterations = reduceGRGUntil(createdGRG, *reduce, REDUCE_MIN_DROP, REDUCE_FRAC_DROP);
+            if (verbose) {
+                std::cout << STREAM_PUID << "Reduced GRG for " << iterations << " iterations in "
+                          << std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::high_resolution_clock::now() - reduceStartTime)
+                                 .count()
+                          << " ms\n";
+            }
+        }
+        theGRG = createdGRG;
     } else {
         std::cerr << "Unsupported/undetected filetype for " << *infile << std::endl;
         std::cerr << "Only .trees and .grg files are supported currently." << std::endl;
@@ -454,9 +492,9 @@ int main(int argc, char** argv) {
         START_TIMING_OPERATION();
         auto counts = saveGRG(theGRG, *outfile, !noSimplify);
         if (verbose) {
-            std::cout << "Wrote simplified GRG with:" << std::endl;
-            std::cout << "  Nodes: " << counts.first << std::endl;
-            std::cout << "  Edges: " << counts.second << std::endl;
+            std::cout << STREAM_PUID << "Wrote simplified GRG with:" << std::endl;
+            std::cout << STREAM_PUID << "  Nodes: " << counts.first << std::endl;
+            std::cout << STREAM_PUID << "  Edges: " << counts.second << std::endl;
             EMIT_TIMING_MESSAGE("Wrote GRG to " << *outfile << " in ");
         }
     }

@@ -27,6 +27,7 @@
 #include "grgl/mutation.h"
 #include "grgl/node_data.h"
 #include "grgl/serialize.h"
+#include "grgl/transform.h"
 #include "grgl/ts2grg.h"
 #include "grgl/version.h"
 #include "grgl/visitor.h"
@@ -617,6 +618,15 @@ PYBIND11_MODULE(_grgl, m) {
             :type individual_index: int
             :return: String identifier for the given individual.
             :rtype: str
+            )^")
+        .def("calculate_missing_coals", &grgl::calculateMissingCoals, R"^(
+            Calculate any missing coalescence information in a GRG. You can use this to compute coalescences
+            for a large graph, though it is likely to scale poorly (RAM-wise). Generally, this is used
+            to "fix up" the coalescences after modifying a GRG -- any modifications that break coalescence
+            should be marked with COAL_COUNT_NOT_SET and this will fix them.
+
+            :return: The number of nodes that had their coalescences updated.
+            :rtype: int
             )^");
     grgClass.doc() = "A Genotype Representation Graph (GRG) representing a particular dataset. "
                      "This is the immutable portion of the API, so every graph has these operations. "
@@ -716,6 +726,35 @@ PYBIND11_MODULE(_grgl, m) {
                 the length of other_grg_files. Each position is an offset that is applied to all Mutation
                 positions in the corresponding GRG, before merging it in.
             :type position_adjust: List[int]
+        )^")
+        .def("reduce", &grgl::reduceGRG, R"^(
+            Make a single pass over the mutable GRG and reduce the size by building hierarchy where there
+            should be some.
+
+            :return: Number of edges that were removed.
+            :rtype: int
+        )^")
+        .def("reduce_until",
+             &grgl::reduceGRGUntil,
+             py::arg("iterations") = 10,
+             py::arg("min_dropped") = 1000,
+             py::arg("fraction_dropped") = 0.8,
+             py::arg("verbose") = false,
+             R"^(
+            Reduce the GRG until one of the conditions is met.
+
+            :param mutGRG: The MutableGRG that will be modified.
+            :type mutGRG: pygrgl.MutableGRG
+            :param iterations: Maximum number of graph iterations.
+            :type iterations: int
+            :param minDropped: Minimum number of edges dropped by a single iteration.
+            :type minDropped: int
+            :param fractionDropped: Total fraction of edges that have been dropped.
+            :type fractionDropped: float
+            :param verbose: Set to True to get stdout information per iteration. Default: False.
+            :type verbose: bool
+            :return: The number of iterations that were performed.
+            :rtype: int
         )^");
 
     m.def("load_mutable_grg", &grgl::loadMutableGRG, py::arg("filename"), py::arg("load_up_edges") = true, R"^(
