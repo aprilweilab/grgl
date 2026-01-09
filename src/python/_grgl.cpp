@@ -116,21 +116,28 @@ inline py::array_t<IOType> dispatchMult(grgl::GRGPtr& grg,
 
     py::buffer_info missBuffer;
     if (!py::isinstance<py::none>(miss)) {
+        api_exc_check(nodeInitMode == grgl::GRG::NIE_ZERO,
+                      "The \"miss\" parameter cannot be mixed with the \"init\" parameter");
+        api_exc_check(!emitAllNodes, "The \"miss\" parameter cannot be mixed with the \"emit_all_nodes\" parameter");
         py::array arr = py::array::ensure(miss, py::array::c_style | py::array::forcecast);
         api_exc_check(py::isinstance<py::array_t<IOType>>(miss),
-                      "The \"miss\" input must be a vector with dtype matching the input matrix. Got: " << arr.dtype());
+                      "The \"miss\" input must be a matrix with dtype matching the input matrix. Got: " << arr.dtype());
         missBuffer = arr.request();
-        api_exc_check(missBuffer.ndim == 1,
-                      "\"miss\" must be a single-dimension numpy array (vector). ndim=" << missBuffer.ndim);
-        const size_t missLength = missBuffer.shape.at(0);
+        api_exc_check(missBuffer.ndim == 2,
+                      "\"miss\" must be a two-dimension numpy array (matrix). ndim=" << missBuffer.ndim);
+        const size_t missRows = missBuffer.shape.at(0);
+        const size_t missCols = missBuffer.shape.at(1);
+        api_exc_check(missRows == rows,
+                      "\"miss\" has " << missRows << " rows, but must match the input and output matrices (" << rows
+                                      << ")");
         if (direction == grgl::TraversalDirection::DIRECTION_DOWN) {
             api_exc_check(
-                missLength == inCols,
-                "The \"miss\" input must have length matching the columns in the input matrix. Got: " << missLength);
+                missCols == inCols,
+                "The \"miss\" matrix must match the number of columns in the input matrix. Got: " << missCols);
         } else {
             api_exc_check(
-                missLength == outCols,
-                "The \"miss\" input must have length matching the columns in the output matrix. Got: " << missLength);
+                missCols == outCols,
+                "The \"miss\" matrix must match the number of columns in the output matrix. Got: " << missCols);
         }
     }
 
@@ -556,6 +563,12 @@ PYBIND11_MODULE(_grgl, m) {
 
                 :return: The mutation count.
                 :rtype: int
+            )^")
+        .def_property_readonly("has_missing_data", &grgl::GRG::hasMissingData, R"^(
+                Return true if there is any missing data in this GRG.
+
+                :return: Whether there is missing data.
+                :rtype: bool
             )^")
         .def("get_population_id", &grgl::GRG::getPopulationId, py::arg("node_id"), R"^(
                 Get the population ID for the given node. Can be used to index into the list returned by
@@ -1004,15 +1017,14 @@ PYBIND11_MODULE(_grgl, m) {
             graph (grg.num_nodes). This fully specifies every node value for the entire matrix operation.
         :type init: Union[str, numpy.array]
         :param miss: Optional. This is an _input_ when the direction is DOWN and an _output_ when the direction
-            is up. In both cases (input or output), it is a vector (single dimensional numpy.array) of length
-            num_mutations. Each value miss[i] in the vector is the "missing data quantity" associated with the
-            mutation having MutationID "i". There exists a missingness node in the graph representing the 
-            sample set with missing data for each site `s`. When "miss" is an input then the missingness node
-            is initialized by adding to it the value miss[i] for each mutation "i" that corresponds to site "s".
-            When "miss" is an output, miss[i] gets set to the sum of all values at the missingness node; i.e.,
-            if the input matrix is a vector (:math:`1xN` matrix) then miss[i] will be exactly the value of the
-            missingness node. If there is more than one input row, miss[i] will be the sum of the missingness
-            node's values for all rows.
+            is up. In both cases (input or output), it is a 2D matrix that matches the shape of the corresponding
+            input or output matrix. Each value miss[i][j] in the matrix is the "missing data quantity" associated
+            with the input/output row "i" and MutationID "j". There exists a missingness node in the graph
+            representing the sample set with missing data for each site `s`. When "miss" is an input then the
+            missingness node is initialized by adding to it the value miss[i][j] for each mutation "j" that
+            corresponds to site "s". When "miss" is an output, miss[i][j] gets set to the sum of all values at
+            the missingness node. I.e., "miss" behaves exactly the same as the input or output matrix (depending
+            on direction) except that it captures sums for missing genotypes, instead of sums for known Mutations.
         :type miss: numpy.array
         :return: The numpy 2-dimensional array of output values.
         :rtype: numpy.array
