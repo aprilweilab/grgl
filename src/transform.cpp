@@ -207,14 +207,17 @@ private:
 };
 
 size_t calculateMissingCoals(const GRGPtr& grg) {
-    // Mark the relevant nodes.
-    GRGCoalMarkVisitor markVisitor;
-    grg->visitDfs(markVisitor, TraversalDirection::DIRECTION_UP, grg->getSampleNodes());
+    if (grg->getPloidy() == 2) {
+        // Mark the relevant nodes.
+        GRGCoalMarkVisitor markVisitor;
+        grg->visitDfs(markVisitor, TraversalDirection::DIRECTION_UP, grg->getSampleNodes());
 
-    // Traverse them and recalculate coalescence information.
-    GRGCoalCalcVisitor visitor(markVisitor.m_marked);
-    fastCompleteDFS(grg, visitor);
-    return visitor.m_updated;
+        // Traverse them and recalculate coalescence information.
+        GRGCoalCalcVisitor visitor(markVisitor.m_marked);
+        fastCompleteDFS(grg, visitor);
+        return visitor.m_updated;
+    }
+    return 0;
 }
 
 } // namespace grgl
