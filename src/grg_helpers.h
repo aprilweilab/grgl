@@ -321,6 +321,7 @@ inline NodeIDSizeT getCoalsForParent(const GRGPtr& grg,
                                      std::unordered_set<NodeIDSizeT>& seenIndivs,
                                      bool cleanup) {
     constexpr NodeIDSizeT ploidy = 2;
+    release_assert(grg->getPloidy() == ploidy);
     NodeIDSizeT coalCount = 0;
 
     // Collect all "individuals below" each child and whenever we see one twice, count
@@ -372,15 +373,15 @@ public:
 
     void add(const GRGPtr& grg, const NodeID node, T data) {
         if (m_direction == TraversalDirection::DIRECTION_UP) {
-            m_refCount[node] = grg->numUpEdges(node);
+            m_refCount.at(node) = grg->numUpEdges(node);
         } else {
-            m_refCount[node] = grg->numDownEdges(node);
+            m_refCount.at(node) = grg->numDownEdges(node);
         }
         m_nodeData.emplace(node, std::move(data));
     }
 
     void decr(const NodeID node) {
-        release_assert(m_refCount[node] > 0);
+        release_assert(m_refCount.at(node) > 0);
         m_refCount[node]--;
         if (m_refCount[node] == 0) {
             m_nodeData.erase(node);

@@ -715,7 +715,7 @@ MutableGRGPtr buildTree(HapWindowContext& context,
                 DEBUG_PRINT("\n");
 
                 // Update the coalescence information for the newly create mutation node.
-                if (ploidy == 2) {
+                if (ploidy == PLOIDY_COAL_PROP) {
                     std::unordered_set<NodeIDSizeT> uncoalescedIndividuals;
                     NodeIDSizeT mutNodeCoals =
                         getCoalsForParent(result, nodeToIndivs, nodeList, uncoalescedIndividuals, false);

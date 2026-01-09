@@ -36,19 +36,16 @@ size_t reduceGRG(const MutableGRGPtr& mutGRG) {
         if (covered[node]) {
             continue;
         }
-        std::unordered_map<NodeID, NodeIDList> shared;
         if (mutGRG->numDownEdges(node) < (MIN_SHARED * NODE_COST)) {
             continue;
         }
         // Go down first
         const auto children = mutGRG->getDownEdges(node);
         const NodeIDSizeT target = children.size();
-        if (target <= MIN_SHARED) {
-            continue;
-        }
         // For all our siblings, find the one with the most sharing.
         NodeID bestSibling = INVALID_NODE_ID;
         size_t bestCount = 0;
+        std::unordered_map<NodeID, NodeIDList> shared;
         for (const NodeID child : children) {
             for (const NodeID parent : mutGRG->getUpEdges(child)) {
                 if (parent >= origNodes || parent == node) {
@@ -63,7 +60,8 @@ size_t reduceGRG(const MutableGRGPtr& mutGRG) {
                 }
             }
         }
-        // We don't want to trade off nodes for edges, so we have bestCount >= 6
+        // Nodes have a size cost that is larger than edges, because of NodeData, and because we
+        // use 64-bits per node in the CSR representation. So we account for that cost here.
         if (((double)bestCount / (double)target) >= CHILD_PROPORTION && bestCount >= (MIN_SHARED * NODE_COST)) {
             release_assert(bestSibling != INVALID_NODE_ID);
             covered[bestSibling] = true;
@@ -78,6 +76,8 @@ size_t reduceGRG(const MutableGRGPtr& mutGRG) {
                 mutGRG->connect(node, newNode);
                 mutGRG->connect(bestSibling, newNode);
 
+                // These nodes are either new, or their children have been modified. As such as need to mark
+                // them for getting the coalescence counts recalculated later.
                 mutGRG->setNumIndividualCoalsGrow(newNode, COAL_COUNT_NOT_SET);
                 mutGRG->setNumIndividualCoals(node, COAL_COUNT_NOT_SET);
                 mutGRG->setNumIndividualCoals(bestSibling, COAL_COUNT_NOT_SET);
