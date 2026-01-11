@@ -60,12 +60,7 @@ def add_options(subparser):
         default=None,
         help="Number of trees to use during shape construction. Defaults to auto-calculate.",
     )
-    subparser.add_argument(
-        "--threads",
-        type=int,
-        default=1,
-        help="Number of threads to use when mapping mutations. Defaults to 1.",
-    )
+
     subparser.add_argument(
         "--mutation-batch-size",
         type=int,

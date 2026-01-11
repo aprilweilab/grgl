@@ -64,12 +64,8 @@ int main(int argc, char** argv) {
     args::Flag verbose(parser, "verbose", "Show verbose details of the GRG", {'v', "verbose"});
     args::ValueFlag<std::string> mapMutations(
         parser, "map-muts", "Map the mutations from the provided file", {'m', "map-muts"});
-    args::ValueFlag<size_t> mapMutationsThreads(
-        parser, "threads", "Use this many threads when mapping mutations", {'t', "threads"});
-    args::ValueFlag<size_t> mapMutationsBatchSize(parser,
-                                                  "mutation-batch-size",
-                                                  "Map this many mutations in a batch (default 64)",
-                                                  {"mutation-batch-size"});
+    args::ValueFlag<size_t> mapMutationsBatchSize(
+        parser, "mutation-batch-size", "Map this many mutations in a batch (default 64)", {"mutation-batch-size"});
     args::Flag binaryMutations(parser,
                                "binary-muts",
                                "Do not store the allele with the mutation, only that a mutation occurred",
@@ -318,11 +314,6 @@ int main(int argc, char** argv) {
             std::cerr << "lf-no-tree not supported for mutation mapping" << std::endl;
             abort();
         }
-        const size_t mapMutThreads = mapMutationsThreads ? *mapMutationsThreads : 1;
-        if (mapMutThreads == 0) {
-            std::cerr << "threads must be at least 1" << std::endl;
-            return 1;
-        }
         START_TIMING_OPERATION();
         std::shared_ptr<grgl::MutationIterator> unmappedMutations =
             makeMutationIterator(*mapMutations, restrictRange, itFlags);
@@ -335,11 +326,10 @@ int main(int argc, char** argv) {
             stats = grgl::mapMutations(std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG),
                                        *unmappedMutations,
                                        verbose,
-                                       mapMutThreads,
                                        *mapMutationsBatchSize);
         } else {
-            stats = grgl::mapMutations(
-                std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG), *unmappedMutations, verbose, mapMutThreads);
+            stats =
+                grgl::mapMutations(std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG), *unmappedMutations, verbose);
         }
         if (verbose) {
             EMIT_TIMING_MESSAGE("Mapping mutations took");

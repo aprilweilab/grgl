@@ -30,7 +30,6 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
-#include <omp.h>
 #include <sys/types.h>
 #include <unordered_map>
 #include <utility>
@@ -358,7 +357,7 @@ public:
                 const NodeID sample = *it;
                 size_t vecIdx = static_cast<size_t>(sample) / m_blockSize;
                 size_t offset = static_cast<size_t>(sample) % m_blockSize;
-                  if ((m_elems[vecIdx] & (1ull << offset)) != 0) {
+                if ((m_elems[vecIdx] & (1ull << offset)) != 0) {
                     return true;
                 }
             }
@@ -509,47 +508,12 @@ private:
     std::vector<uint32_t> m_membershipStorage; // membership storage is 32-bit
 };
 
-class TopoCandidateCollectorVisitor : public grgl::ParallelGRGVisitor {
+class TopoCandidateCollectorVisitor : public grgl::GRGVisitor {
 public:
     explicit TopoCandidateCollectorVisitor(const MutationBatch& mutBatch)
         : m_batchBitCount(mutBatch.m_batchBitCount),
           m_sampleBatchMembership(mutBatch.m_sampleMembership),
           m_collectedNodes(mutBatch.m_batchBitCount) {}
-
-    void parallelVisit(const grgl::GRGPtr& grg,
-                       const grgl::NodeIDList& nodes,
-                       std::vector<bool>& results,
-                       grgl::TraversalDirection direction,
-                       size_t numThreads) override {
-        release_assert(direction == TraversalDirection::DIRECTION_UP);
-#if CLEANUP_SAMPLE_SETS_MAPPING
-        if (m_refCounts.empty()) {
-            m_refCounts.resize(grg->numNodes());
-        }
-#endif
-        if (m_sampleCoverage.empty()) {
-            m_sampleCoverage.resize(grg->numNodes());
-        }
-#pragma omp parallel for schedule(guided) num_threads(numThreads) default(none) shared(nodes, grg, results)
-        for (int i = 0; i < static_cast<int>(nodes.size()); ++i) {
-            results[i] = safeVisit(grg, nodes[i]);
-        }
-
-#if CLEANUP_SAMPLE_SETS_MAPPING
-        for (NodeID nodeId : nodes) {
-            for (const auto& childId : grg->getDownEdges(nodeId)) {
-                // Skip children that aren't part of our search.
-                if (m_refCounts[childId] == 0) {
-                    continue;
-                }
-                if (--m_refCounts[childId] == 0) {
-                    m_sampleCoverage[childId].reset();
-                }
-            }
-        }
-#endif
-    }
-
     bool visit(const grgl::GRGPtr& grg,
                const grgl::NodeID nodeId,
                const grgl::TraversalDirection direction,
@@ -869,18 +833,13 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
                                     const MutationBatch& mutBatch,
                                     MutationMappingStats& stats,
                                     const NodeID shapeNodeIdMax,
-                                    std::pair<BpPosition, NodeID>& currentMissing,
-                                    size_t numThreads) {
+                                    std::pair<BpPosition, NodeID>& currentMissing) {
     // The topological order of nodeIDs is maintained throughout this algorithm.
     release_assert(grg->nodesAreOrdered());
     const NodeIDList& mutSamples = mutBatch.seedList();
 
     TopoCandidateCollectorVisitor collector(mutBatch);
-    if (numThreads == 1) {
-        grg->visitTopo(collector, grgl::TraversalDirection::DIRECTION_UP, mutSamples);
-    } else {
-        grg->visitTopoParallel(collector, grgl::TraversalDirection::DIRECTION_UP, mutSamples, numThreads);
-    }
+    grg->visitTopo(collector, grgl::TraversalDirection::DIRECTION_UP, mutSamples);
 
     NodeIDList totalAdded{};
     std::vector<CandidateList>& candidateList = collector.m_collectedNodes;
@@ -970,14 +929,14 @@ MutationMappingStats mapMutations(
 
                 if (mutBatch.numMutations() == mutationBatchSize) {
                     NodeIDList addedNodes =
-                        greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing, numThreads);
+                        greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
                     mutBatch.clear();
                 }
             }
         } else {
             if (mutBatch.numMutations() > 0) {
                 NodeIDList addedNodes =
-                    greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing, numThreads);
+                    greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
                 mutBatch.clear();
             }
             stats.emptyMutations++;
@@ -1008,10 +967,9 @@ MutationMappingStats mapMutations(
     }
 
     if (mutBatch.numMutations() > 0) {
-        NodeIDList addedNodes = greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing, numThreads);
+        NodeIDList addedNodes = greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
     }
     return stats;
 }
 
 } // namespace grgl
-

@@ -57,7 +57,7 @@ if (${ENABLE_CHECKERS})
 
   function(add_clang_format_target)
     if(NOT ${PROJECT_NAME}_CLANG_FORMAT_BINARY)
-      find_program(${PROJECT_NAME}_CLANG_FORMAT_BINARY clang-format)
+            find_program(${PROJECT_NAME}_CLANG_FORMAT_BINARY clang-format)
     endif()
 
     if(${PROJECT_NAME}_CLANG_FORMAT_BINARY)
@@ -82,11 +82,6 @@ if (${ENABLE_CHECKERS})
   endfunction()
 
   add_clang_format_target()
-endif()
-find_package(OpenMP REQUIRED)
-
-if (OpenMP_CXX_FOUND)
-  message(STATUS "OpenMP found")
 endif()
 
 set(GRGL_TEST_SOURCES
@@ -162,7 +157,6 @@ endif()
 add_library(grgl STATIC ${GRGL_CORE_SOURCES})
 target_compile_options(grgl PRIVATE
                        -fPIC)
-target_link_libraries(grgl PUBLIC OpenMP::OpenMP_CXX)
 
 # Tool for doing some basic format conversion tasks.
 add_executable(grgl_tool
@@ -205,9 +199,9 @@ install(TARGETS grgl_tool grgl_merge gconverter gindexer)
 
 # Build Python support as "_grgl"
 if(PYTHON_SUPPORT)
-  add_subdirectory(third-party/pybind11)
-  pybind11_add_module(_grgl src/python/_grgl.cpp)
-  target_link_libraries(_grgl PRIVATE grgl tskit vbyte)
+    add_subdirectory(third-party/pybind11)
+    pybind11_add_module(_grgl src/python/_grgl.cpp)
+    target_link_libraries(_grgl PRIVATE grgl tskit vbyte)
 endif()
 
 
