@@ -33,7 +33,13 @@ void dumpHash(const HaplotypeVector& hash) {
     std::cout << std::endl;
 }
 
-void HaplotypeIndex::add(const NodeID nodeId) { m_bkTree.insert(nodeId, m_comparisons); }
+void HaplotypeIndex::add(const NodeID nodeId) {
+    auto bkNode = m_bkTree.insert(nodeId, m_comparisons);
+    if (nodeId >= m_nodeToBKNode.size()) {
+        m_nodeToBKNode.resize(nodeId + 1);
+    }
+    m_nodeToBKNode[nodeId] = std::move(bkNode);
+}
 
 void HaplotypeIndex::remove(const NodeID nodeId) {}
 
@@ -51,8 +57,31 @@ NodeIDList HaplotypeIndex::getMostSimilarNodes(const NodeID nodeId, const bool c
      */
     NodeIDList result;
 
+    // FIXME: this interaction between HaplotypeIndex and LeanBKTree is really messy. Should just
+    // combine them and simplify.
+
     size_t nearestDistance = 0;
-    auto bkTreeNodes = m_bkTree.lookup(nodeId, nearestDistance, m_comparisons, collectAll);
+    size_t comparisons = 0;
+
+    // Budget how much we can "spend" on the next query.
+    if (m_maxComparisons == std::numeric_limits<size_t>::max()) {
+        m_comparisonBudget = std::numeric_limits<size_t>::max();
+    } else {
+        m_comparisonBudget = std::max(m_maxComparisons, m_comparisonBudget + m_maxComparisons);
+    }
+    const auto& queryNode = m_nodeToBKNode.at(nodeId);
+    auto bkTreeNodes = m_bkTree.lookup(queryNode, nodeId, nearestDistance, comparisons, collectAll, m_comparisonBudget);
+    if (comparisons > m_comparisonBudget) {
+        m_comparisonBudget = 0;
+    } else {
+        m_comparisonBudget = m_comparisonBudget - comparisons;
+    }
+    m_nodeToBKNode.at(nodeId).reset();
+    m_queries++;
+    if (comparisons == m_maxComparisons) {
+        m_trunc++;
+    }
+    m_comparisons += comparisons;
     for (auto& node : bkTreeNodes) {
         m_bkTree.deleteNode(node, result);
     }
@@ -60,14 +89,20 @@ NodeIDList HaplotypeIndex::getMostSimilarNodes(const NodeID nodeId, const bool c
         if (*it == nodeId) {
             it = result.erase(it);
         } else {
+            m_nodeToBKNode.at(*it).reset();
             ++it;
         }
     }
 
     if (m_rebuildProportion < 1.0 && m_bkTree.deletedProportion() >= m_rebuildProportion) {
+        m_nodeToBKNode.clear();
         LeanBKTree<NodeID> newBkTree(m_bkTree.m_distFunc);
         for (const NodeID nodeId : m_bkTree.removeAllElements()) {
-            newBkTree.insert(nodeId, m_comparisons);
+            auto bkNode = newBkTree.insert(nodeId, m_comparisons);
+            if (nodeId >= m_nodeToBKNode.size()) {
+                m_nodeToBKNode.resize(nodeId + 1);
+            }
+            m_nodeToBKNode[nodeId] = std::move(bkNode);
         }
         m_bkTree = std::move(newBkTree);
     }

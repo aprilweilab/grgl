@@ -36,9 +36,22 @@
 #include <sstream>
 #include <vector>
 
+#include <unistd.h>
+
 #include "grgl/serialize.h"
 
 namespace grgl {
+
+extern char PROCESS_UNIQUE[8];
+
+inline void setProcessUniqueID() {
+    release_assert(snprintf(&PROCESS_UNIQUE[0], sizeof(PROCESS_UNIQUE), "%d", getpid()) > 0);
+    PROCESS_UNIQUE[7] = 0;
+}
+
+inline const char* getProcessUniqueID() { return (const char*)&PROCESS_UNIQUE[0]; }
+
+#define STREAM_PUID "[" << grgl::getProcessUniqueID() << "] "
 
 inline void fastCompleteDFS(const GRGPtr& grg, GRGVisitor& visitor) {
     if (grg->nodesAreOrdered()) {
@@ -109,6 +122,13 @@ static inline void dumpStats(const GRGPtr& grg, const bool calculateNaiveEdges =
     std::cout << "======================" << std::endl;
 }
 
+/**
+ * Load the GRG so that it can be modified, by adding/removing nodes and edges.
+ *
+ * @param[in] filename The file to load.
+ * @param[in] loadUpEdges Whether to load the "up" edges (in addition to the down edges). Default: true.
+ * @return A shared_ptr to the MutableGRG object.
+ */
 static inline MutableGRGPtr loadMutableGRG(const std::string& filename, const bool loadUpEdges = true) {
     MutableGRGPtr result;
     IFSPointer inStream = std::make_shared<std::ifstream>(filename, std::ios::binary);
@@ -125,7 +145,15 @@ static inline MutableGRGPtr loadMutableGRG(const std::string& filename, const bo
     return result;
 }
 
-static inline GRGPtr loadImmutableGRG(const std::string& filename, bool loadUpEdges = true) {
+/**
+ * Load the GRG read-only. Edges and nodes cannot be changed, but the Mutations and other auxiliary
+ * information still can be.
+ *
+ * @param[in] filename The file to load.
+ * @param[in] loadUpEdges Whether to load the "up" edges (in addition to the down edges). Default: false.
+ * @return A shared_ptr to the GRG object.
+ */
+static inline GRGPtr loadImmutableGRG(const std::string& filename, bool loadUpEdges = false) {
     GRGPtr result;
     IFSPointer inStream = std::make_shared<std::ifstream>(filename, std::ios::binary);
     if (!inStream->good()) {
@@ -152,6 +180,8 @@ static inline bool saveGRGSubset(const GRGPtr& theGRG,
                                  const TraversalDirection direction,
                                  const NodeIDList& seedList,
                                  std::pair<BpPosition, BpPosition> bpRange = {}) {
+    api_exc_check(direction == TraversalDirection::DIRECTION_DOWN || theGRG->hasUpEdges(),
+                  "Filtering a GRG by samples (individuals) requires loading the GRG with up edges");
     GRGOutputFilter filter(direction, seedList);
     filter.bpRange = bpRange;
     if (seedList.empty()) {
@@ -283,6 +313,115 @@ inline MutableGRGPtr grgFromTrees(const std::string& filename,
     }
 
     return grgl::convertTreeSeqToGRG(&treeSeq, binaryMutations, useNodeTimes, maintainTopology, computeCoals);
+}
+
+inline NodeIDSizeT getCoalsForParent(const GRGPtr& grg,
+                                     std::unordered_map<NodeID, NodeIDList>& nodeToIndivs,
+                                     const NodeIDList& children,
+                                     std::unordered_set<NodeIDSizeT>& seenIndivs,
+                                     bool cleanup) {
+    constexpr NodeIDSizeT ploidy = 2;
+    release_assert(grg->getPloidy() == ploidy);
+    NodeIDSizeT coalCount = 0;
+
+    // Collect all "individuals below" each child and whenever we see one twice, count
+    // it as a coalescence and remove it from the list of seen individuals.
+    for (const NodeID child : children) {
+        if (grg->isSample(child)) {
+            const NodeIDSizeT indiv = child / ploidy;
+            auto insertIt = seenIndivs.insert(indiv);
+            if (!insertIt.second) {
+                seenIndivs.erase(insertIt.first);
+                coalCount++;
+            }
+        } else {
+            auto findIt = nodeToIndivs.find(child);
+            release_assert(findIt != nodeToIndivs.end());
+            const NodeIDList& rightIndividuals = findIt->second;
+            for (const NodeID indiv : findIt->second) {
+                auto insertIt = seenIndivs.insert(indiv);
+                if (!insertIt.second) {
+                    seenIndivs.erase(insertIt.first);
+                    coalCount++;
+                }
+            }
+            if (cleanup) {
+                nodeToIndivs.erase(findIt);
+            }
+        }
+    }
+    return coalCount;
+}
+
+/**
+ * Common data container used internally when building/modifying graphs. We have some (storage-expensive) data
+ * we want to store for each node during a traveral. When that data is no longer needed we want to release
+ * it ASAP. This uses a hash table from NodeID to data (type T) to store the data and reference counts each
+ * node's data based on the number of parents/children processed so far.
+ */
+template <typename T> class RefCountedNodeData {
+public:
+    RefCountedNodeData() = default;
+
+    // Direction is the direction we are currently moving. For DFS, the second pass is reversed from
+    // the visitor direction.
+    explicit RefCountedNodeData(NodeIDSizeT numNodes, TraversalDirection direction)
+        : m_refCount(numNodes, 0),
+          m_direction(direction) {}
+
+    bool uninitialized() const { return m_refCount.empty(); }
+
+    void add(const GRGPtr& grg, const NodeID node, T data) {
+        if (m_direction == TraversalDirection::DIRECTION_UP) {
+            m_refCount.at(node) = grg->numUpEdges(node);
+        } else {
+            m_refCount.at(node) = grg->numDownEdges(node);
+        }
+        m_nodeData.emplace(node, std::move(data));
+    }
+
+    void decr(const NodeID node) {
+        release_assert(m_refCount.at(node) > 0);
+        m_refCount[node]--;
+        if (m_refCount[node] == 0) {
+            m_nodeData.erase(node);
+        }
+    }
+
+    void decr_children(const NodeIDList& children) {
+        release_assert(m_direction == TraversalDirection::DIRECTION_UP);
+        for (const auto& child : children) {
+            decr(child);
+        }
+    }
+
+    void decr_parents(const NodeIDList& parents) {
+        release_assert(m_direction == TraversalDirection::DIRECTION_DOWN);
+        for (const auto& parent : parents) {
+            decr(parent);
+        }
+    }
+
+    std::unordered_map<NodeID, T> m_nodeData;
+
+private:
+    std::vector<NodeIDSizeT> m_refCount;
+    TraversalDirection m_direction{TraversalDirection::DIRECTION_DOWN};
+};
+
+// Flip a traversal direction.
+inline TraversalDirection flipDir(TraversalDirection dir) {
+    return (dir == TraversalDirection::DIRECTION_UP) ? TraversalDirection::DIRECTION_DOWN
+                                                     : TraversalDirection::DIRECTION_UP;
+}
+
+// Convert NodeIDSet to NodeIDList
+inline NodeIDList nodeSetToList(const NodeIDSet& set) {
+    NodeIDList result;
+    for (const auto& item : set) {
+        result.emplace_back(item);
+    }
+    return std::move(result);
 }
 
 } // namespace grgl

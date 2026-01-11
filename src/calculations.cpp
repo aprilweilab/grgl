@@ -91,11 +91,13 @@ void emitAlleleCounts(grgl::GRGPtr& grg,
     } else {
         grgl::NodeIDList seeds;
         for (const auto& tuple : grg->getNodesAndMutations<GRG::NodeMutMiss>()) {
-            const NodeID& node = std::get<0>(tuple);
             const MutationId& mutId = std::get<1>(tuple);
             const grgl::Mutation& mut = grg->getMutationById(mutId);
-            if (mut.getPosition() >= bpRange.first && mut.getPosition() < bpRange.second && node != INVALID_NODE_ID) {
-                seeds.push_back(node);
+            if (mut.getPosition() >= bpRange.first && mut.getPosition() < bpRange.second) {
+                const NodeID& node = std::get<0>(tuple);
+                if (node != INVALID_NODE_ID) {
+                    seeds.push_back(node);
+                }
                 const NodeID& missingnessNode = std::get<2>(tuple);
                 if (missingnessNode != INVALID_NODE_ID) {
                     seeds.push_back(missingnessNode);

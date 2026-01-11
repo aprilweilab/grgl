@@ -26,6 +26,7 @@
 #include "util.h"
 
 int main(int argc, char** argv) {
+    grgl::setProcessUniqueID();
     args::ArgumentParser parser("Merge two GRGs.");
     args::HelpFlag help(parser, "help", "Display this help menu", {'h', "help"});
     args::Flag showStats(parser, "show-stats", "Show statistics about the GRG", {'s', "show-stats"});

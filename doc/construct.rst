@@ -88,3 +88,35 @@ Construct GRG via Python API
 A GRG can be constructed using arbitrary input data, by making use of the Python API.
 See the methods on :py:class:`pygrgl.MutableGRG` which can be used to create nodes and connect
 them, as well as merge two or more GRGs.
+
+Extra Options
+-------------
+
+Run ``grg construct -h`` and ``grg convert -h`` to see a full list of GRG construction options. We highlight a few here.
+
+Population Labels
+~~~~~~~~~~~~~~~~~
+
+GRG stores population labels against sample nodes. These can be retrieved from a GRG in Python using
+:py:meth:`pygrgl.GRG.get_population_id` (passing the sample node ID). The population ID can then be
+looked up in list of population descriptions (via :py:meth:`pygrgl.GRG.get_populations`).
+
+When converting from a tskit tree sequence, populations are automatically attached to the resulting
+GRG. When constructing a GRG from genotype data, you have to specify the ``--population-ids`` flag.
+Population data is specified via a tab-separated input text file. Here is an example, ``pop.tsv``:
+
+::
+
+	SAMPLE_NAME POP_NAME
+	samp1    CEU
+	samp99   CHB
+	samp4    YRI
+
+Assume the whitespace is tab characters. Then the GRG would be constructed with:
+
+::
+
+	grg construct input.vcf.gz --population-ids pop.tsv:SAMPLE_NAME:POP_NAME
+
+The syntax of the ``--population-ids`` flag is ``filename:field1:field2`` where ``field1`` is the
+column name of the sample identifier column. ``field2`` is the column name for the population identifier.

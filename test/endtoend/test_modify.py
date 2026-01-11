@@ -1,8 +1,6 @@
-import glob
 import numpy
 import os
 import pygrgl
-import subprocess
 import sys
 import unittest
 
@@ -20,7 +18,7 @@ class TestGrgModify(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.grg_filename = construct_grg("test-200-samples.vcf.gz")
-        cls.grg = pygrgl.load_immutable_grg(cls.grg_filename)
+        cls.grg = pygrgl.load_immutable_grg(cls.grg_filename, load_up_edges=True)
 
     @classmethod
     def tearDownClass(cls):
@@ -63,6 +61,14 @@ class TestGrgModify(unittest.TestCase):
         )
         self.assertFalse(saved)
         self.assertFalse(os.path.isfile(sub_grg_filename))
+
+    def test_reduce(self):
+        grg = pygrgl.load_mutable_grg(self.grg_filename, load_up_edges=True)
+        iterations = grg.reduce_until(iterations=5, min_dropped=10, verbose=True)
+        self.assertLess(grg.num_edges, self.grg.num_edges)
+        self.assertGreater(grg.num_nodes, self.grg.num_nodes)
+        self.assertLessEqual(iterations, 5)
+        self.assertGreaterEqual(iterations, 1)
 
 
 if __name__ == "__main__":

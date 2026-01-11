@@ -10,6 +10,7 @@ option(ENABLE_CHECKERS "Enable external tools like clang-tidy" OFF)
 option(ENABLE_TESTS "Enable automated test execution" ON)
 option(ENABLE_BGEN "Enable BGEN support" OFF)
 option(ENABLE_CPU_PROF "Enable gperftools CPU profiler" OFF)
+option(ENABLE_CUDA "Enable CUDA support" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -19,8 +20,59 @@ endif()
 include(CheckSymbolExists)
 check_symbol_exists(posix_fadvise "fcntl.h" HAVE_POSIX_FADVISE)
 
+# CUDA Detection (optional)
+if(ENABLE_CUDA)
+    include(CheckLanguage)
+    check_language(CUDA)
+    
+    if(CMAKE_CUDA_COMPILER)
+        enable_language(CUDA)
+        find_package(CUDAToolkit REQUIRED)
+        
+        if(CUDAToolkit_FOUND)
+            message(STATUS "CUDA found: ${CUDAToolkit_VERSION}")
+            message(STATUS "CUDA include dirs: ${CUDAToolkit_INCLUDE_DIRS}")
+            
+            # Set CUDA compiler flags
+            set(CMAKE_CUDA_STANDARD 14)
+            set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+            
+            # Set CUDA architecture (common architectures for compatibility)
+            if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+                set(CMAKE_CUDA_ARCHITECTURES 60 61 70 75 80 86 90)
+            endif()
+            
+            # Add CUDA compile definitions
+            add_compile_definitions(GRGL_CUDA_ENABLED)
+            
+            # Set CUDA-specific flags
+            set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --extended-lambda -Xcompiler=-fPIC")
+            if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+                set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -g -G -lineinfo")
+            else()
+                set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3")
+            endif()
+            # Set CUDA properties for shared libraries
+            set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
+            set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+            
+            message(STATUS "Building with CUDA support for architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+        else()
+            message(FATAL_ERROR "CUDA requested but CUDAToolkit not found")
+        endif()
+    else()
+        message(WARNING "CUDA requested but no CUDA compiler found. Building without CUDA support.")
+        set(ENABLE_CUDA OFF)
+    endif()
+endif()
+
 # Global flags that affect more than one target.
-add_compile_options(-DCOMPACT_NODE_IDS -DVCF_GZ_SUPPORT -Werror)
+# Use generator expressions to apply flags only to appropriate languages
+add_compile_options(
+    -DCOMPACT_NODE_IDS 
+    -DVCF_GZ_SUPPORT 
+    $<$<COMPILE_LANGUAGE:CXX>:-Werror>
+)
 
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -118,9 +170,19 @@ set(GRGL_CORE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/mut_iterator.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/mutation.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/serialize.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/transform.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/ts2grg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/windowing.cpp
   )
+
+# Add CUDA sources if CUDA is enabled
+if(ENABLE_CUDA)
+    set(GRGL_CUDA_SOURCES
+        ${CMAKE_CURRENT_LIST_DIR}/src/cuda/cuda_matmul.cu
+        ${CMAKE_CURRENT_LIST_DIR}/src/cuda/gpu_grg.cu
+    )
+    list(APPEND GRGL_CORE_SOURCES ${GRGL_CUDA_SOURCES})
+endif()
 
 include_directories(${CMAKE_CURRENT_LIST_DIR}/include/
                     ${CMAKE_CURRENT_LIST_DIR}/third-party/tskit/c/
@@ -135,7 +197,7 @@ include_directories(${CMAKE_CURRENT_LIST_DIR}/include/
 
 if (${ENABLE_BGEN})
   set(BGEN_LIBS bgen)
-  add_compile_options(-DBGEN_ENABLED=1)
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-DBGEN_ENABLED=1>)
 endif()
 
 # In order to use this, grab https://github.com/gperftools/gperftools/releases/download/gperftools-2.15/gperftools-2.15.tar.gz
@@ -148,7 +210,7 @@ endif()
 # ./gperftools-2.15/src/pprof build/grgl grgl_prof --cum --text
 if (${ENABLE_CPU_PROF})
   include_directories(${CMAKE_CURRENT_LIST_DIR}/gperftools-2.15/src/)
-  add_compile_options(-g) # Turn on symbols (but not debug mode)
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-g>) # Turn on symbols (but not debug mode)
   set(GRGP_LIBS ${CMAKE_CURRENT_LIST_DIR}/gperftools-2.15/.libs/libprofiler.a unwind)
   set(GRGL_EXTRA_LIBS ${CMAKE_CURRENT_LIST_DIR}/gperftools-2.15/.libs/libprofiler.a unwind)
 endif()
@@ -156,7 +218,22 @@ endif()
 # Library libgrgl.a for C++ projects that want to use GRGL.
 add_library(grgl STATIC ${GRGL_CORE_SOURCES})
 target_compile_options(grgl PRIVATE
-                       -fPIC)
+                       $<$<COMPILE_LANGUAGE:CXX>:-fPIC>)
+
+# Link CUDA libraries if enabled
+if(ENABLE_CUDA)
+    # Set CUDA properties for device linking
+    set_property(TARGET grgl PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+    set_property(TARGET grgl PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+    
+    target_link_libraries(grgl CUDA::cudart CUDA::cuda_driver)
+    
+    # Ensure proper CUDA architecture and PIC
+    set_target_properties(grgl PROPERTIES 
+        CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
+        POSITION_INDEPENDENT_CODE ON
+    )
+endif()
 
 # Tool for doing some basic format conversion tasks.
 add_executable(grgl_tool
@@ -202,6 +279,9 @@ if(PYTHON_SUPPORT)
     add_subdirectory(third-party/pybind11)
     pybind11_add_module(_grgl src/python/_grgl.cpp)
     target_link_libraries(_grgl PRIVATE grgl tskit vbyte)
+    if(ENABLE_CUDA)
+        target_link_libraries(_grgl PRIVATE CUDA::cudart)
+    endif()
 endif()
 
 
@@ -232,8 +312,23 @@ if(ENABLE_TESTS)
   set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
 
+  # Add CUDA test sources if CUDA is enabled
+  if(ENABLE_CUDA)
+      set(GRGL_CUDA_TEST_SOURCES
+          ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_cuda_support.cpp
+          ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_cuda_matmul.cpp
+          # ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_cuda_grg.cpp
+          # ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_cuda_traversal.cpp
+          # ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_cuda_matmul.cpp
+      )
+      list(APPEND GRGL_TEST_SOURCES ${GRGL_CUDA_TEST_SOURCES})
+  endif()
+
   # Now simply link against gtest or gtest_main as needed. Eg
   add_executable(grgl_test ${GRGL_TEST_SOURCES})
   target_link_libraries(grgl_test gtest_main tskit grgl z ${BGEN_LIBS} vbyte)
+  if(ENABLE_CUDA)
+      target_link_libraries(grgl_test CUDA::cudart) #CUDA::cublas
+  endif()
   add_test(NAME grgl_test COMMAND grgl_test vbyte)
 endif()

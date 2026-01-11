@@ -85,14 +85,6 @@ def add_options(subparser):
         help="Switch the reference allele with the major allele when they differ",
     )
     subparser.add_argument(
-        "--shape-lf-filter",
-        "-f",
-        type=float,
-        default=10.0,
-        help="During shape construction ignore mutations with counts less than this."
-        "If value is <1.0 then it is treated as a frequency. Defaults to 10 (count).",
-    )
-    subparser.add_argument(
         "--population-ids",
         default=None,
         help='Format: "filename:fieldname". Read population ids from the given '
@@ -125,18 +117,17 @@ def add_options(subparser):
         action="store_true",
         help="Do not store missing data in the GRG, pretend missing alleles are the reference allele.",
     )
+    # By default, everything uses single-pass mode (no map mutations).
     # There are 9 compression levels:
-    # 1: same as 2
-    # 2: single-pass, use FASTER2 to determine # of trees, direct-map muts with count less
-    #    than 10.
-    # 3: single-pass, use FASTER2 to determine # of trees
-    # 4: single-pass, use FASTER1 to determine # of trees
-    # 5: single-pass, use OPTIMAL to determine # of trees
-    # 6: multi-pass, use OPTIMAL to determine # of trees, direct-map muts with count less
-    #    than 10.
-    # 7: multi-pass, use OPTIMAL to determine # of trees.
-    # 8: same as 7
-    # 9: same as 7
+    # 1: use FASTER2 to determine # of trees, direct map LF muts (<10)
+    # 2: use FASTER1 to determine # of trees, direct map LF muts (<10)
+    # 3: use OPTIMAL to determine # of trees, direct map LF muts (<10)
+    # 4: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 1
+    # 5: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 5
+    # 6: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 10
+    # 7: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 15
+    # 8: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 15, slow merge (--use-samples)
+    # 9: use OPTIMAL to determine # of trees, --reduce 15, slow merge (--use-samples)
     level = subparser.add_mutually_exclusive_group()
     level.add_argument(
         "--level1",
@@ -161,6 +152,12 @@ def add_options(subparser):
         "--force",
         action="store_true",
         help="Ignore any warning conditions that cause execution to stop.",
+    )
+    subparser.add_argument(
+        "--reduce",
+        type=int,
+        default=None,
+        help="Forcing reduction of graph after merge.",
     )
 
 
@@ -188,7 +185,7 @@ def compute_parts(input_file: str, threads: int):
         # 100 is obviously not optimal for small datasets, but oh well!
         max_parts = 100
     best_parts = max(threads, round_up_to(100, threads))
-    return min(max_parts, best_parts)
+    return max(min(max_parts, best_parts), 1)
 
 
 def log_v(msg, verbose):
@@ -236,6 +233,8 @@ def build_shape(
         command.append("--ignore-missing")
     if args.force:
         command.append("--force")
+    if args.reduce is not None:
+        command.extend(["--reduce", str(args.reduce)])
     shape_filename = out_filename(output_file, part)
     command.extend(
         [
@@ -350,36 +349,48 @@ def from_tabular(args):
         args.parts = compute_parts(input_file, args.jobs)
     print(f"Processing input file in {args.parts} parts.", file=sys.stderr)
 
-    do_map_mutations = False
-    # 3: single-pass, use FASTER2 to determine # of trees
-    if args.level3:
-        auto_args = ["--trees"]
+    auto_args = ["--lf-no-tree", str(10)]
+    auto_tree = "optimal"
+    slow_merge = False
+    # 1: use FASTER2 to determine # of trees, direct map LF muts (<10)
+    if args.level1:
         auto_tree = "faster2"
-    # 4: single-pass, use FASTER1 to determine # of trees
-    elif args.level4:
-        auto_args = []
+    # 2: use FASTER1 to determine # of trees, direct map LF muts (<10)
+    elif args.level2:
         auto_tree = "faster1"
-    # 5: single-pass, use OPTIMAL to determine # of trees
+    # 3: use OPTIMAL to determine # of trees, direct map LF muts (<10)
+    elif args.level3:
+        pass
+    # 4: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 1
+    elif args.level4:
+        if args.reduce is None:
+            auto_args.extend(["--reduce", str(1)])
+    # 5: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 5
     elif args.level5:
-        auto_args = []
-        auto_tree = "optimal"
-    # 6: multi-pass, use OPTIMAL to determine # of trees, direct-map muts with count less
-    #    than 10.
+        if args.reduce is None:
+            auto_args.extend(["--reduce", str(5)])
+    # 6: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 10
     elif args.level6:
-        auto_args = ["--lf-no-tree", str(10), "--no-tree-map", "--no-simplify"]
-        auto_tree = "optimal"
-        do_map_mutations = True
-    # 7: multi-pass, use OPTIMAL to determine # of trees.
-    elif args.level7 or args.level8 or args.level9:
-        auto_args = ["--no-tree-map", "--no-simplify"]
-        auto_tree = "optimal"
-        do_map_mutations = True
-    # level1/2 and default are the same
-    # 2: single-pass, use FASTER2 to determine # of trees, direct-map muts with count less
-    #    than 10.
+        if args.reduce is None:
+            auto_args.extend(["--reduce", str(10)])
+    # 7: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 15
+    elif args.level7:
+        if args.reduce is None:
+            auto_args.extend(["--reduce", str(15)])
+    # 8: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 15, slow merge (--use-samples)
+    elif args.level8:
+        if args.reduce is None:
+            auto_args.extend(["--reduce", str(15)])
+        slow_merge = True
+    # 9: use OPTIMAL to determine # of trees, --reduce 15, slow merge (--use-samples)
+    elif args.level9:
+        if args.reduce is None:
+            auto_args = ["--reduce", str(15)]  # overwrite "--lf-no-tree" args above
+        slow_merge = True
+    # Default is level5: use OPTIMAL to determine # of trees, direct map LF muts (<10), --reduce 5
     else:
-        auto_args = ["--lf-no-tree", str(10)]
-        auto_tree = "faster2"
+        if args.reduce is None:
+            auto_args.extend(["--reduce", str(5)])
 
     if args.trees is None:
         print(f"Auto-calculating number of trees per part.", file=sys.stderr)
@@ -403,9 +414,7 @@ def from_tabular(args):
 
     # Compute the separate GRGs in parallel.
     if len(ranges) == 1:
-        build_grg(
-            ranges[0], args, auto_args, input_file, final_filename, do_map_mutations
-        )
+        build_grg(ranges[0], args, auto_args, input_file, final_filename, False)
     else:
         print("Converting segments of input data to graphs", file=sys.stderr)
         with Pool(args.jobs) as pool:
@@ -420,10 +429,11 @@ def from_tabular(args):
                                 auto_args,
                                 input_file,
                                 final_filename,
-                                do_map_mutations,
+                                False,
                             )
                             for r in ranges
                         ],
+                        1,  # chunksize - the Python docs are wrong, this is not 1 by default
                     ),
                     total=len(ranges),
                 )
@@ -445,6 +455,8 @@ def from_tabular(args):
             "-s",
             final_filename,
         ]
+        if slow_merge:
+            command.append("--use-samples")
         command.extend(
             map(lambda part: out_filename(final_filename, part), range(0, args.parts))
         )
