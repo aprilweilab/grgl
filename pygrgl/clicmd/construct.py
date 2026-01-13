@@ -60,6 +60,13 @@ def add_options(subparser):
         default=None,
         help="Number of trees to use during shape construction. Defaults to auto-calculate.",
     )
+
+    subparser.add_argument(
+        "--mutation-batch-size",
+        type=int,
+        default=64,
+        help="Mutations to process per batch when mapping. Defaults to 64.",
+    )
     subparser.add_argument(
         "--binary-muts",
         "-b",
@@ -276,6 +283,7 @@ def build_grg(
                 out_filename(output_file, part),
             ]
         )
+        command.extend(["--mutation-batch-size", str(args.mutation_batch_size)])
         if args.binary_muts:
             command.append("-b")
         log_v(command, args.verbose)
@@ -468,3 +476,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
