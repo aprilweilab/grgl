@@ -279,8 +279,6 @@ def build_grg(
                 f"{lower}:{upper}{suffix}",
                 "-m",
                 input_file,
-                "--threads",
-                str(args.threads),
                 "-o",
                 out_filename(output_file, part),
             ]
@@ -299,8 +297,6 @@ def star_build_grg(args):
 
 
 def from_tabular(args):
-    if args.threads < 1:
-        raise RuntimeError("--threads must be at least 1")
     if args.range is not None:
         if ":" not in args.range:
             raise RuntimeError('--range must be specified as "lower:upper"')

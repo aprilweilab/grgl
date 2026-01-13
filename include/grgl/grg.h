@@ -1044,7 +1044,6 @@ public:
                    const NodeIDList& seedList,
                    const std::vector<NodeIDSizeT>* sortOrder = nullptr) override;
 
-
     EagerCSREdges32 m_downEdges;
     EagerCSREdges32 m_upEdges;
 

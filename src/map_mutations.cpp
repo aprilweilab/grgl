@@ -858,7 +858,7 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
 }
 
 MutationMappingStats mapMutations(
-    const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose, size_t numThreads, size_t mutationBatchSize) {
+    const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose, size_t mutationBatchSize) {
     auto operationStartTime = std::chrono::high_resolution_clock::now();
 #define START_TIMING_OPERATION() operationStartTime = std::chrono::high_resolution_clock::now();
 #define EMIT_TIMING_MESSAGE(msg)                                                                                       \
