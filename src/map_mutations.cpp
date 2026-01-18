@@ -29,11 +29,19 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
-#include <mutex>
 #include <sys/types.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#if MAP_MUTS_THREADED
+#include <mutex>
+#define DEFINE_MUTEX(name) std::mutex name;
+#define CREATE_GUARD(mutex) std::lock_guard<std::mutex> lock(mutex);
+#else
+#define DEFINE_MUTEX(name)
+#define CREATE_GUARD(mutex)
+#endif
 // When enabled: garbage collects unneeded sample sets
 #define CLEANUP_SAMPLE_SETS_MAPPING 1
 
@@ -45,6 +53,9 @@
 
 // Histogram size for statistics
 #define STATS_HIST_SIZE (200)
+
+
+
 
 namespace grgl {
 
@@ -60,127 +71,8 @@ static bool cmpNodeSamples(const NodeSamples& ns1, const NodeSamples& ns2) {
 // What percentage of total samples must be covered before we switch to dense bitvecs
 #define USE_DENSE_COVERAGE_PERCENT (0.001f)
 
-class BitVecCoverageSet;
-class SparseCoverageSet;
 
-// reference based membership. membership bits are stored separately as uint32_t words.
-class BatchMembership {
-public:
-    BatchMembership() = default;
-    BatchMembership(uint32_t* ptr, size_t batchSizeBits)
-        : m_words32(ptr),
-          m_numBits(batchSizeBits) {}
-
-    size_t numWords32() const { return (m_numBits + 31) / 32; }
-
-    void setOnes(size_t mutBatchBits) {
-        m_numBits = mutBatchBits;
-        const size_t wc = (mutBatchBits + 31) / 32;
-        release_assert(m_words32 != nullptr);
-        std::fill(m_words32, m_words32 + wc, 0xFFFFFFFFu);
-
-        const size_t rem = mutBatchBits % 32;
-        if (rem != 0) {
-            m_words32[wc - 1] &= ((1u << rem) - 1u);
-        }
-    }
-
-    void clear() {
-        release_assert(m_words32 != nullptr);
-        std::fill(m_words32, m_words32 + numWords32(), 0u);
-    }
-
-    bool any() const {
-        return std::any_of(m_words32, m_words32 + numWords32(), [](uint32_t word) { return word != 0u; });
-    }
-
-    void andAssign(const BatchMembership& other) {
-        release_assert(numWords32() == other.numWords32());
-        for (size_t i = 0; i < numWords32(); ++i) {
-            m_words32[i] &= other.m_words32[i];
-        }
-    }
-
-    void setBit(size_t bitIndex) {
-        release_assert(bitIndex < m_numBits);
-        const size_t word = bitIndex / 32;
-        const size_t off = bitIndex % 32;
-        m_words32[word] |= (1u << off);
-    }
-
-    void copyFrom(const BatchMembership& other) {
-        release_assert(numWords32() == other.numWords32());
-        std::copy(other.m_words32, other.m_words32 + numWords32(), m_words32);
-    }
-
-    class Iterator {
-    public:
-        Iterator(const BatchMembership* left, const BatchMembership* right, bool atEnd)
-            : m_left(left),
-              m_right(right),
-              m_wordIndex(atEnd ? left->numWords32() : 0),
-              m_currentWordIndex(atEnd ? left->numWords32() : 0) {
-            if (!atEnd) {
-                ++(*this);
-            }
-        }
-
-        size_t operator*() const {
-            const int bit = __builtin_ctz(m_currentWord);
-            return (m_currentWordIndex * 32) + static_cast<size_t>(bit);
-        }
-
-        Iterator& operator++() {
-            // consume current bit if present
-            if (m_currentWord != 0u) {
-                m_currentWord &= (m_currentWord - 1u);
-                if (m_currentWord != 0u) {
-                    return *this;
-                }
-            }
-
-            // find next nonzero word (or XOR-diff word)
-            while (m_wordIndex < m_left->numWords32()) {
-                uint32_t word = m_left->m_words32[m_wordIndex];
-                if (m_right != nullptr) {
-                    word ^= m_right->m_words32[m_wordIndex];
-                }
-                m_currentWordIndex = m_wordIndex;
-                ++m_wordIndex;
-                m_currentWord = word;
-                if (m_currentWord != 0u) {
-                    return *this;
-                }
-            }
-
-            m_currentWordIndex = m_left->numWords32();
-            m_currentWord = 0u;
-            return *this;
-        }
-
-        bool operator!=(const Iterator& other) const {
-            return m_currentWordIndex != other.m_currentWordIndex || m_currentWord != other.m_currentWord;
-        }
-
-    private:
-        const BatchMembership* m_left;
-        const BatchMembership* m_right; // nullptr => bits(), non-null => XOR
-        size_t m_wordIndex;
-        size_t m_currentWordIndex;
-        uint32_t m_currentWord{};
-    };
-
-    Iterator begin() const { return {this, nullptr, false}; }
-    Iterator end() const { return {this, nullptr, true}; }
-
-    Iterator beginDiff(const BatchMembership& other) const { return {this, &other, false}; }
-    Iterator endDiff(const BatchMembership& other) const { return {this, &other, true}; }
-
-private:
-    uint32_t* m_words32{};
-    size_t m_numBits = 0;
-};
-
+// SampleCoverageSet is the interface for tracking which sample nodes lie beneath a GRG node.
 class SampleCoverageSet {
 public:
     /// the number of total samples
@@ -230,7 +122,7 @@ protected:
     }
 };
 
-// SparseCoverageSet: membership bits stored as uint32_t words; sample list stored as NodeID (32-bit).
+// membership bits stored as uint32_t words; sample list stored as NodeID (32-bit) for small coverage.
 class SparseCoverageSet : public SampleCoverageSet {
 public:
     explicit SparseCoverageSet(size_t batchSize, size_t totalSampleCount, size_t reserve_amount = 0)
@@ -297,7 +189,7 @@ private:
     size_t m_batchSize;
 };
 
-// BitVecCoverageSet: membership bits stored as uint32_t words; sample bitset stored as uint64_t words.
+// dense bitset representation of sample coverage and membership for large coverage sets
 class BitVecCoverageSet : public SampleCoverageSet {
 public:
     friend class CoalescenceVisitor;
@@ -395,20 +287,20 @@ protected:
             const uint64_t* __restrict otherData = other_v->m_elems.data();
             uint64_t* __restrict seen_d = seenSet.m_elems.data();
             const size_t len = m_elems.size();
-            constexpr uint64_t EVEN = 0x5555555555555555ull; // all even bits
+            constexpr uint64_t EVEN = 0x5555555555555555ULL; // all even bits
             for (size_t i = 0; i < len; ++i) {
                 const uint64_t word = otherData[i];
                 m_numSamples += __builtin_popcountll(word & ~data[i]);
                 data[i] |= word;
                 const uint64_t coalesced =
-                    (word | (word >> 1ull)) & EVEN; // pack two consecutive haplotype bits into one individual slot
+                    (word | (word >> 1ULL)) & EVEN; // pack two consecutive haplotype bits into one individual slot
                 const uint64_t new_coals = coalesced & seen_d[i];
                 coalescences += __builtin_popcountll(new_coals);
                 seen_d[i] |= coalesced;
             }
         } else if (const SparseCoverageSet* other_v = dynamic_cast<const SparseCoverageSet*>(&other)) {
             auto& seenWords = seenSet.m_elems;
-            for (auto it = other_v->samplesBegin(); it != other_v->samplesEnd(); ++it) {
+            for (const auto *it = other_v->samplesBegin(); it != other_v->samplesEnd(); ++it) {
                 const NodeID sample = *it;
                 addElem(sample);
                 // Collapse the two haplotypes for an individual down to their even slot in the bitset.
@@ -443,6 +335,7 @@ private:
     size_t m_batchSize{};
 };
 
+// MutationBatch groups mutations and their sample sets for batch processing and candidate collection.
 class MutationBatch {
     friend class TopoCandidateCollectorVisitor;
 
@@ -508,6 +401,7 @@ private:
     std::vector<uint32_t> m_membershipStorage; // membership storage is 32-bit
 };
 
+// TopoCandidateCollectorVisitor walks the GRG to collect candidate nodes and sample coverage for each mutation bit.
 class TopoCandidateCollectorVisitor : public grgl::GRGVisitor {
 public:
     explicit TopoCandidateCollectorVisitor(const MutationBatch& mutBatch)
@@ -553,6 +447,8 @@ public:
         return value;
     }
 
+    size_t batchBitCount() const { return m_batchBitCount; }
+
     std::vector<std::unique_ptr<SampleCoverageSet>> m_sampleCoverage;
     std::vector<CandidateList> m_collectedNodes;
 
@@ -561,7 +457,7 @@ private:
     const std::vector<BatchMembership>& m_sampleBatchMembership;
     // shared 'thread-safe' logic
     bool safeVisit(const grgl::GRGPtr& grg, grgl::NodeID nodeId);
-    std::mutex m_collectedNodesMutex;
+    DEFINE_MUTEX(m_collectedNodesMutex)
 #if CLEANUP_SAMPLE_SETS_MAPPING
     std::vector<NodeIDSizeT> m_refCounts;
 #endif
@@ -645,7 +541,7 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
     if (isRoot) {
         // Root can only be a candidate when it fully covers the batch for at least one bit.
         if (membership.any()) {
-            std::lock_guard<std::mutex> lock(m_collectedNodesMutex);
+            CREATE_GUARD(m_collectedNodesMutex)
             for (auto it = membership.begin(); it != membership.end(); ++it) {
                 const size_t mutationIndex = *it;
                 m_collectedNodes[mutationIndex].emplace_back(nodeId, samplesBeneathSet->numSamplesCovered());
@@ -664,7 +560,7 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
             auto bitIterator = childMembership.beginDiff(membership);
             auto bitEnd = childMembership.endDiff(membership);
             if (bitIterator != bitEnd) {
-                std::lock_guard<std::mutex> lock(m_collectedNodesMutex);
+                CREATE_GUARD(m_collectedNodesMutex)
                 for (; bitIterator != bitEnd; ++bitIterator) {
                     const size_t mutationIndex = *bitIterator;
                     m_collectedNodes[mutationIndex].emplace_back(candidate,
@@ -686,7 +582,7 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
         auto bitIterator = childMembership.beginDiff(membership);
         auto bitEnd = childMembership.endDiff(membership);
         if (bitIterator != bitEnd) {
-            std::lock_guard<std::mutex> lock(m_collectedNodesMutex);
+            CREATE_GUARD(m_collectedNodesMutex)
             for (; bitIterator != bitEnd; ++bitIterator) {
                 const size_t mutationIndex = *bitIterator;
                 m_collectedNodes[mutationIndex].emplace_back(candidate,
@@ -755,8 +651,9 @@ static NodeIDList processCandidateSet(const MutableGRGPtr& grg,
     }
 
     size_t individualCoalCount = 0;
-    BitVecCoverageSet coalTrackingSet{grg->numSamples()};
-    BitVecCoverageSet coverageSet{grg->numSamples()};
+    const size_t batchBitCount = collector.batchBitCount();
+    BitVecCoverageSet coalTrackingSet{grg->numSamples(), batchBitCount};
+    BitVecCoverageSet coverageSet{grg->numSamples(), batchBitCount};
 
     const NodeID mutNodeId = grg->makeNode(1, true);
     if (!newMutation.isMissing()) {
@@ -776,8 +673,12 @@ static NodeIDList processCandidateSet(const MutableGRGPtr& grg,
         // Different candidates may cover different subsets of the sample set that we are currently trying to cover.
         // Those sample sets MUST be non-overlapping or we will introduce a diamond into the graph.
         if (!coverageSet.overlapsWith(*candidateSet)) {
-            // Mark all the sample nodes as covered.
-            coverageSet.mergeSampleCoverage(*candidateSet, coalTrackingSet, individualCoalCount);
+            // Mark all the sample nodes as covered. Only track coalescences for diploid data.
+            if (ploidy == 2) {
+                coverageSet.mergeSampleCoverage(*candidateSet, coalTrackingSet, individualCoalCount);
+            } else {
+                coverageSet.mergeSampleCoverage(*candidateSet);
+            }
             if (candidateId >= shapeNodeIdMax) {
                 stats.reusedMutNodes++;
             }
@@ -857,8 +758,8 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     return totalAdded;
 }
 
-MutationMappingStats mapMutations(
-    const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose, size_t mutationBatchSize) {
+MutationMappingStats
+mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose, size_t mutationBatchSize) {
     auto operationStartTime = std::chrono::high_resolution_clock::now();
 #define START_TIMING_OPERATION() operationStartTime = std::chrono::high_resolution_clock::now();
 #define EMIT_TIMING_MESSAGE(msg)                                                                                       \
@@ -928,15 +829,13 @@ MutationMappingStats mapMutations(
                 mutBatch.addMutation(unmapped.mutation, mutSamples);
 
                 if (mutBatch.numMutations() == mutationBatchSize) {
-                    NodeIDList addedNodes =
-                        greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
+                    NodeIDList addedNodes = greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
                     mutBatch.clear();
                 }
             }
         } else {
             if (mutBatch.numMutations() > 0) {
-                NodeIDList addedNodes =
-                    greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
+                NodeIDList addedNodes = greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
                 mutBatch.clear();
             }
             stats.emptyMutations++;
@@ -973,3 +872,4 @@ MutationMappingStats mapMutations(
 }
 
 } // namespace grgl
+
