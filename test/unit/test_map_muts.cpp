@@ -86,7 +86,7 @@ TEST(MapMutations, Basic) {
         }
     }
 
-    MutationMappingStats stats = mapMutations(grg, testIt);
+    MutationMappingStats stats = mapMutations(grg, testIt, false, 1);
     const NodeIDSizeT nodesAfter = grg->numNodes();
     std::cout << stats.totalMutations << "\n";
     std::cout << "Added " << nodesAfter << " nodes\n";
@@ -106,7 +106,7 @@ TEST(MapMutations, Basic) {
             case 4:
             	// 4, 5 coalesced here (it should reuse the previous (6, 7) node, which
                 // will have it's own coal count for 4,5)
-                ASSERT_EQ(grg->getNumIndividualCoals(mutAndNode.second), 2);
+                ASSERT_EQ(grg->getNumIndividualCoals(mutAndNode.second), 1);
                 break;
             default:
                 ASSERT_FALSE(true);
@@ -117,11 +117,12 @@ TEST(MapMutations, Basic) {
 	// We have nodes from the unmapped GRG that we know will coalesce
     ASSERT_EQ(grg->getNumIndividualCoals(8), 1);
     size_t totalCoals = 0;
-	for (NodeID nodeId = 0; nodeId < nodesAfter; nodeId++) {
+    for (NodeID nodeId = 0; nodeId < nodesAfter; nodeId++) {
         const NodeIDSizeT coals = grg->getNumIndividualCoals(nodeId);
         if (coals != COAL_COUNT_NOT_SET) {
             totalCoals += grg->getNumIndividualCoals(nodeId);
         }
     }
-    ASSERT_EQ(totalCoals, 4);
+    ASSERT_EQ(totalCoals, 3);
 }
+
