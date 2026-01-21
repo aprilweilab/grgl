@@ -900,7 +900,9 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
         FAST_GRG_OUTPUT("Auto-detected a total tree count of approximately " << treeCountApprox << "\n");
 
         MutableGRGPtr tree = buildTree(hapContext, numSamples, ploidy, isPhased, buildFlags, rebuildProportion);
-        directMap(tree, hapContext.directMap);
+        if (!hasBSFlag(buildFlags, GBF_NO_TREE_MAP)) {
+            directMap(tree, hapContext.directMap);
+        }
         const std::string treeFilename = getTreeGRGName(filePrefix, 0);
         CANNOT_EXIST(treeFilename);
         saveGRG(tree, treeFilename);
@@ -931,7 +933,9 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
         DUMP_HAP_SEG(hapContext);
 
         MutableGRGPtr tree = buildTree(hapContext, numSamples, ploidy, isPhased, buildFlags, rebuildProportion);
-        directMap(tree, hapContext.directMap);
+        if (!hasBSFlag(buildFlags, GBF_NO_TREE_MAP)) {
+            directMap(tree, hapContext.directMap);
+        }
         const std::string treeFilename = getTreeGRGName(filePrefix, treeNum++);
         CANNOT_EXIST(treeFilename);
         saveGRG(tree, treeFilename);
