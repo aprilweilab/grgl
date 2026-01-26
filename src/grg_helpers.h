@@ -393,11 +393,14 @@ public:
             m_data.resize(node + 1);
         }
         if (m_direction == TraversalDirection::DIRECTION_UP) {
-            m_refCount.at(node) = grg->numUpEdges(node);
+            m_refCount[node] = grg->numUpEdges(node);
         } else {
-            m_refCount.at(node) = grg->numDownEdges(node);
+            m_refCount[node] = grg->numDownEdges(node);
         }
-        m_data[node] = std::move(data);
+        // If no one needs this data, then don't store it!
+        if (m_refCount[node] > 0) {
+            m_data[node] = std::move(data);
+        }
     }
 
     const std::unique_ptr<T>& get(const NodeID node) const {
