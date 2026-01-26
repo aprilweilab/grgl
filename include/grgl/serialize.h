@@ -103,9 +103,18 @@ public:
     size_t getPloidy(const GRGPtr& grg) const;
 
 private:
+    NodeIDSizeT getAdjustedCoalCount(const GRGPtr& grg, NodeID nodeId);
+
     std::ostream& m_outStream;
     // Maps old NodeID to new NodeID
     std::vector<NodeIDSizeT> m_nodeIdMap;
+    // Adjustments for coalescences for each node. Only used if we are downsampling (by individual)
+    // when serializing the GRG. When m_coalAdjustIsSubtract then these values represent the coalescences
+    // of the removed samples, and we subtract them from the existing values. Otherwise these are the
+    // new node coalescences that replace existing values.
+    std::vector<NodeIDSizeT> m_coalAdjust;
+    bool m_coalAdjustIsSubtract{};
+
     NodeIDSizeT m_newSampleCount{};
     NodeIDSizeT m_nodeCounter{};
     std::unique_ptr<CSRStringTable> m_filteredIndivIds;

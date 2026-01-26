@@ -9,6 +9,7 @@
 #include "common_grgs.h"
 #include "common_visitors.h"
 #include "grgl/visitor.h"
+#include "grg_helpers.h"
 
 #include <fstream>
 
@@ -221,4 +222,37 @@ TEST(GRG, TestFrontier) {
     ASSERT_EQ(upVisitor.m_frontier, expectedUp);
 }
 
+}
+TEST(GRGHelper, CoalsForParent) {
+    GRGPtr grg = sample8Grg();
+    UnmanagedNodeData<NodeIDList> nodeToIndivs;
+    nodeToIndivs.add(grg, 10, NodeIDListUPtr(new NodeIDList({0, 2})));
+    nodeToIndivs.add(grg, 11, NodeIDListUPtr(new NodeIDList({0, 3})));
+    nodeToIndivs.add(grg, 12, NodeIDListUPtr(new NodeIDList({3})));
+    NodeIDList children = {10,11,12};
+    NodeIDList uncoalesced;
+    const NodeIDSizeT coals = getCoalsForParent(grg, nodeToIndivs, 14, children, uncoalesced);
+    ASSERT_EQ(coals, 2);
+    NodeIDList expected = {2};
+    ASSERT_EQ(uncoalesced, expected);
+
+    // Coalesce the last one
+    children = {13, 9};
+    nodeToIndivs.add(grg, 13, NodeIDListUPtr(new NodeIDList({2})));
+    nodeToIndivs.add(grg, 9, NodeIDListUPtr(new NodeIDList({1})));
+    const NodeIDSizeT coals2 = getCoalsForParent(grg, nodeToIndivs, 14, children, uncoalesced);
+    ASSERT_EQ(coals2, 1);
+    ASSERT_EQ(uncoalesced.size(), 1);
+
+    // Start over, and test the no coalescences case
+    nodeToIndivs.m_data.clear();
+    nodeToIndivs.add(grg, 10, NodeIDListUPtr(new NodeIDList({0, 1})));
+    nodeToIndivs.add(grg, 11, NodeIDListUPtr(new NodeIDList({2})));
+    nodeToIndivs.add(grg, 12, NodeIDListUPtr(new NodeIDList({3})));
+    children = {10,11,12};
+    uncoalesced.clear();
+    const NodeIDSizeT coals3 = getCoalsForParent(grg, nodeToIndivs, 14, children, uncoalesced);
+    ASSERT_EQ(coals3, 0);
+    expected = {0, 1, 2, 3};
+    ASSERT_EQ(uncoalesced, expected);
 }

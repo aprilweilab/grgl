@@ -350,7 +350,7 @@ size_t countUniqueHaps(HapWindowContext& hapContext) {
 // calculations. This information is pretty cheap to calculate, since we construct the graph
 // bottom-up and only use each node once.
 void propagateCoalInformation(MutableGRGPtr& grg,
-                              std::unordered_map<NodeID, NodeIDList>& nodeToIndivs,
+                              UnmanagedNodeData<NodeIDList>& nodeToIndivs,
                               const NodeID intersectionParent,
                               const NodeID leftParent,
                               const NodeID rightParent,
@@ -363,68 +363,48 @@ void propagateCoalInformation(MutableGRGPtr& grg,
     }
     release_assert(intersectionParent != INVALID_NODE_ID);
     release_assert(leftNode != INVALID_NODE_ID);
+    release_assert(!rightNodes.empty());
 
     // Get the RIGHT side individuals, from maybe multiple nodes. We count the coalescences
     // as we go. Everytime an individual is seen twice, it has coalesced (diploid), so we then
     // remove it since the parent nodes do not need to track the coalescence any further.
-    std::unordered_set<NodeIDSizeT> nextIndivs;
-    NodeIDList intersectIndividuals;
-    NodeIDSizeT rightCoalCount =
-        getCoalsForParent(grg, nodeToIndivs, rightNodes, nextIndivs, /*cleanup=*/(rightParent != INVALID_NODE_ID));
+    NodeIDListUPtr uncoalescedIndivs = NodeIDListUPtr(new NodeIDList());
+    const NodeIDSizeT rightCoalCount =
+        getCoalsForParent(grg, nodeToIndivs, rightParent, rightNodes, *uncoalescedIndivs, /*implicitSamples=*/true);
+    for (const auto& node : rightNodes) {
+        nodeToIndivs.destroy(node);
+    }
 
     // At this point:
     //  nodeToIndivs has the individuals that have not coalesced yet at rightParent
     //  rightCoalCount has the count of individuals that coalesced at rightParent
     //
     // intersectionParent also contains all of the above, so we'll reuse this information for that later.
-    NodeIDList rightIndivs;
-    rightIndivs.reserve(nextIndivs.size());
-    for (const auto& indiv : nextIndivs) {
-        rightIndivs.emplace_back(indiv);
-        intersectIndividuals.emplace_back(indiv);
-    }
     if (rightParent != INVALID_NODE_ID) {
+        NodeIDListUPtr rightIndivs = NodeIDListUPtr(new NodeIDList(*uncoalescedIndivs));
         grg->setNumIndividualCoalsGrow(rightParent, rightCoalCount);
-        nodeToIndivs.emplace(rightParent, std::move(rightIndivs));
+        nodeToIndivs.add(grg, rightParent, std::move(rightIndivs));
     }
 
     // Now process the LEFT side individuals, which will coalescence with the RIGHT side individuals
     // at the intersectionParent.
     // There are never any coalescences in the left parent, because it has a single child.
-    NodeIDSizeT intersectCoalCount = 0;
-    if (grg->isSample(leftNode)) {
-        const NodeIDSizeT indiv = leftNode / PLOIDY_COAL_PROP;
-        auto insertIt = nextIndivs.insert(indiv);
-        if (!insertIt.second) {
-            nextIndivs.erase(insertIt.first);
-            intersectCoalCount++;
-        } else {
-            intersectIndividuals.emplace_back(indiv);
+    const NodeIDList leftChildren = {leftNode};
+    const NodeIDSizeT intersectCoalCount = getCoalsForParent(
+        grg, nodeToIndivs, intersectionParent, leftChildren, *uncoalescedIndivs, /*implicitSamples=*/true);
+    if (leftParent != INVALID_NODE_ID) {
+        // This is kind of gross. getCoalsForParent() handles implicitSamples=true for most cases, but the left node is
+        // a really special case that we are "cheating" on, because we know it only ever has a single child.
+        if (grg->isSample(leftNode)) {
+            nodeToIndivs.add(grg, leftParent, NodeIDListUPtr(new NodeIDList({leftNode / grg->getPloidy()})));
+        } else if (nodeToIndivs.hasNode(leftNode)) {
+            nodeToIndivs.add(grg, leftParent, std::move(nodeToIndivs.m_data.at(leftNode)));
         }
-        if (leftParent != INVALID_NODE_ID) {
-            nodeToIndivs.insert({leftParent, {indiv}});
-            grg->setNumIndividualCoalsGrow(leftParent, 0);
-        }
-    } else {
-        auto findIt = nodeToIndivs.find(leftNode);
-        release_assert(findIt != nodeToIndivs.end());
-        for (const NodeID indiv : findIt->second) {
-            auto insertIt = nextIndivs.insert(indiv);
-            if (!insertIt.second) {
-                nextIndivs.erase(insertIt.first);
-                intersectCoalCount++;
-            } else {
-                intersectIndividuals.emplace_back(indiv);
-            }
-        }
-        if (leftParent != INVALID_NODE_ID) {
-            nodeToIndivs.emplace(leftParent, std::move(findIt->second));
-            grg->setNumIndividualCoalsGrow(leftParent, 0);
-            nodeToIndivs.erase(findIt);
-        }
+        grg->setNumIndividualCoalsGrow(leftParent, 0);
     }
     grg->setNumIndividualCoalsGrow(intersectionParent, intersectCoalCount + rightCoalCount);
-    nodeToIndivs.emplace(intersectionParent, std::move(intersectIndividuals));
+    nodeToIndivs.add(grg, intersectionParent, std::move(uncoalescedIndivs));
+    nodeToIndivs.destroy(leftNode);
 }
 
 MutableGRGPtr buildTree(HapWindowContext& context,
@@ -481,7 +461,7 @@ MutableGRGPtr buildTree(HapWindowContext& context,
      *   leftParent represents the ancestral haplotype of A not in intersectNode
      */
 
-    std::unordered_map<NodeID, NodeIDList> nodeToIndivs;
+    UnmanagedNodeData<NodeIDList> nodeToIndivs;
     size_t level = 1;
     bool createdNodes = true;
     while (createdNodes) {
@@ -673,8 +653,7 @@ MutableGRGPtr buildTree(HapWindowContext& context,
         std::vector<NodeIDList> mutIndexToNodes(context.allMutations.size());
         for (const NodeID rootId : result->getRootNodes()) {
             size_t haps = 0;
-            assert(result->getPloidy() != PLOIDY_COAL_PROP || nodeToIndivs.find(rootId) != nodeToIndivs.end() ||
-                   rootId < numSamples);
+            assert(result->getPloidy() != PLOIDY_COAL_PROP || nodeToIndivs.hasNode(rootId) || rootId < numSamples);
             std::vector<size_t> mutIndices = hapsToMutIndices(context.sampleHapVects[rootId], context.windowInfo);
             DEBUG_PRINT("Root " << rootId << " has " << mutIndices.size() << " mutations\n");
             for (const size_t mutIndex : mutIndices) {
@@ -712,16 +691,17 @@ MutableGRGPtr buildTree(HapWindowContext& context,
                     DEBUG_PRINT(childNode << ", ");
                     result->connect(mutNode, childNode);
                 }
-                DEBUG_PRINT("\n");
 
                 // Update the coalescence information for the newly create mutation node.
                 if (ploidy == PLOIDY_COAL_PROP) {
-                    std::unordered_set<NodeIDSizeT> uncoalescedIndividuals;
-                    NodeIDSizeT mutNodeCoals =
-                        getCoalsForParent(result, nodeToIndivs, nodeList, uncoalescedIndividuals, false);
+                    NodeIDListUPtr uncoalescedIndividuals = NodeIDListUPtr(new NodeIDList());
+                    const NodeIDSizeT mutNodeCoals = getCoalsForParent(
+                        result, nodeToIndivs, mutNode, nodeList, *uncoalescedIndividuals, /*implicitSamples=*/true);
                     result->setNumIndividualCoalsGrow(mutNode, mutNodeCoals);
+                    nodeToIndivs.add(result, mutNode, std::move(uncoalescedIndividuals));
                 }
             }
+            DEBUG_PRINT("\n");
             currentPosition = mut.getPosition();
         }
         if (hasBSFlag(buildFlags, GBF_VERBOSE_OUTPUT)) {
@@ -738,7 +718,7 @@ MutableGRGPtr buildTree(HapWindowContext& context,
 // Just map the given mutations and their samples directly as edges. This is equivalent to the
 // sparse matrix representation of these mutations+samples.
 void directMap(MutableGRGPtr& grg, const std::vector<MutationAndSamples>& toBeMapped) {
-    std::unordered_map<NodeID, NodeIDList> nodeToIndivs;
+    UnmanagedNodeData<NodeIDList> nodeToIndivs;
     for (const MutationAndSamples& pair : toBeMapped) {
         const NodeID mutNode = grg->makeNode();
         grg->addMutation(pair.mutation, mutNode);
@@ -746,9 +726,9 @@ void directMap(MutableGRGPtr& grg, const std::vector<MutationAndSamples>& toBeMa
             grg->connect(mutNode, sampleId);
         }
         if (grg->getPloidy() == PLOIDY_COAL_PROP) {
-            std::unordered_set<NodeIDSizeT> uncoalescedIndividuals;
-            NodeIDSizeT mutNodeCoals =
-                getCoalsForParent(grg, nodeToIndivs, pair.samples, uncoalescedIndividuals, false);
+            NodeIDList uncoalescedIndividuals;
+            const NodeIDSizeT mutNodeCoals = getCoalsForParent(
+                grg, nodeToIndivs, mutNode, pair.samples, uncoalescedIndividuals, /*implicitSamples=*/true);
             grg->setNumIndividualCoalsGrow(mutNode, mutNodeCoals);
         }
     }

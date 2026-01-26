@@ -105,6 +105,14 @@ public:
     }
 
     /**
+     * Clear all data; requires that no items have been flushed to disk.
+     */
+    void clear() {
+        release_assert(m_flushedItems == 0);
+        m_data.clear();
+    }
+
+    /**
      * Store a value atomically to the vector.
      * On the architectures we support, just the proper size and alignment of the write will
      * make it atomic. If you are using this in a lock-free algorithm, you likely want to use

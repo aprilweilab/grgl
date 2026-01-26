@@ -17,6 +17,7 @@
 #ifndef GRG_HELPERS_H
 #define GRG_HELPERS_H
 
+#include "grgl/common.h"
 #include "tskit.h"
 
 #include "common_visitors.h"
@@ -32,6 +33,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <vector>
@@ -315,43 +317,56 @@ inline MutableGRGPtr grgFromTrees(const std::string& filename,
     return grgl::convertTreeSeqToGRG(&treeSeq, binaryMutations, useNodeTimes, maintainTopology, computeCoals);
 }
 
-inline NodeIDSizeT getCoalsForParent(const GRGPtr& grg,
-                                     std::unordered_map<NodeID, NodeIDList>& nodeToIndivs,
-                                     const NodeIDList& children,
-                                     std::unordered_set<NodeIDSizeT>& seenIndivs,
-                                     bool cleanup) {
-    constexpr NodeIDSizeT ploidy = 2;
-    release_assert(grg->getPloidy() == ploidy);
-    NodeIDSizeT coalCount = 0;
+/**
+ * Common data container used internally when building/modifying graphs. During actual construction (not modification)
+ * we want to manage the life/death of node data ourselves.
+ */
+template <typename T> class UnmanagedNodeData {
+public:
+    UnmanagedNodeData() = default;
 
-    // Collect all "individuals below" each child and whenever we see one twice, count
-    // it as a coalescence and remove it from the list of seen individuals.
-    for (const NodeID child : children) {
-        if (grg->isSample(child)) {
-            const NodeIDSizeT indiv = child / ploidy;
-            auto insertIt = seenIndivs.insert(indiv);
-            if (!insertIt.second) {
-                seenIndivs.erase(insertIt.first);
-                coalCount++;
-            }
-        } else {
-            auto findIt = nodeToIndivs.find(child);
-            release_assert(findIt != nodeToIndivs.end());
-            const NodeIDList& rightIndividuals = findIt->second;
-            for (const NodeID indiv : findIt->second) {
-                auto insertIt = seenIndivs.insert(indiv);
-                if (!insertIt.second) {
-                    seenIndivs.erase(insertIt.first);
-                    coalCount++;
-                }
-            }
-            if (cleanup) {
-                nodeToIndivs.erase(findIt);
-            }
+    // Direction is the direction we are currently moving. For DFS, the second pass is reversed from
+    // the visitor direction.
+    explicit UnmanagedNodeData(NodeIDSizeT numNodes, TraversalDirection direction)
+        : m_data(numNodes),
+          m_direction(direction) {}
+
+    bool uninitialized() const { return m_data.empty(); }
+
+    void add(const GRGPtr& grg, const NodeID node, std::unique_ptr<T> data) {
+        if (node >= m_data.size()) {
+            m_data.resize(node + 1);
+        }
+        m_data[node] = std::move(data);
+    }
+
+    const std::unique_ptr<T>& get(const NodeID node) const {
+        static std::unique_ptr<T> nullT;
+        if (node < m_data.size()) {
+            return m_data[node];
+        }
+        return nullT;
+    }
+
+    void destroy(const NodeID node) {
+        if (node < m_data.size()) {
+            m_data[node].reset();
         }
     }
-    return coalCount;
-}
+
+    void decr(const NodeID node) {}
+
+    void decr_children(const NodeIDList& children) { (void)children; }
+
+    void decr_parents(const NodeIDList& parents) { (void)parents; }
+
+    bool hasNode(const NodeID nodeId) const { return nodeId < m_data.size(); }
+
+    std::vector<std::unique_ptr<T>> m_data;
+
+private:
+    TraversalDirection m_direction{TraversalDirection::DIRECTION_DOWN};
+};
 
 /**
  * Common data container used internally when building/modifying graphs. We have some (storage-expensive) data
@@ -366,25 +381,46 @@ public:
     // Direction is the direction we are currently moving. For DFS, the second pass is reversed from
     // the visitor direction.
     explicit RefCountedNodeData(NodeIDSizeT numNodes, TraversalDirection direction)
-        : m_refCount(numNodes, 0),
+        : m_data(numNodes),
+          m_refCount(numNodes, 0),
           m_direction(direction) {}
 
     bool uninitialized() const { return m_refCount.empty(); }
 
-    void add(const GRGPtr& grg, const NodeID node, T data) {
-        if (m_direction == TraversalDirection::DIRECTION_UP) {
-            m_refCount.at(node) = grg->numUpEdges(node);
-        } else {
-            m_refCount.at(node) = grg->numDownEdges(node);
+    void add(const GRGPtr& grg, const NodeID node, std::unique_ptr<T> data) {
+        if (node >= m_refCount.size()) {
+            m_refCount.resize(node + 1);
+            m_data.resize(node + 1);
         }
-        m_nodeData.emplace(node, std::move(data));
+        if (m_direction == TraversalDirection::DIRECTION_UP) {
+            m_refCount[node] = grg->numUpEdges(node);
+        } else {
+            m_refCount[node] = grg->numDownEdges(node);
+        }
+        // If no one needs this data, then don't store it!
+        if (m_refCount[node] > 0) {
+            m_data[node] = std::move(data);
+        }
+    }
+
+    const std::unique_ptr<T>& get(const NodeID node) const {
+        static std::unique_ptr<T> nullT;
+        if (node < m_data.size()) {
+            return m_data[node];
+        }
+        return nullT;
+    }
+
+    void destroy(const NodeID node) {
+        m_refCount.at(node) = 0;
+        m_data[node].reset();
     }
 
     void decr(const NodeID node) {
         release_assert(m_refCount.at(node) > 0);
         m_refCount[node]--;
         if (m_refCount[node] == 0) {
-            m_nodeData.erase(node);
+            m_data[node].reset();
         }
     }
 
@@ -402,12 +438,104 @@ public:
         }
     }
 
-    std::unordered_map<NodeID, T> m_nodeData;
+    bool hasNode(const NodeID nodeId) const { return nodeId < m_data.size(); }
+
+    std::vector<std::unique_ptr<T>> m_data;
 
 private:
     std::vector<NodeIDSizeT> m_refCount;
     TraversalDirection m_direction{TraversalDirection::DIRECTION_DOWN};
 };
+
+template <typename T> inline std::unique_ptr<T> make_unique(T* ptr) { return std::unique_ptr<T>(ptr); }
+
+inline void mergeInPlace(NodeIDList::iterator start, NodeIDList::iterator middle, NodeIDList::iterator end) {
+    std::inplace_merge(start, middle, end);
+}
+
+/**
+ * Common coalescence calculations for a parent node with children.
+ * Coalescence information lets us _exactly_ compute the mean/variance for each mutation
+ * in the diploid genotype matrix. Anytime the graph is modify (including during construction)
+ * we need to track this information.
+ *
+ * This only applies to diploid data. Each "individual ID" is just the sample ID divided by 2.
+ *
+ * @param[in] grg The graph.
+ * @param[in] nodeToIndivs Either an UnmanagedNodeData<NodeIDList> or RefCountedNodeData<NodeIDList>
+ *     that is tracking all of the uncoalesced individual information per node. This is not as memory
+ *     expensive as most per-node data, because once an individual coalesces all parent nodes do not
+ *     track that information. The lists of individuals are kept in vectors (NodeIDList) and sorted,
+ *     as this is more than 2x faster than uses a hash table to track coalescences.
+ * @param[in] nodeId The node being computed (parent).
+ * @param[in] children The child nodes of nodeId.
+ * @param[in,out] uncoalescedIndivs Sorted list of individuals that have not yet coalesced. All the
+ *     uncoalesced individuals at the children nodes (passed in) are evaluated and any that coalesce
+ *     are left out of this list. Any that remain uncoalesced remain. The list can be passed in to
+ *     this function empty (the usual use case), or with individuals that you want to check coalescence
+ *     against.
+ * @param[in] implicitSamples Set to true if samples should be treated implicitly instead of storing
+ *     them in nodeToIndivs, which is only valid when performing a full graph traversal. Partial
+ *     traversal require this to be false, and samples should be handled explicitly. Default: false.
+ */
+template <typename NodeDataT = RefCountedNodeData<NodeIDList>>
+inline NodeIDSizeT getCoalsForParent(const GRGPtr& grg,
+                                     NodeDataT& nodeToIndivs,
+                                     const NodeID nodeId,
+                                     const NodeIDList& children,
+                                     NodeIDList& uncoalescedIndivs,
+                                     bool implicitSamples = false) {
+    constexpr NodeIDSizeT ploidy = 2;
+    release_assert(grg->getPloidy() == ploidy);
+    NodeIDSizeT coalCount = 0;
+
+    // Collect all "individuals below" each child and whenever we see one twice, count
+    // it as a coalescence and remove it from the list of seen individuals.
+    if (!implicitSamples && grg->isSample(nodeId)) {
+        uncoalescedIndivs.emplace_back(nodeId / ploidy);
+    } else {
+        for (const auto& childId : children) {
+            const ssize_t sortedEndPos = static_cast<ssize_t>(uncoalescedIndivs.size());
+            if (implicitSamples && grg->isSample(childId)) {
+                uncoalescedIndivs.emplace_back(childId / ploidy);
+            } else {
+                const auto& childIndivs = nodeToIndivs.get(childId);
+                if (childIndivs) {
+                    for (const NodeID childIndivId : *childIndivs) {
+                        uncoalescedIndivs.emplace_back(childIndivId);
+                    }
+                    nodeToIndivs.decr(childId);
+                }
+            }
+            if (sortedEndPos > 0) {
+                mergeInPlace(uncoalescedIndivs.begin(),
+                             std::next(uncoalescedIndivs.begin(), sortedEndPos),
+                             uncoalescedIndivs.end());
+            }
+        }
+        if (!uncoalescedIndivs.empty()) {
+            size_t j = 0;
+            NodeID prevIndiv = INVALID_NODE_ID;
+            for (size_t i = 0; i < uncoalescedIndivs.size(); i++) {
+                const NodeID currentIndiv = uncoalescedIndivs[i];
+                if (currentIndiv == prevIndiv) {
+                    release_assert(j > 0);
+                    j--; // Erase the previous and skip the current
+                    coalCount++;
+                    prevIndiv = INVALID_NODE_ID;
+                } else {
+                    if (j < i) {
+                        uncoalescedIndivs[j] = uncoalescedIndivs[i];
+                    }
+                    j++;
+                    prevIndiv = currentIndiv;
+                }
+            }
+            uncoalescedIndivs.resize(j);
+        }
+    }
+    return coalCount;
+}
 
 // Flip a traversal direction.
 inline TraversalDirection flipDir(TraversalDirection dir) {
@@ -420,6 +548,30 @@ inline NodeIDList nodeSetToList(const NodeIDSet& set) {
     NodeIDList result;
     for (const auto& item : set) {
         result.emplace_back(item);
+    }
+    return std::move(result);
+}
+
+inline NodeIDList complementSampleList(const NodeIDSizeT numSamples, const NodeIDList& samples) {
+    NodeIDList result;
+    NodeID previous = INVALID_NODE_ID;
+    size_t j = 0;
+    for (NodeID nodeId = 0; nodeId < numSamples; nodeId++) {
+        bool matched = false;
+        if (j < samples.size()) {
+            NodeID current = samples[j];
+            api_exc_check(previous == INVALID_NODE_ID || previous < current,
+                          "Sample list must be in sorted order with no duplicates");
+            release_assert(current >= nodeId);
+            if (nodeId == current) {
+                j++;
+                previous = current;
+                matched = true;
+            }
+        }
+        if (!matched) {
+            result.emplace_back(nodeId);
+        }
     }
     return std::move(result);
 }
