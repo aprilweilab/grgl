@@ -301,16 +301,17 @@ NodeIDSizeT RenumberAndWriteVisitor::setKeepSamples(const grgl::GRGPtr& grg, grg
         }
         // Adjust the coalescence counts, if diploid data
         if (grg->getPloidy() == 2) {
-            // Compute the coalescence information for all the samples that we are dropping. We will use
-            // this later to adjust the existing coalescence information.
-            NodeIDList removedSamples = complementSampleList(grg->numSamples(), sampleIDList);
-            std::cout << "COMPUTING NEW COALS FOR " << removedSamples.size() << " DROPPED SAMPLES\n";
-            m_subtractCoals = std::move(calculateCoalsForSamples(grg, removedSamples));
-            size_t total = 0;
-            for (size_t i = 0; i < m_subtractCoals.size(); i++) {
-                total += m_subtractCoals[i];
+            // Recompute the coalescence information. If we are dropping fewer than 50%, then we compute
+            // for all the samples that we are dropping and then subtract those coalescences later. Otherwise,
+            // we just recompute the coalescence based on the kept samples.
+            if (((double)numSamples / (double)grg->numSamples()) > 0.5) {
+                NodeIDList removedSamples = complementSampleList(grg->numSamples(), sampleIDList);
+                m_coalAdjust = std::move(calculateCoalsForSamples(grg, removedSamples));
+                m_coalAdjustIsSubtract = true;
+            } else {
+                m_coalAdjust = std::move(calculateCoalsForSamples(grg, sampleIDList));
+                m_coalAdjustIsSubtract = false;
             }
-            std::cout << "Saw " << total << " coal adjustments\n";
         }
     }
     m_nodeCounter = numSamples;
@@ -364,13 +365,19 @@ bool RenumberAndWriteVisitor::keepMutation(const MutationId mutId) {
 }
 
 NodeIDSizeT RenumberAndWriteVisitor::getAdjustedCoalCount(const GRGPtr& grg, NodeID nodeId) {
-    const NodeIDSizeT minusCoals = m_subtractCoals.empty() ? 0 : m_subtractCoals.at(nodeId);
-    NodeIDSizeT nodeCoals = grg->getNumIndividualCoals(nodeId);
-    if (nodeCoals != COAL_COUNT_NOT_SET) {
-        release_assert(minusCoals <= nodeCoals);
-        nodeCoals -= minusCoals;
+    if (m_coalAdjust.empty()) {
+        return grg->getNumIndividualCoals(nodeId);
     }
-    return nodeCoals;
+    if (m_coalAdjustIsSubtract) {
+        const NodeIDSizeT minusCoals = m_coalAdjust.empty() ? 0 : m_coalAdjust.at(nodeId);
+        NodeIDSizeT nodeCoals = grg->getNumIndividualCoals(nodeId);
+        if (nodeCoals != COAL_COUNT_NOT_SET) {
+            release_assert(minusCoals <= nodeCoals);
+            nodeCoals -= minusCoals;
+        }
+        return nodeCoals;
+    }
+    return m_coalAdjust.at(nodeId);
 }
 
 bool RenumberAndWriteVisitor::visit(const grgl::GRGPtr& grg,

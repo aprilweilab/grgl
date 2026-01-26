@@ -104,6 +104,9 @@ public:
         m_data.reserve(numElements - m_flushedItems);
     }
 
+    /**
+     * Clear all data; requires that no items have been flushed to disk.
+     */
     void clear() {
         release_assert(m_flushedItems == 0);
         m_data.clear();

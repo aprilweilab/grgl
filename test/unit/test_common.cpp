@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 #include <limits>
 
-#include "grg_helpers.h"
 #include "grgl/common.h"
 
 using namespace grgl;
