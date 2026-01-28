@@ -60,6 +60,13 @@ def add_options(subparser):
         default=None,
         help="Number of trees to use during shape construction. Defaults to auto-calculate.",
     )
+
+    subparser.add_argument(
+        "--mutation-batch-size",
+        type=int,
+        default=64,
+        help="Mutations to process per batch when mapping. Defaults to 64.",
+    )
     subparser.add_argument(
         "--binary-muts",
         "-b",
@@ -152,6 +159,9 @@ def add_options(subparser):
         default=None,
         help="Forcing reduction of graph after merge.",
     )
+    subparser.add_argument(
+        "--force-map-muts", action="store_true", help="Force the use of the MapMutations algorithm (debug feature).",
+    )
 
 
 grgl_exe = which("grgl")
@@ -228,6 +238,8 @@ def build_shape(
         command.append("--force")
     if args.reduce is not None:
         command.extend(["--reduce", str(args.reduce)])
+    if args.force_map_muts:
+        command.append("--no-tree-map")
     shape_filename = out_filename(output_file, part)
     command.extend(
         [
@@ -250,12 +262,11 @@ def build_grg(
     auto_args: List[str],
     input_file: str,
     output_file: str,
-    do_map_muts: bool,
 ):
     shape_grg = build_shape(range_triple, args, auto_args, input_file, output_file)
     part, lower, upper = range_triple
     # When we do --fast, no need to call MapMutations
-    if do_map_muts:
+    if args.force_map_muts:
         command = [grgl_exe, shape_grg]
         suffix = get_default_range_suffix(input_file)
         if args.maf_flip:
@@ -276,6 +287,7 @@ def build_grg(
                 out_filename(output_file, part),
             ]
         )
+        command.extend(["--mutation-batch-size", str(args.mutation_batch_size)])
         if args.binary_muts:
             command.append("-b")
         log_v(command, args.verbose)
@@ -402,7 +414,7 @@ def from_tabular(args):
 
     # Compute the separate GRGs in parallel.
     if len(ranges) == 1:
-        build_grg(ranges[0], args, auto_args, input_file, final_filename, False)
+        build_grg(ranges[0], args, auto_args, input_file, final_filename)
     else:
         print("Converting segments of input data to graphs", file=sys.stderr)
         with Pool(args.jobs) as pool:
@@ -417,7 +429,6 @@ def from_tabular(args):
                                 auto_args,
                                 input_file,
                                 final_filename,
-                                False,
                             )
                             for r in ranges
                         ],
@@ -468,3 +479,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

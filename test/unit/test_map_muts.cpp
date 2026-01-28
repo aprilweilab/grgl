@@ -86,7 +86,7 @@ TEST(MapMutations, Basic) {
         }
     }
 
-    MutationMappingStats stats = mapMutations(grg, testIt);
+    MutationMappingStats stats = mapMutations(grg, testIt, false, 1);
     const NodeIDSizeT nodesAfter = grg->numNodes();
     std::cout << stats.totalMutations << "\n";
     std::cout << "Added " << nodesAfter << " nodes\n";
@@ -125,3 +125,4 @@ TEST(MapMutations, Basic) {
     }
     ASSERT_EQ(totalCoals, 3);
 }
+

@@ -68,6 +68,8 @@ int main(int argc, char** argv) {
     args::Flag verbose(parser, "verbose", "Show verbose details of the GRG", {'v', "verbose"});
     args::ValueFlag<std::string> mapMutations(
         parser, "map-muts", "Map the mutations from the provided file", {'m', "map-muts"});
+    args::ValueFlag<size_t> mapMutationsBatchSize(
+        parser, "mutation-batch-size", "Map this many mutations in a batch (default 64)", {"mutation-batch-size"});
     args::Flag binaryMutations(parser,
                                "binary-muts",
                                "Do not store the allele with the mutation, only that a mutation occurred",
@@ -257,19 +259,6 @@ int main(int argc, char** argv) {
             std::cerr << "Failed to load " << *infile << std::endl;
             return 2;
         }
-        if (reduce) {
-            api_exc_check(*reduce > 0 && *reduce <= 100, "--reduce must be between 1 and 100 (iterations)");
-            const auto reduceStartTime = std::chrono::high_resolution_clock::now();
-            grgl::MutableGRGPtr mutGRG = std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG);
-            const size_t iterations = reduceGRGUntil(mutGRG, *reduce, REDUCE_MIN_DROP, REDUCE_FRAC_DROP);
-            if (verbose) {
-                std::cout << STREAM_PUID << "Reduced GRG for " << iterations << " iterations in "
-                          << std::chrono::duration_cast<std::chrono::milliseconds>(
-                                 std::chrono::high_resolution_clock::now() - reduceStartTime)
-                                 .count()
-                          << " ms\n";
-            }
-        }
         if (countVariants) {
             std::cout << theGRG->numMutations() << std::endl;
             return 0;
@@ -324,18 +313,6 @@ int main(int argc, char** argv) {
                                                                   treeCount,
                                                                   lfNoTree ? *lfNoTree : 0.0,
                                                                   indivIdToPop);
-        if (reduce) {
-            api_exc_check(*reduce > 0 && *reduce <= 100, "--reduce must be between 1 and 100 (iterations)");
-            const auto reduceStartTime = std::chrono::high_resolution_clock::now();
-            const size_t iterations = reduceGRGUntil(createdGRG, *reduce, REDUCE_MIN_DROP, REDUCE_FRAC_DROP);
-            if (verbose) {
-                std::cout << STREAM_PUID << "Reduced GRG for " << iterations << " iterations in "
-                          << std::chrono::duration_cast<std::chrono::milliseconds>(
-                                 std::chrono::high_resolution_clock::now() - reduceStartTime)
-                                 .count()
-                          << " ms\n";
-            }
-        }
         theGRG = createdGRG;
     } else {
         std::cerr << "Unsupported/undetected filetype for " << *infile << std::endl;
@@ -359,7 +336,15 @@ int main(int argc, char** argv) {
             return 1;
         }
         grgl::MutationMappingStats stats;
-        stats = grgl::mapMutations(std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG), *unmappedMutations, verbose);
+        if (mapMutationsBatchSize) {
+            stats = grgl::mapMutations(std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG),
+                                       *unmappedMutations,
+                                       verbose,
+                                       *mapMutationsBatchSize);
+        } else {
+            stats =
+                grgl::mapMutations(std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG), *unmappedMutations, verbose);
+        }
         if (verbose) {
             EMIT_TIMING_MESSAGE("Mapping mutations took");
             std::cerr << std::endl;
@@ -370,7 +355,24 @@ int main(int argc, char** argv) {
             std::cerr << std::endl;
         }
     }
-
+    if (reduce) {
+        if (theGRG->isMutable()) {
+            api_exc_check(*reduce > 0 && *reduce <= 100, "--reduce must be between 1 and 100 (iterations)");
+            const auto reduceStartTime = std::chrono::high_resolution_clock::now();
+            grgl::MutableGRGPtr mutGRG = std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG);
+            const size_t iterations = reduceGRGUntil(mutGRG, *reduce, REDUCE_MIN_DROP, REDUCE_FRAC_DROP);
+            if (verbose) {
+                std::cout << STREAM_PUID << "Reduced GRG for " << iterations << " iterations in "
+                        << std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::high_resolution_clock::now() - reduceStartTime)
+                                .count()
+                        << " ms\n";
+            }
+        } else {
+            std::cerr << "WARNING: --reduce used, but GRG is not mutable." << std::endl;
+        }
+    }
+    
     if (showStats) {
         dumpStats(theGRG);
     }

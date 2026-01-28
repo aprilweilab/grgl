@@ -138,6 +138,7 @@ endif()
 
 set(GRGL_TEST_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_bloom_filter.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_batch_membership.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_common.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_construct.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test/unit/test_csr_storage.cpp
