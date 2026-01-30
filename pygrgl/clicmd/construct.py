@@ -80,7 +80,7 @@ def add_options(subparser):
     subparser.add_argument(
         "--population-ids",
         default=None,
-        help='Format: "filename:fieldname". Read population ids from the given '
+        help='Format: "filename:sample_field:pop_field". Read population ids from the given '
         "tab-separate file, using the given fieldname.",
     )
     subparser.add_argument(

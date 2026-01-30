@@ -64,6 +64,21 @@ void addExtraInfoToGRG(MutableGRGPtr& grg,
     // Population mapping.
     std::vector<std::string> indivIds;
     if (!indivIdToPop.empty()) {
+        std::map<std::string, size_t> popDescriptionMap;
+        // Get the numeric ID for the population description
+        auto getPopId = [&](const std::string& popDescription) {
+            const size_t nextPopId = popDescriptionMap.size();
+            const auto& findPopIt = popDescriptionMap.emplace(popDescription, nextPopId);
+            const auto popId = findPopIt.first->second;
+            if (findPopIt.second) {
+                release_assert(popId == nextPopId);
+                grg->addPopulation(popDescription);
+            } else {
+                release_assert(popId != nextPopId);
+            }
+            return popId;
+        };
+
         size_t ploidy = 0;
         size_t numIndividuals = 0;
         bool isPhased = false;
@@ -71,7 +86,6 @@ void addExtraInfoToGRG(MutableGRGPtr& grg,
         indivIds = mutationIterator.getIndividualIds();
         if (!indivIds.empty()) {
             release_assert(indivIds.size() == numIndividuals);
-            std::map<std::string, size_t> popDescriptionMap;
             for (NodeID individual = 0; individual < indivIds.size(); individual++) {
                 const auto& stringId = indivIds[individual];
                 const auto& findIt = indivIdToPop.find(stringId);
@@ -81,15 +95,7 @@ void addExtraInfoToGRG(MutableGRGPtr& grg,
                     throw std::runtime_error(ssErr.str());
                 }
                 const auto& popDescription = findIt->second;
-                const size_t nextPopId = popDescriptionMap.size();
-                const auto& findPopIt = popDescriptionMap.emplace(popDescription, nextPopId);
-                const auto popId = findPopIt.first->second;
-                if (findPopIt.second) {
-                    release_assert(popId == nextPopId);
-                    grg->addPopulation(popDescription);
-                } else {
-                    release_assert(popId != nextPopId);
-                }
+                const auto popId = getPopId(popDescription);
                 for (NodeID offset = 0; offset < ploidy; offset++) {
                     const NodeID sampleId = (individual * ploidy) + offset;
                     release_assert(sampleId < grg->numSamples());
@@ -97,7 +103,16 @@ void addExtraInfoToGRG(MutableGRGPtr& grg,
                 }
             }
         } else {
-            throw ApiMisuseFailure("No individual IDs present in input; required for population mapping");
+            for (const auto& idAndPop : indivIdToPop) {
+                NodeID sampleId = INVALID_NODE_ID;
+                if (!parseExactUint32(idAndPop.first, sampleId)) {
+                    throw ApiMisuseFailure(
+                        "GRG does not have individual IDs; population mapping must be based on sample index");
+                }
+                api_exc_check(sampleId < grg->numSamples(), "Invalid sample index: " << sampleId);
+                const auto popId = getPopId(idAndPop.second);
+                grg->setPopulationId(sampleId, popId);
+            }
         }
     }
 
@@ -791,7 +806,7 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
     // TODO:
     // 1. Make the datatype for these haplotype segments a fixed size array. Now that we are using
     //    this for automatic parameter detection, we can't change it without extra work.
-    // 2. Since length is 128, look into doing calculations using SSE/AVX.
+    // 2. Since length is ~256, look into doing calculations using SSE/AVX.
     constexpr size_t hapLength = FIXED_HAP_LENGTH;
     static_assert(MAX_FAST_HAP_LENGTH == 254, "Fix below exception text if changing this size.");
     release_assert(hapLength <= MAX_FAST_HAP_LENGTH);
