@@ -36,7 +36,7 @@
 
 #if MAP_MUTS_THREADED
 #include <mutex>
-#define DEFINE_MUTEX(name) std::mutex name;
+#define DEFINE_MUTEX(name)  std::mutex name;
 #define CREATE_GUARD(mutex) std::lock_guard<std::mutex> lock(mutex);
 #else
 #define DEFINE_MUTEX(name)
@@ -54,9 +54,6 @@
 // Histogram size for statistics
 #define STATS_HIST_SIZE (200)
 
-
-
-
 namespace grgl {
 
 using NodeSamples = std::tuple<NodeID, size_t>;
@@ -69,8 +66,7 @@ static bool cmpNodeSamples(const NodeSamples& ns1, const NodeSamples& ns2) {
 }
 
 // What percentage of total samples must be covered before we switch to dense bitvecs
-#define USE_DENSE_COVERAGE_PERCENT (0.001f)
-
+constexpr double USE_DENSE_COVERAGE_PROPORTION(0.001f);
 
 // SampleCoverageSet is the interface for tracking which sample nodes lie beneath a GRG node.
 class SampleCoverageSet {
@@ -300,7 +296,7 @@ protected:
             }
         } else if (const SparseCoverageSet* other_v = dynamic_cast<const SparseCoverageSet*>(&other)) {
             auto& seenWords = seenSet.m_elems;
-            for (const auto *it = other_v->samplesBegin(); it != other_v->samplesEnd(); ++it) {
+            for (const auto* it = other_v->samplesBegin(); it != other_v->samplesEnd(); ++it) {
                 const NodeID sample = *it;
                 addElem(sample);
                 // Collapse the two haplotypes for an individual down to their even slot in the bitset.
@@ -365,15 +361,15 @@ public:
     }
 
     const NodeIDList& seedList() const { return m_seedList; }
-    const Mutation& getMutation(size_t idx) const { return m_mutations[idx].m_mutation; }
-    const NodeIDList& sampleSet(size_t idx) const { return m_sampleSets[idx]; }
+    const Mutation& getMutation(size_t idx) const { return m_mutations.at(idx).m_mutation; }
+    const NodeIDList& sampleSet(size_t idx) const { return m_sampleSets.at(idx); }
     size_t numMutations() const { return m_mutations.size(); }
 
     void clear() {
         m_sampleSets.clear();
         m_mutations.clear();
         m_seedList.clear();
-        std::fill(m_membershipStorage.begin(), m_membershipStorage.end(), 0u);
+        std::fill(m_membershipStorage.begin(), m_membershipStorage.end(), 0U);
     }
 
     MutationBatch(const MutationBatch&) = delete;
@@ -465,12 +461,12 @@ private:
 
 bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grgl::NodeID nodeId) {
     release_assert(grg->hasUpEdges());
-    // Note: Any modification to current node or children is safe, as we never process parent and child at the same time
+    // Note: Any modification to current node or child is safe, as we never process parent and child at the same time
     const bool isRoot = grg->numUpEdges(nodeId) == 0;
     const bool isSample = grg->isSample(nodeId);
     const size_t ploidy = grg->getPloidy();
     const auto numCoals = grg->getNumIndividualCoals(nodeId);
-    const bool computeCoals = !isSample && (ploidy == 2) && (COAL_COUNT_NOT_SET == numCoals);
+    const bool computeCoals = !isSample && (ploidy == PLOIDY_COAL_PROP) && (COAL_COUNT_NOT_SET == numCoals);
 
     size_t individualCoalCount = 0;
     NodeIDList candidateNodes;
@@ -487,7 +483,7 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
     std::unique_ptr<BitVecCoverageSet> coalTrackerSet;
     std::unordered_map<NodeIDSizeT, NodeIDSizeT> coalTrackerMap;
     double coveragePercent = (double)sampleCount / (double)grg->numSamples();
-    bool dense = coveragePercent > USE_DENSE_COVERAGE_PERCENT;
+    bool dense = coveragePercent > USE_DENSE_COVERAGE_PROPORTION;
     if (dense) {
         samplesBeneathSet =
             std::unique_ptr<SampleCoverageSet>(new BitVecCoverageSet(grg->numSamples(), m_batchBitCount));
@@ -674,7 +670,7 @@ static NodeIDList processCandidateSet(const MutableGRGPtr& grg,
         // Those sample sets MUST be non-overlapping or we will introduce a diamond into the graph.
         if (!coverageSet.overlapsWith(*candidateSet)) {
             // Mark all the sample nodes as covered. Only track coalescences for diploid data.
-            if (ploidy == 2) {
+            if (ploidy == PLOIDY_COAL_PROP) {
                 coverageSet.mergeSampleCoverage(*candidateSet, coalTrackingSet, individualCoalCount);
             } else {
                 coverageSet.mergeSampleCoverage(*candidateSet);
@@ -701,7 +697,7 @@ static NodeIDList processCandidateSet(const MutableGRGPtr& grg,
     for (const NodeID sampleNodeId : mutSamples) {
         if (!coverageSet.contains(sampleNodeId)) {
             uncovered.emplace(sampleNodeId);
-            if (ploidy == 2) {
+            if (ploidy == PLOIDY_COAL_PROP) {
                 NodeID individualId = (sampleNodeId / 2) * 2;
                 if (coalTrackingSet.contains(individualId)) {
                     individualCoalCount++;
@@ -711,7 +707,7 @@ static NodeIDList processCandidateSet(const MutableGRGPtr& grg,
             }
         }
     }
-    if (ploidy == 2) {
+    if (ploidy == PLOIDY_COAL_PROP) {
         grg->setNumIndividualCoals(mutNodeId, individualCoalCount);
     }
 
@@ -792,6 +788,8 @@ mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose
     size_t _ignored = 0;
     std::pair<BpPosition, NodeID> currentMissing = {INVALID_POSITION, INVALID_NODE_ID};
     MutationAndSamples unmapped = {Mutation(0.0, ""), NodeIDList()};
+
+    const int ploidy = grg->getPloidy();
     while (mutations.next(unmapped, _ignored)) {
         const NodeIDList& mutSamples = unmapped.samples;
         if (!mutSamples.empty()) {
@@ -805,9 +803,7 @@ mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose
                 const NodeID missingnessNode =
                     (currentMissing.first == unmapped.mutation.getPosition()) ? currentMissing.second : INVALID_NODE_ID;
 
-                const int ploidy = grg->getPloidy();
-
-                const NodeID mutNodeId = grg->makeNode(1, true);
+                const NodeID mutNodeId = sampleNodeId;
                 if (!unmapped.mutation.isMissing()) {
                     grg->addMutation(unmapped.mutation, mutNodeId, missingnessNode);
                 } else {
@@ -815,27 +811,20 @@ mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose
                 }
 
                 // Coalescence is always 0 for singletons
-                if (ploidy == 2) {
+                if (ploidy == PLOIDY_COAL_PROP) {
                     grg->setNumIndividualCoals(mutNodeId, 0);
                 }
-
-                stats.numWithSingletons++;
-                stats.maxSingletons = std::max<size_t>(1, stats.maxSingletons);
-                stats.singletonSampleEdges++;
-                grg->connect(mutNodeId, sampleNodeId);
-
-                NodeIDList singletonAdded{mutNodeId};
             } else {
                 mutBatch.addMutation(unmapped.mutation, mutSamples);
 
                 if (mutBatch.numMutations() == mutationBatchSize) {
-                    NodeIDList addedNodes = greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
+                    greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
                     mutBatch.clear();
                 }
             }
         } else {
             if (mutBatch.numMutations() > 0) {
-                NodeIDList addedNodes = greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
+                greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
                 mutBatch.clear();
             }
             stats.emptyMutations++;

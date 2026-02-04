@@ -45,8 +45,6 @@
 
 namespace grgl {
 
-// We only propagate coalescence information for ploidy=2 datasets.
-constexpr size_t PLOIDY_COAL_PROP = 2;
 
 inline bool hasBSFlag(GrgBuildFlags flags, GrgBuildFlags flag) { return (bool)(flags & flag); }
 
