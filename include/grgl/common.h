@@ -26,6 +26,9 @@
 
 namespace grgl {
 
+// We only propagate coalescence information for ploidy=2 datasets.
+constexpr size_t PLOIDY_COAL_PROP = 2;
+
 #define release_assert(condition)                                                                                      \
     do {                                                                                                               \
         if (!(condition)) {                                                                                            \

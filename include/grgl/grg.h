@@ -712,6 +712,9 @@ public:
         }
     }
 
+    virtual bool isMutable() const {
+        return false;
+    }
 protected:
     void visitTopoNodeOrderedDense(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
     void visitTopoNodeOrderedSparse(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
@@ -984,6 +987,9 @@ public:
      */
     void compact(NodeID nodeId = INVALID_NODE_ID);
 
+    bool isMutable() const override {
+        return true;
+    }
 private:
     // The list of nodes. The node's position in this vector must match its ID.
     std::vector<GRGNodePtr> m_nodes;
