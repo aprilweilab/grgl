@@ -861,4 +861,3 @@ mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose
 }
 
 } // namespace grgl
-

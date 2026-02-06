@@ -45,7 +45,6 @@
 
 namespace grgl {
 
-
 inline bool hasBSFlag(GrgBuildFlags flags, GrgBuildFlags flag) { return (bool)(flags & flag); }
 
 void addExtraInfoToGRG(MutableGRGPtr& grg,
