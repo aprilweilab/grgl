@@ -15,10 +15,16 @@ GRGL. See our paper `"Enabling efficient analysis of biobank-scale data with
 genotype representation graphs" <https://www.nature.com/articles/s43588-024-00739-9>`_
 for more details.
 
-.. contents::
-   :depth: 2
+This documentation tries to pull together all the important GRG-related functionality
+in one spot. If you want detailed API documentation, they can be found at:
+
+* Core library: `pygrgl <https://grgl.readthedocs.io/en/stable/python_api.html>`_
+* Statgen and popgen applications: `grapp <https://grapp.readthedocs.io/en/latest/>`_
+* Phenotype simulation: `grg_pheno_sim <https://grg-pheno-sim.readthedocs.io/en/latest/>`_
+
 
 .. toctree::
+  :caption: Concepts and APIs
   :hidden:
   :maxdepth: 2
 
@@ -31,6 +37,25 @@ for more details.
   python_api
   cpp_api
   Examples and applications <examples_and_applications>
+  Command-line Recipes <cli_recipes>
+
+.. toctree::
+  :caption: Tutorials
+  :hidden:
+  :maxdepth: 2
+
+  tutorials/GWAS
+  tutorials/GWASCovariates
+  tutorials/PCA
+  tutorials/LinearOperators
+  tutorials/WorkingWithRealData
+  tutorials/WorkingWithSimData
+  tutorials/SimulatingPhenotypes
+  tutorials/IGDToGRG
+  tutorials/VCFToGRG
+
+.. contents::
+   :depth: 2
 
 Simple Usage Examples
 ---------------------

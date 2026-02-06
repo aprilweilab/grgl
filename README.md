@@ -27,6 +27,16 @@ Recent releases (after v2.3) support the following improvements over the [initia
 If you need to cite something, use
 ["Enabling efficient analysis of biobank-scale data with genotype representation graphs"](https://www.nature.com/articles/s43588-024-00739-9).
 
+# Documentation
+
+Check out [the main documentation](https://grgl.readthedocs.io/en/latest/) for core API documentation, examples, tutorials, etc. Things covered in the documentation include:
+* Creating and using GRGs
+* Performing GWAS, PCA, GWAS with covariates, or other analyses with GRG
+* Simulating phenotypes with GRG
+* Using GRG with Python (integration with [numpy](https://numpy.org/), [pandas](https://pandas.pydata.org/), [scipy](https://scipy.org/), etc.)
+
+You can also download the tutorials as [Jupyter Notebooks](https://github.com/aprilweilab/grgl/tree/main/doc/tutorials/notebooks) and work through them interactively.
+
 # Genotype Representation Graph Library (GRGL)
 
 GRGL can be used as a library in both C++ and Python. Support is currently limited to Linux and MacOS.
