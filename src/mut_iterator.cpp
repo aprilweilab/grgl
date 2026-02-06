@@ -154,15 +154,22 @@ VCFMutationIterator::VCFMutationIterator(const char* filename, FloatRange genome
         const auto vcfGenomeRange = m_vcf->getGenomeRange();
         m_genomeRange = genomeRange.denormalized(vcfGenomeRange.first, vcfGenomeRange.second);
     }
+    getMetadataHelper();
+
     // Tell it to scan to the first variant.
     m_needsReset = true;
 }
-
 void VCFMutationIterator::getMetadata(size_t& ploidy, size_t& numIndividuals, bool& isPhased) {
+    ploidy = m_ploidy;
+    numIndividuals = m_numIndividuals;
+    isPhased = m_isPhased;
+}
+
+void VCFMutationIterator::getMetadataHelper() {
     const auto originalPosition = m_vcf->getFilePosition();
-    numIndividuals = m_vcf->numIndividuals();
-    ploidy = 0;
-    isPhased = false;
+    m_numIndividuals = m_vcf->numIndividuals();
+    m_ploidy = 0;
+    m_isPhased = false;
     m_vcf->seekBeforeVariants();
     // We only look at the first individual of the first variant, because subsequent code in
     // this iterator ensures that we have consistent ploidy and phasedness for all data.
@@ -170,9 +177,9 @@ void VCFMutationIterator::getMetadata(size_t& ploidy, size_t& numIndividuals, bo
         picovcf::VCFVariantView& variant = m_vcf->currentVariant();
         api_exc_check(variant.hasGenotypeData(), "No GT data in VCF file");
         variant.getGenotypeArray();
-        ploidy = variant.getMaxPloidy();
+        m_ploidy = variant.getMaxPloidy();
         api_exc_check(variant.getPhasedness() != picovcf::PVCFP_MIXED, "Mixed phased VCF files not supported");
-        isPhased = (variant.getPhasedness() == picovcf::PVCFP_PHASED);
+        m_isPhased = (variant.getPhasedness() == picovcf::PVCFP_PHASED);
     }
     m_vcf->setFilePosition(originalPosition);
 }

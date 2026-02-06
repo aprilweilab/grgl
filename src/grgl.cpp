@@ -363,16 +363,16 @@ int main(int argc, char** argv) {
             const size_t iterations = reduceGRGUntil(mutGRG, *reduce, REDUCE_MIN_DROP, REDUCE_FRAC_DROP);
             if (verbose) {
                 std::cout << STREAM_PUID << "Reduced GRG for " << iterations << " iterations in "
-                        << std::chrono::duration_cast<std::chrono::milliseconds>(
-                                std::chrono::high_resolution_clock::now() - reduceStartTime)
-                                .count()
-                        << " ms\n";
+                          << std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::high_resolution_clock::now() - reduceStartTime)
+                                 .count()
+                          << " ms\n";
             }
         } else {
             std::cerr << "WARNING: --reduce used, but GRG is not mutable." << std::endl;
         }
     }
-    
+
     if (showStats) {
         dumpStats(theGRG);
     }

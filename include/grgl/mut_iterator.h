@@ -162,10 +162,15 @@ public:
 protected:
     void buffer_next(size_t& totalSamples) override;
     void reset_specific() override;
+    void getMetadataHelper();
 
 private:
     std::unique_ptr<picovcf::VCFFile> m_vcf;
+    // Metadata we cache.
     size_t m_ploidy{};
+    size_t m_numIndividuals{};
+    bool m_isPhased{};
+
     bool m_needsReset;
 };
 
