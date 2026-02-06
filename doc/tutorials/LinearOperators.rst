@@ -8,10 +8,12 @@ functions actually make use of the
 `LinearOperators <https://grapp.readthedocs.io/en/latest/grapp.html#non-standardized-linear-operators>`__
 under the hood.
 
-**What you’ll need:** \* Python dependencies “grapp”, “pandas”,
-“seaborn”, “scipy”: ``pip install grapp pandas seaborn scipy`` \* \*
-Command line tool “wget”: ``sudo apt install wget`` (or your system’s
-equivalent)
+**What you’ll need:**
+
+-  Python dependencies “grapp”, “pandas”, “seaborn”, “scipy”:
+   ``pip install grapp pandas seaborn scipy``
+-  Command line tool “wget”: ``sudo apt install wget`` (or your system’s
+   equivalent)
 
 Get Dataset
 -----------
