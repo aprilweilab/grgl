@@ -1,0 +1,10 @@
+*.index
+*.tsv
+*.grg
+*.igd
+*.vcf.gz
+*.tbi
+.ipynb_checkpoints/
+*.trees
+*.phen
+haplotypes.txt
