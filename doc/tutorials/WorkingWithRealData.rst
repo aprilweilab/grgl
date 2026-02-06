@@ -7,15 +7,19 @@ examine it with GRG. The goal is just to illustrate the ease with which
 you can work with such datasets. We also illustrate how to include
 population information in GRG for a real dataset.
 
-**What is demonstrated:** \* Building a GRG from real data, including
-population information \* Using GRG matrix multiplication to calculate
-population-specific allele frequencies \* Using
-`grapp <https://github.com/aprilweilab/grapp>`__ to filter information
-out of a GRG
+**What is demonstrated:**
 
-**What you’ll need:** \* Python dependencies “grapp”, “seaborn”:
-``pip install grapp seaborn`` \* Command line tools “wget”, “tabix”:
-``sudo apt install wget tabix`` (or your system’s equivalent)
+-  Building a GRG from real data, including population information
+-  Using GRG matrix multiplication to calculate population-specific
+   allele frequencies
+-  Using `grapp <https://github.com/aprilweilab/grapp>`__ to filter
+   information out of a GRG
+
+**What you’ll need:**
+
+-  Python dependencies “grapp”, “seaborn”: ``pip install grapp seaborn``
+-  Command line tools “wget”, “tabix”: ``sudo apt install wget tabix``
+   (or your system’s equivalent)
 
 First, download the data. This can take 10-15 minutes, depending on your
 internet connection (the file is roughly 425MB)

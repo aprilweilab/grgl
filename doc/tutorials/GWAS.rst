@@ -21,9 +21,12 @@ The other piece of information we need for performing a GWAS is the
 phenotype, :math:`Y`. We are just going to simulate a phenotype for this
 tutorial, but replace it with your own phenotype as desired.
 
-**What you’ll need:** \* Python dependencies “grapp”, “igdtools”,
-“seaborn”: ``pip install grapp igdtools seaborn`` \* Command line tool
-“wget”: ``sudo apt install wget`` (or your system’s equivalent)
+**What you’ll need:**
+
+-  Python dependencies “grapp”, “igdtools”, “seaborn”:
+   ``pip install grapp igdtools seaborn``
+-  Command line tool “wget”: ``sudo apt install wget`` (or your system’s
+   equivalent)
 
 Get Dataset
 ~~~~~~~~~~~
@@ -135,7 +138,7 @@ Simulate Phenotype
 
 Since this phenotype is just for demonstration purposes, we can use the
 default settings for phenotype simulation. See `Simulating
-Phenotypes <SimulationPhenotypes.html>`__ for a more detailed tutorial
+Phenotypes <SimulatingPhenotypes.html>`__ for a more detailed tutorial
 that describes the range of options. Here, we just want a phenotype that
 has been derived from the genotype: that is, our simulation will choose
 some “causal mutations” that are responsible for some proportion of the
@@ -698,7 +701,7 @@ Related Topics
 -  In practice, GWAS is often performed while handling covariates (such
    as age, sex, principal components, etc). See `GWAS with
    Covariates <GWASCovariates.html>`__.
--  See `Simulating Phenotypes <SimulationPhenotypes.html>`__ for a more
+-  See `Simulating Phenotypes <SimulatingPhenotypes.html>`__ for a more
    details on generating synthetic phenotypes.
 -  Documentation links:
 

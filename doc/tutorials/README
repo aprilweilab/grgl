@@ -1,0 +1,5 @@
+How to update the tutorials:
+* Make changes to the Jupyter Notebooks in notebooks/
+* Rerun the notebook to update it's outputs
+* Run `python build_rst.py` which converts the notebooks to the sphinx .rst files
+* Commit the notebook changes and the .rst file changes

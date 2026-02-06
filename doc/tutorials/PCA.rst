@@ -14,15 +14,18 @@ reflect that structure.
 Simulate Data
 -------------
 
-We’re going to use `stdpopsim <>`__ and `msprime <>`__ to simulate the
-data we need. The result of that simulation will be simulated Ancestral
-Recombination Graphs (ARGs) in `tskit <>`__ format. Given such an ARG,
-we have two options for converting it to GRG: \* We can convert the ARG
-directly to a GRG by graph transformations. This is extremely fast, but
-only works on simulated data. We sometimes refer to this as the “true
-ARG” and the “true GRG”, since they did not need to be inferred from
-data. \* A more realistic approach is to build a GRG from tabular data,
-like ``.vcf.gz`` or
+We’re going to use
+`stdpopsim <https://popsim-consortium.github.io/stdpopsim-docs/stable/index.html>`__
+and `msprime <https://tskit.dev/msprime/docs/stable/intro.html>`__ to
+simulate the data we need. The result of that simulation will be
+simulated Ancestral Recombination Graphs (ARGs) in
+`tskit <https://tskit.dev/tskit/docs/stable/introduction.html>`__
+format. Given such an ARG, we have two options for converting it to GRG:
+\* We can convert the ARG directly to a GRG by graph transformations.
+This is extremely fast, but only works on simulated data. We sometimes
+refer to this as the “true ARG” and the “true GRG”, since they did not
+need to be inferred from data. \* A more realistic approach is to build
+a GRG from tabular data, like ``.vcf.gz`` or
 `IGD <https://picovcf.readthedocs.io/en/latest/igd_overview.html>`__.
 For simulated data, the fastest way to do this is
 ``true ARG -> true GRG -> IGD``. We then generate an “constructed GRG”

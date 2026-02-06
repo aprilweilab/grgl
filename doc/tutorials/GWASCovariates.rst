@@ -12,8 +12,11 @@ represent our genotype matrix. If you’re not sure how to get a GRG,
 start with `the simple GWAS tutorial <GWAS.html>`__ instead, since we
 are re-using the ``gwas.example.grg`` from that tutorial.
 
-**What you’ll need:** \* Files: ``gwas.example.grg`` \* Python
-dependencies “grapp”, “seaborn”: ``pip install grapp igdtools seaborn``
+**What you’ll need:**
+
+-  Files: ``gwas.example.grg``
+-  Python dependencies “grapp”, “seaborn”:
+   ``pip install grapp igdtools seaborn``
 
 Simulate Phenotype
 ------------------
@@ -889,7 +892,7 @@ Related Topics
 --------------
 
 -  See `GWAS <GWAS.html>`__ and `PCA <PCA.html>`__ for for details.
--  See `Simulating Phenotypes <SimulationPhenotypes.html>`__ for a more
+-  See `Simulating Phenotypes <SimulatingPhenotypes.html>`__ for a more
    details on generating synthetic phenotypes.
 -  Documentation links:
 
