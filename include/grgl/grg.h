@@ -377,7 +377,10 @@ public:
         return m_mutations.cref(mutId);
     }
 
-    void setMutationById(MutationId mutId, Mutation mutation) { m_mutations.atRef(mutId) = std::move(mutation); }
+    void setMutationById(MutationId mutId, Mutation mutation) {
+        m_mutations.atRef(mutId) = std::move(mutation);
+        m_mutsAreOrdered = false;
+    }
 
     /**
      * Get the mutations associated with no nodes. By default, the template argument is MutationId,
@@ -558,10 +561,9 @@ public:
 
     /**
      * Remove the Mutation with the given ID and nodeId from the graph. If the Mutation has a node
-     * (i.e., has more than 0 samples) then you MUST provide it for the deletion to work properly.
-     * Marks the Mutation with the given MutationId (mapped to the particular NodeId) as removed.
-     * The Mutation information will be cleared out, and the sorted order of the mutations will
-     * be invalidated (so subsequent analyses may re-number the
+     * associated with it, the mapping of that Mutation to its node will also be removed. This is a memory
+     * efficient operation; it leaves an empty Mutation at the MutationID. Therefore, if you want the
+     * MutationID ordering to match position/allele ordering you must call sortMutations().
      *
      * @param[in] mutId The MutationId.
      * @param[in] nodeId The NodeId.

@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iosfwd>
+#include <vector>
 
 namespace grgl {
 
@@ -201,6 +202,12 @@ class HaplotypeIndex;
 
 MutationMappingStats mapMutations(const MutableGRGPtr& grg,
                                   MutationIterator& mutations,
+                                  bool verbose = false,
+                                  size_t mutationBatchSize = 64);
+
+MutationMappingStats mapMutations(const MutableGRGPtr& grg,
+                                  const std::vector<Mutation>& mutations,
+                                  const std::vector<NodeIDList>& samples,
                                   bool verbose = false,
                                   size_t mutationBatchSize = 64);
 
