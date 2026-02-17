@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <sys/types.h>
@@ -754,8 +755,12 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     return totalAdded;
 }
 
-MutationMappingStats
-mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose, size_t mutationBatchSize) {
+static MutationMappingStats
+mapMutationsImpl(const MutableGRGPtr& grg,
+                 size_t totalMutations,
+                 std::function<bool(MutationAndSamples&, size_t&)> next,
+                 bool verbose,
+                 size_t mutationBatchSize) {
     auto operationStartTime = std::chrono::high_resolution_clock::now();
 #define START_TIMING_OPERATION() operationStartTime = std::chrono::high_resolution_clock::now();
 #define EMIT_TIMING_MESSAGE(msg)                                                                                       \
@@ -774,7 +779,7 @@ mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose
 
     MutationMappingStats stats;
     stats.reuseSizeHist.resize(STATS_HIST_SIZE, 0);
-    stats.totalMutations = mutations.countMutations();
+    stats.totalMutations = totalMutations;
 
     if (verbose) {
         std::cout << "Mapping " << stats.totalMutations << " mutations\n";
@@ -790,7 +795,7 @@ mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose
     MutationAndSamples unmapped = {Mutation(0.0, ""), NodeIDList()};
 
     const int ploidy = grg->getPloidy();
-    while (mutations.next(unmapped, _ignored)) {
+    while (next(unmapped, _ignored)) {
         const NodeIDList& mutSamples = unmapped.samples;
         if (!mutSamples.empty()) {
             stats.samplesProcessed += mutSamples.size();
@@ -858,6 +863,38 @@ mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose
         NodeIDList addedNodes = greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
     }
     return stats;
+}
+
+MutationMappingStats
+mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose, size_t mutationBatchSize) {
+    auto next = [&mutations](MutationAndSamples& unmapped, size_t& totalSamples) {
+        return mutations.next(unmapped, totalSamples);
+    };
+
+    return mapMutationsImpl(grg, mutations.countMutations(), std::move(next), verbose, mutationBatchSize);
+}
+
+MutationMappingStats mapMutations(const MutableGRGPtr& grg,
+                                  const std::vector<Mutation>& mutations,
+                                  const std::vector<NodeIDList>& samples,
+                                  bool verbose,
+                                  size_t mutationBatchSize) {
+    api_exc_check(mutations.size() == samples.size(),
+                  "mutations and samples must be the same length in mapMutations");
+
+    size_t idx = 0;
+    auto next = [&mutations, &samples, &idx](MutationAndSamples& unmapped, size_t& totalSamples) {
+        if (idx >= mutations.size()) {
+            return false;
+        }
+        unmapped.mutation = mutations[idx];
+        unmapped.samples = samples[idx];
+        totalSamples = unmapped.samples.size();
+        idx++;
+        return true;
+    };
+
+    return mapMutationsImpl(grg, mutations.size(), std::move(next), verbose, mutationBatchSize);
 }
 
 } // namespace grgl

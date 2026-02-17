@@ -24,6 +24,7 @@
 #include "grgl/common.h"
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
+#include "grgl/map_mutations.h"
 #include "grgl/mutation.h"
 #include "grgl/node_data.h"
 #include "grgl/serialize.h"
@@ -320,6 +321,24 @@ PYBIND11_MODULE(_grgl, m) {
         .def(pybind11::self == pybind11::self)
         .def(pybind11::self < pybind11::self)
         .def("__hash__", &hashMutation);
+
+    py::class_<grgl::MutationMappingStats>(m, "MutationMappingStats")
+        .def_readonly("total_mutations", &grgl::MutationMappingStats::totalMutations)
+        .def_readonly("empty_mutations", &grgl::MutationMappingStats::emptyMutations)
+        .def_readonly("mutations_with_one_sample", &grgl::MutationMappingStats::mutationsWithOneSample)
+        .def_readonly("mutations_with_no_candidates", &grgl::MutationMappingStats::mutationsWithNoCandidates)
+        .def_readonly("reused_nodes", &grgl::MutationMappingStats::reusedNodes)
+        .def_readonly("reused_node_coverage", &grgl::MutationMappingStats::reusedNodeCoverage)
+        .def_readonly("reused_exactly", &grgl::MutationMappingStats::reusedExactly)
+        .def_readonly("singleton_sample_edges", &grgl::MutationMappingStats::singletonSampleEdges)
+        .def_readonly("new_tree_nodes", &grgl::MutationMappingStats::newTreeNodes)
+        .def_readonly("samples_processed", &grgl::MutationMappingStats::samplesProcessed)
+        .def_readonly("num_candidates", &grgl::MutationMappingStats::numCandidates)
+        .def_readonly("reuse_size_bigger_than_hist_max", &grgl::MutationMappingStats::reuseSizeBiggerThanHistMax)
+        .def_readonly("num_with_singletons", &grgl::MutationMappingStats::numWithSingletons)
+        .def_readonly("max_singletons", &grgl::MutationMappingStats::maxSingletons)
+        .def_readonly("reused_mut_nodes", &grgl::MutationMappingStats::reusedMutNodes)
+        .def_readonly("reuse_size_hist", &grgl::MutationMappingStats::reuseSizeHist);
 
     py::class_<grgl::GRG, std::shared_ptr<grgl::GRG>> grgClass(m, "GRG");
     grgClass
@@ -863,6 +882,41 @@ PYBIND11_MODULE(_grgl, m) {
         :type compute_coals: bool
         :return: The GRG.
         :rtype: pygrgl.GRG
+    )^");
+
+    m.def("map_mutations",
+          [](const grgl::MutableGRGPtr& grg,
+             const std::vector<grgl::Mutation>& mutations,
+             const std::vector<grgl::NodeIDList>& samples,
+             bool verbose,
+             size_t mutationBatchSize) {
+              api_exc_check(mutations.size() == samples.size(),
+                            "map_mutations requires mutations and samples to be the same length.");
+              py::gil_scoped_release release;
+              return grgl::mapMutations(grg, mutations, samples, verbose, mutationBatchSize);
+          },
+          py::arg("grg"),
+          py::arg("mutations"),
+          py::arg("samples"),
+          py::arg("verbose") = false,
+          py::arg("mutation_batch_size") = 64,
+          R"^(
+        Map the provided mutations into a MutableGRG.
+
+        The entire input is processed as one batch; callers should split work into smaller chunks if peak RAM is a concern.
+
+        :param grg: The MutableGRG that will be modified in-place.
+        :type grg: pygrgl.MutableGRG
+        :param mutations: The list of Mutation objects to insert.
+        :type mutations: List[pygrgl.Mutation]
+        :param samples: List of sample NodeID lists, parallel to ``mutations``.
+        :type samples: List[List[int]]
+        :param verbose: Emit periodic progress information.
+        :type verbose: bool
+        :param mutation_batch_size: Number of mutations to accumulate before mapping.
+        :type mutation_batch_size: int
+        :return: Mapping statistics.
+        :rtype: pygrgl.MutationMappingStats
     )^");
 
     m.def("get_bfs_order",
