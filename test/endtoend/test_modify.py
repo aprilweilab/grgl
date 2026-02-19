@@ -70,6 +70,43 @@ class TestGrgModify(unittest.TestCase):
         self.assertLessEqual(iterations, 5)
         self.assertGreaterEqual(iterations, 1)
 
+    def test_mutations(self):
+        grg = pygrgl.load_mutable_grg(self.grg_filename, load_up_edges=False)
+        orig_count = grg.num_mutations
+        # Pick a (deterministic) random mutation
+        mut_id = int(grg.num_mutations / 2.5)
+        for m, node_id in grg.get_mutation_node_pairs():
+            if m == mut_id:
+                break
+        old_mut = grg.get_mutation_by_id(mut_id)
+        self.assertNotEqual(node_id, pygrgl.INVALID_NODE)
+        self.assertTrue(grg.mutations_are_ordered)
+        grg.remove_mutation(mut_id, node_id)
+        self.assertFalse(grg.mutations_are_ordered)
+        # Pick a different random node and add two mutations to it.
+        self.assertTrue(grg.num_nodes > 1001)
+        grg.add_mutation(pygrgl.Mutation(0, "FAKE ALT", "00"), 500)
+        grg.add_mutation(pygrgl.Mutation(500_000_000, "FAKE ALT2", "002"), 1001)
+        self.assertFalse(grg.mutations_are_ordered)
+
+        # Now sort them and verify the new ones are in the right order
+        grg.sort_mutations()
+        self.assertTrue(grg.mutations_are_ordered)
+        self.assertEqual(grg.num_mutations, orig_count + 1)
+        new_mut1 = grg.get_mutation_by_id(0)
+        self.assertEqual(new_mut1.allele, "FAKE ALT")
+        self.assertEqual(new_mut1.position, 0)
+        new_mut2 = grg.get_mutation_by_id(grg.num_mutations - 1)
+        self.assertEqual(new_mut2.allele, "FAKE ALT2")
+        self.assertEqual(new_mut2.position, 500_000_000)
+        # Make sure the old one is gone
+        for i in range(grg.num_mutations):
+            mut = grg.get_mutation_by_id(i)
+            self.assertNotEqual(
+                (old_mut.position, old_mut.allele),
+                (mut.position, mut.allele),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

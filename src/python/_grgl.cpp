@@ -387,6 +387,10 @@ PYBIND11_MODULE(_grgl, m) {
                 sorted order. That is, MutationID of 0 is the lowest position value
                 and MutationID of num_mutations-1 is the highest. Ties are broken
                 by the lexicographic order of the allele.
+
+                If False, you can make this become True by either:
+                1. Writing the GRG to disk (save_grg()) and reloading it
+                2. Or calling sort_mutations() explicitly
             )^")
         .def_property_readonly("num_nodes", &grgl::GRG::numNodes, R"^(
                 Get the total number of nodes (including sample and mutation nodes)
@@ -557,6 +561,30 @@ PYBIND11_MODULE(_grgl, m) {
                 :type mutation: pygrgl.Mutation
                 :param node_id: The NodeID to attach the Mutation to.
                 :type node_id: int
+            )^")
+        .def("remove_mutation",
+             &grgl::GRG::removeMutation,
+             py::arg("mut_id"),
+             py::arg("node_id"),
+             R"^(
+                Mark the Mutation with the given MutationId (mapped to the particular NodeId)
+                as removed. The Mutation information will be cleared out, and the sorted order
+                of the mutations will be invalidated. To restore the sorted order of the mutations
+                either save the GRG to disk and reload it, or call sort_mutations().
+
+                :param mutation: The MutationId of an existing Mutation.
+                :type mutation: int
+                :param node_id: The NodeID the Mutation is attached to (or INVALID_NODE_ID if not
+                    attached to a node).
+                :type node_id: int
+            )^")
+        .def("sort_mutations",
+             &grgl::GRG::sortMutations,
+             R"^(
+                If needed, sort the mutations by their (position, allele) and renumber them so
+                that the MutationId ascending order matches this order. Can be a memory-intensive
+                operation. Alternatively, you can just write the GRG to disk (save_grg()) and then
+                reload it (load_immutable_grg()) and it will use less memory (but be slower).
             )^")
         .def_property_readonly("num_mutations", &grgl::GRG::numMutations, R"^(
                 Get the total number of mutations in the GRG.

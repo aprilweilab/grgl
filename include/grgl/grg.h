@@ -525,6 +525,26 @@ public:
      */
     MutationId addMutation(const Mutation& mutation, NodeID nodeId, NodeID missNodeId = INVALID_NODE_ID);
 
+    /**
+     * Remove the Mutation with the given ID and nodeId from the graph. If the Mutation has a node
+     * (i.e., has more than 0 samples) then you MUST provide it for the deletion to work properly.
+     * Marks the Mutation with the given MutationId (mapped to the particular NodeId) as removed.
+     * The Mutation information will be cleared out, and the sorted order of the mutations will
+     * be invalidated (so subsequent analyses may re-number the
+     *
+     * @param[in] mutId The MutationId.
+     * @param[in] nodeId The NodeId.
+     */
+    void removeMutation(MutationId mutId, NodeID nodeId);
+
+    /**
+     * If needed, sort the mutations by their (position, allele) and renumber them so
+     * that the MutationId ascending order matches this order. Can be a memory-intensive
+     * operation. Alternatively, you can just write the GRG to disk (saveGrg()) and then
+     * reload it (loadImmutableGRG()) and it will use less memory (but be slower).
+     */
+    void sortMutations();
+
     // Internal enum used for determining the node value initialization behavior of matrix multiplication.
     enum NodeInitEnum {
         NIE_ZERO = 0,   // Zero values.
@@ -717,6 +737,7 @@ public:
 protected:
     void visitTopoNodeOrderedDense(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
     void visitTopoNodeOrderedSparse(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
+    void populateMutMissInfo();
 
     // m_mutIdsByNodeId gets appended to and then sorted periodically or as needed, using this
     // function. We rarely need to lookup Mutations by NodeID while modifying a GRG, so this ends
