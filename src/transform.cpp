@@ -94,6 +94,7 @@ size_t reduceGRG(const MutableGRGPtr& mutGRG) {
                 for (const NodeID child : sharedList) {
                     release_assert(mutGRG->disconnect(bestSibling, child));
                 }
+                // Add the edge and tell GRG that we broke node ordering
                 mutGRG->connect(bestSibling, node);
                 // node's coalescence is unchanged, but bestSibling no longer coalesces the children that
                 // are beneath node now.
@@ -105,8 +106,6 @@ size_t reduceGRG(const MutableGRGPtr& mutGRG) {
                     release_assert(existingCoals >= nodeCoals);
                     mutGRG->setNumIndividualCoals(bestSibling, existingCoals - nodeCoals);
                 }
-                // Since we didn't create a node, we need to tell the GRG explicitly that we broke node ordering.
-                mutGRG->nodesAreOrdered() = false;
                 removedEdges += sharedList.size();
             }
         }

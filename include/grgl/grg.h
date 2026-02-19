@@ -22,6 +22,7 @@
 #include <list>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <vector>
 
 #include "grgl/common.h"
@@ -118,11 +119,17 @@ public:
      *
      * @param[in] nodeId The node ID to check.
      */
-    bool isSample(const NodeID nodeId) const { return nodeId < this->m_numSamples; }
+    virtual bool isSample(const NodeID nodeId) const { return nodeId < this->m_numSamples; }
 
-    size_t numSamples() const { return m_numSamples; }
+    /**
+     * The number of samples (haplotypes) in the graph.
+     */
+    virtual NodeIDSizeT numSamples() const { return m_numSamples; }
 
-    size_t numIndividuals() const { return m_numSamples / m_ploidy; }
+    /**
+     * The number of individuals (haplotypes/ploidy) in the graph.
+     */
+    NodeIDSizeT numIndividuals() const { return numSamples() / m_ploidy; }
 
     /**
      * How many haploid samples are there per individual?
@@ -141,9 +148,22 @@ public:
     bool isPhased() const { return m_phased; }
 
     /**
-     * Returns true if nodes are ordered in bottom-up topological order.
+     * Returns true if nodes are ordered by ID in bottom-up topological order.
+     *
+     * This means you can just iterate the node IDs from 0...(numNodes - 1) to
+     * perform a topological traversal.
      */
     virtual bool nodesAreOrdered() const = 0;
+
+    /**
+     * Returns true if nodes are ordered in bottom-up topological order, If this is true
+     * and nodesAreOrdered is false, then you cannot iterate by NodeID (which are
+     * always positive), but you can iterate by using getOrderedNodes().
+     *
+     * Most users will not need this method, unless they are heavily modifying the GRG
+     * (e.g., by adding negative nodes to the graph).
+     */
+    virtual bool nodesAreTopo() const = 0;
 
     /**
      * Number of nodes (including sample nodes) in the graph.
@@ -174,6 +194,12 @@ public:
      * Get list of up edges for a particular node in the graph.
      */
     virtual NodeIDList getUpEdges(NodeID nodeId) = 0;
+
+    /**
+     * Get all of the node IDs in topological order for the given direction (UP means do
+     * the leaves first, DOWN means do the roots first).
+     */
+    virtual NodeIDList getOrderedNodes(TraversalDirection direction) = 0;
 
     /**
      * True if this graph stores up edges, false if only down edges are stored.
@@ -228,9 +254,10 @@ public:
     void setSpecifiedBPRange(std::pair<BpPosition, BpPosition> bpRange) { m_specifiedRange = bpRange; }
 
     /**
-     * Get the NodeIDList for all samples in the graph.
+     * Get the NodeIDList for all samples in the graph, in order of sample ID (from the 0th sample
+     * to the (N-1)th sample, where N is the number of haplotypes).
      */
-    NodeIDList getSampleNodes() const {
+    virtual NodeIDList getSampleNodes() const {
         NodeIDList result;
         for (grgl::NodeID i = 0; i < this->numSamples(); i++) {
             result.push_back(i);
@@ -359,11 +386,15 @@ public:
      * where the additional NodeID is the missingness node (or INVALID_NODE_ID) associated with this
      * Mutation.
      *
+     * @param[in] allowSort Allow the mutations-to-node mapping to be resorted; if false and the mapping is
+     *      not sorted then an exception will be thrown.
+     *
      * @return An iterator over (NodeID, MutationId) pairs or (NodeID, MutationId, NodeID) tuples,
      *      depending on the function template argument.
      */
-    template <typename T = NodeAndMut> NodeAndMutIterator<T> getNodesAndMutations() {
+    template <typename T = NodeAndMut> NodeAndMutIterator<T> getNodesAndMutations(const bool allowSort = true) {
         if (!m_mutIdsByNodeIdSorted) {
+            api_exc_check(allowSort, "Mutation-to-node mapping needs to be sorted, but the user forbid it.");
             sortMutIdsByNodeID();
         }
         if (!m_mutIdsByNodeId.empty()) {
@@ -401,11 +432,15 @@ public:
      * GRG::MutAndNode then the mutation and it's corresponding missingness node will be returned.
      *
      * @param[in] nodeId The node to lookup.
+     * @param[in] allowSort Allow the mutations-to-node mapping to be resorted; if false and the mapping is
+     *      not sorted then an exception will be thrown.
      * @return A vector of either MutationId or GRG::MutAndNode (a std::pair), depending on the template
      *      parameter.
      */
-    template <typename T = MutationId> std::vector<T> getMutationsForNode(const NodeID nodeId) {
+    template <typename T = MutationId>
+    std::vector<T> getMutationsForNode(const NodeID nodeId, const bool allowSort = true) {
         if (!m_mutIdsByNodeIdSorted) {
+            api_exc_check(allowSort, "Mutation-to-node mapping needs to be sorted, but the user forbid it.");
             sortMutIdsByNodeID();
         }
         std::vector<T> result;
@@ -436,10 +471,13 @@ public:
      * Does the node have at least one Mutation associated with it?
      *
      * @param[in] nodeId The node to lookup.
+     * @param[in] allowSort Allow the mutations-to-node mapping to be resorted; if false and the mapping is
+     *      not sorted then an exception will be thrown.
      * @return true if the node has one or more Mutation.
      */
-    bool nodeHasMutations(const NodeID nodeId) {
+    bool nodeHasMutations(const NodeID nodeId, const bool allowSort = true) {
         if (!m_mutIdsByNodeIdSorted) {
+            api_exc_check(allowSort, "Mutation-to-node mapping needs to be sorted, but the user forbid it.");
             sortMutIdsByNodeID();
         }
         if (!m_mutIdsByNodeId.empty()) {
@@ -851,7 +889,7 @@ protected:
     // Sample (individual) identifiers
     CSRStringTable m_individualIds;
 
-    const size_t m_numSamples;
+    const NodeIDSizeT m_numSamples;
     const uint16_t m_ploidy;
     const bool m_phased;
 
@@ -918,10 +956,10 @@ public:
      * @param[in] (Optional) the initial capacity of the node vector. If you know in advance roughly
      *      how many nodes will be created this can improve performance.
      */
-    explicit MutableGRG(size_t numSamples,
+    explicit MutableGRG(NodeIDSizeT numSamples,
                         uint16_t ploidy,
                         bool phased = true,
-                        size_t initialNodeCapacity = DEFAULT_NODE_CAPACITY,
+                        NodeIDSizeT initialNodeCapacity = DEFAULT_NODE_CAPACITY,
                         bool useUpEdges = true)
         : GRG(numSamples, ploidy, phased),
           m_hasUpEdges(useUpEdges) {
@@ -929,12 +967,33 @@ public:
             initialNodeCapacity = numSamples * 2;
         }
         this->m_nodes.reserve(initialNodeCapacity);
-        this->makeNode(numSamples, true);
+        this->makeNode(numSamples);
     }
 
-    bool nodesAreOrdered() const override { return m_nodesAreOrdered; }
+    NodeIDSizeT numSamples() const override {
+        if (m_samplesMapping.empty()) {
+            return GRG::numSamples();
+        }
+        return m_samplesMapping.size();
+    }
 
-    bool& nodesAreOrdered() { return m_nodesAreOrdered; }
+    bool isSample(const NodeID nodeId) const override {
+        if (m_samplesMapping.empty()) {
+            return GRG::isSample(nodeId);
+        }
+        return m_sampleSet.find(nodeId) != m_sampleSet.end();
+    }
+
+    NodeIDList getSampleNodes() const override {
+        if (m_samplesMapping.empty()) {
+            return std::move(GRG::getSampleNodes());
+        }
+        return m_samplesMapping;
+    }
+
+    bool nodesAreOrdered() const override { return m_nodesAreOrdered && m_negativeNodes.empty(); }
+
+    bool nodesAreTopo() const override { return m_nodesAreOrdered; }
 
     size_t numNodes() const override { return m_nodes.size(); }
 
@@ -967,6 +1026,8 @@ public:
 
     bool edgesAreOrdered() const override { return false; }
 
+    NodeIDList getOrderedNodes(TraversalDirection direction) override;
+
     /**
      * Create a new node in the GRG.
      *
@@ -975,11 +1036,15 @@ public:
      * generate sequential-ID nodes. Use `connect()` to connect the newly created node to other nodes.
      *
      * @param[in] count The number of nodes to create.
-     * @param[in] forceOrdered If true, do not "break" the topological ordering property of the graph if
-     *      it already exists. Use only when you are certain that newly added nodes (and their edges) will
-     *      main topological order.
+     * @param[in] negative For "normal" nodes, the topological order is based on counting up with NodeIDs
+     *      but for negative nodes this is not the case, they count (and build) down. If you set this true,
+     *      the node will be added to a special list of prepended nodes so that the topological order can
+     *      be maintained (via getOrderedNodes()... the integer iteration will no longer work). This does not
+     *      return a negative value for NodeID (it is unsigned), and the NodeID increments just like a
+     *      normal node. It is up to the user to use the NodeID appropriately - which means passing it as
+     *      a negative value to connect() whenever edges are created with it.
      */
-    NodeID makeNode(const size_t count = 1, bool forceOrdered = false) {
+    NodeID makeNode(const size_t count = 1, bool negative = false) {
         const auto nextId = this->m_nodes.size();
         if (nextId + count > MAX_GRG_NODES) {
             std::stringstream ssErr;
@@ -988,9 +1053,9 @@ public:
         }
         for (size_t i = 0; i < count; i++) {
             this->m_nodes.push_back(std::unique_ptr<GRGNode>(new GRGNode()));
-        }
-        if (!forceOrdered) {
-            this->m_nodesAreOrdered = false;
+            if (negative) {
+                m_negativeNodes.emplace_back(nextId + i);
+            }
         }
         if (this->m_nodes.size() > this->m_numSamples) {
             this->m_nodeData.allocNumCoals((this->m_nodes.size() - this->m_numSamples) + 1);
@@ -1008,7 +1073,7 @@ public:
      * @param[in] srcId The ID of the source node.
      * @param[in] tgtId The ID of the target node.
      */
-    void connect(NodeID srcId, NodeID tgtId);
+    void connect(SignedNodeID srcId, SignedNodeID tgtId);
 
     /**
      * Remove a graph edge between two nodes.
@@ -1068,14 +1133,37 @@ public:
                std::vector<BpPosition> positionAdjust = {});
 
     /**
+     * Change which nodes in the graph are the sample nodes. These nodes do not need to be leaf nodes,
+     * but they should not be reachable from each other (this is not checked: the user must ensure).
+     *
+     * The order that the NodeIDs are passed in the input list is the order that the samples will be
+     * numbered. So for example, sampleNodes[0] is sample 0, samplesNodes[1] is 1, etc. All methods
+     * that deal with samples will treat them in this order, and when the GRG is written to disk the
+     * nodes will be renumbered such that sampleNodes[0] becomes NodeID=0, and so on.
+     *
+     * @param[in] sampleNodes The ordered list of new sample nodes. This list length must be evenly
+     *  divisible by getPloidy().
+     */
+    void setSamples(const NodeIDList& sampleNodes) {
+        api_exc_check(sampleNodes.size() < numNodes(), "Too many sample nodes");
+        m_samplesMapping.clear();
+        m_sampleSet.clear();
+        m_samplesMapping.shrink_to_fit();
+        m_samplesMapping.reserve(sampleNodes.size());
+        for (const NodeID node : sampleNodes) {
+            api_exc_check(node < numNodes(), "Invalid sample node: " << node);
+            m_samplesMapping.emplace_back(node);
+            m_sampleSet.insert(node);
+        }
+        api_exc_check(m_samplesMapping.size() == m_sampleSet.size(), "Sample nodes must be unique");
+    }
+
+    /**
      * Retrieve a node by ID.
      *
      * @param[in] nodeId The ID of the node in question.
      */
-    GRGNode& getNode(const NodeID nodeId) const {
-        const NodeID checkId = removeMarks(nodeId);
-        return *this->m_nodes.at(checkId);
-    }
+    GRGNode& getNode(const NodeID nodeId) const { return *this->m_nodes.at(nodeId); }
 
     std::vector<NodeIDSizeT> topologicalSort(TraversalDirection direction) override;
 
@@ -1092,11 +1180,21 @@ public:
 
     bool isMutable() const override { return true; }
 
+    bool samplesAreOrdered() const override { return m_samplesMapping.empty(); }
+
 private:
+    // Empty, or the map from NodeIDs that correspond to the samples to the "sample ID"
+    // (e.g., the NodeID that it will get when/if the GRG is written to disk).
+    NodeIDSet m_sampleSet;
+    NodeIDList m_samplesMapping;
+
     // The list of nodes. The node's position in this vector must match its ID.
     std::vector<std::unique_ptr<GRGNode>> m_nodes;
 
     friend MutableGRGPtr readMutableGrg(IFSPointer&, bool);
+
+    // Negative nodes in the order they were added to the GRG. See makeNode() for details.
+    std::vector<NodeID> m_negativeNodes;
 
     // True if the nodeId order matches the bottom-up topological order.
     bool m_nodesAreOrdered{true};
@@ -1112,6 +1210,8 @@ public:
           m_upEdges(loadUpEdges ? nodeCount : 0) {}
 
     bool nodesAreOrdered() const override { return true; }
+
+    bool nodesAreTopo() const override { return true; }
 
     size_t numNodes() const override { return m_downEdges.numNodes(); }
 
@@ -1145,6 +1245,19 @@ public:
         return std::move(result);
     }
 
+    // For CSRGRG, you can just iterate the nodes in order from 0...(numNodes-1). This function
+    // only exists for the Python API, and also to have an agnostic function if you don't
+    // know (or care) what kind of GRG you have.
+    NodeIDList getOrderedNodes(TraversalDirection direction) override {
+        NodeIDList result(numNodes());
+        if (direction == grgl::TraversalDirection::DIRECTION_DOWN) {
+            std::iota(result.rbegin(), result.rend(), 0);
+        } else {
+            std::iota(result.begin(), result.end(), 0);
+        }
+        return std::move(result);
+    }
+
     std::vector<NodeIDSizeT> topologicalSort(TraversalDirection direction) override;
 
     void visitTopo(GRGVisitor& visitor,
@@ -1165,6 +1278,30 @@ using ConstCSRGRGPtr = std::shared_ptr<const CSRGRG>;
 // This header is just separated out to try to keep grg.h well organized. It contains templated
 // functions/classes that are needed by matrix multiplication.
 #include "internal_mult.h"
+
+template <typename NodeValueType, bool useBitVector>
+inline void matmulSumChildrenDown(GRG* grg,
+                                  const NodeID nodeId,
+                                  std::vector<NodeValueType>& nodeValues,
+                                  const size_t effectiveInputRows) {
+    const size_t base = nodeId * effectiveInputRows;
+    for (NodeID childId : grg->getDownEdges(nodeId)) {
+        const size_t cbase = childId * effectiveInputRows;
+        vectorAdd<NodeValueType, useBitVector>(nodeValues.data(), nodeValues.data(), cbase, base, effectiveInputRows);
+    }
+}
+
+template <typename NodeValueType, bool useBitVector>
+inline void matmulSumChildrenUp(GRG* grg,
+                                const NodeID nodeId,
+                                std::vector<NodeValueType>& nodeValues,
+                                const size_t effectiveInputRows) {
+    const size_t base = nodeId * effectiveInputRows;
+    for (NodeID childId : grg->getDownEdges(nodeId)) {
+        const size_t cbase = childId * effectiveInputRows;
+        vectorAdd<NodeValueType, useBitVector>(nodeValues.data(), nodeValues.data(), base, cbase, effectiveInputRows);
+    }
+}
 
 // Notes on parameter constraints/assumptions (_CALLERS_ must ensure these):
 // * initMatrix and nodeInit match -- the dimensions of the former are defined by the latter
@@ -1199,6 +1336,7 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
     release_assert(effectiveInputRows % nodesPerElem == 0);
     std::vector<NodeValueType> nodeValues(numNodes() * effectiveInputRows / nodesPerElem);
 
+    api_exc_check(nodeInit == NIE_ZERO || !useBitVector, "Node initialization and bit vector type cannot be mixed");
     switch (nodeInit) {
     case NIE_XTX:
         for (NodeID i = 0; i < numNodes(); i++) {
@@ -1259,50 +1397,54 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
         }
         if (this->nodesAreOrdered()) {
             for (NodeID i = numNodes(); i > 0; i--) {
-                const NodeID nodeId = i - 1;
-                const size_t base = nodeId * effectiveInputRows;
-                for (NodeID childId : this->getDownEdges(nodeId)) {
-                    const size_t cbase = childId * effectiveInputRows;
-                    vectorAdd<NodeValueType, useBitVector>(
-                        nodeValues.data(), nodeValues.data(), cbase, base, effectiveInputRows);
-                }
+                matmulSumChildrenDown<NodeValueType, useBitVector>(this, i - 1, nodeValues, effectiveInputRows);
+            }
+        } else if (this->nodesAreTopo()) {
+            for (NodeID nodeId : this->getOrderedNodes(TraversalDirection::DIRECTION_DOWN)) {
+                matmulSumChildrenDown<NodeValueType, useBitVector>(this, nodeId, nodeValues, effectiveInputRows);
             }
         } else {
             ValueSumVisitor<NodeValueType> valueSumVisitor(nodeValues, effectiveInputRows);
             this->visitDfs(valueSumVisitor, DIRECTION_UP, getSampleNodes());
         }
         if (!emitAllNodes) {
+            const NodeIDList& samples = getSampleNodes();
             for (size_t row = 0; row < inputRows; row++) {
                 const size_t rowStart = row * outputCols;
-                for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
-                    const size_t base = sampleId * effectiveInputRows;
-                    assert(rowStart + sampleId < outputSize);
-                    const size_t sampleIndex = byIndividual ? (sampleId / m_ploidy) : sampleId;
+                for (NodeID sampleIdx = 0; sampleIdx < samples.size(); sampleIdx++) {
+                    const NodeID sampleNodeId = samples[sampleIdx];
+                    const size_t srcBase = sampleNodeId * effectiveInputRows; // Node space
+                    assert(rowStart + sampleIdx < outputSize);
+                    const size_t generalSample = byIndividual ? (sampleIdx / m_ploidy) : sampleIdx; // IO space
                     matmulPerformIOAddition<IOType, NodeValueType, useBitVector>(
-                        outputMatrix, rowStart + sampleIndex, nodeValues.data(), base + row);
+                        outputMatrix, rowStart + generalSample, nodeValues.data(), srcBase + row);
                 }
             }
         }
         // Upward, we are calculating "how do the samples impact the mutations?"
     } else {
-        for (NodeID sampleId = 0; sampleId < numSamples(); sampleId++) {
-            assert(sampleId < inputCols);
-            const size_t base = sampleId * effectiveInputRows;
-            const size_t sampleIndex = byIndividual ? (sampleId / m_ploidy) : sampleId;
+        // Copy from the input matrix to the sample node values. The destination is per-sample-node,
+        // and the source is per-sample-index (ID of 0...(N-1) where N is number of haplotypes).
+        const NodeIDList& samples = getSampleNodes();
+        for (NodeID sampleIdx = 0; sampleIdx < samples.size(); sampleIdx++) {
+            const NodeID sampleNodeId = samples[sampleIdx];
+            assert(sampleIdx < inputCols);
+            const size_t destBase = sampleNodeId * effectiveInputRows;
+            const size_t generalSample = byIndividual ? (sampleIdx / m_ploidy) : sampleIdx;
             for (size_t row = 0; row < inputRows; row++) {
                 const size_t rowStart = row * inputCols;
                 matmulPerformIOAddition<NodeValueType, IOType, useBitVector>(
-                    nodeValues.data(), base + row, inputMatrix, rowStart + sampleIndex);
+                    nodeValues.data(), destBase + row, inputMatrix, rowStart + generalSample);
             }
         }
         if (this->nodesAreOrdered()) {
-            for (NodeID nodeId = numSamples(); nodeId < numNodes(); nodeId++) {
-                const size_t base = nodeId * effectiveInputRows;
-                for (NodeID childId : this->getDownEdges(nodeId)) {
-                    const size_t cbase = childId * effectiveInputRows;
-                    vectorAdd<NodeValueType, useBitVector>(
-                        nodeValues.data(), nodeValues.data(), base, cbase, effectiveInputRows);
-                }
+            const NodeID start = this->samplesAreOrdered() ? numSamples() : 0;
+            for (NodeID nodeId = start; nodeId < numNodes(); nodeId++) {
+                matmulSumChildrenUp<NodeValueType, useBitVector>(this, nodeId, nodeValues, effectiveInputRows);
+            }
+        } else if (this->nodesAreTopo()) {
+            for (NodeID nodeId : this->getOrderedNodes(TraversalDirection::DIRECTION_UP)) {
+                matmulSumChildrenUp<NodeValueType, useBitVector>(this, nodeId, nodeValues, effectiveInputRows);
             }
         } else {
             ValueSumVisitor<NodeValueType> valueSumVisitor(nodeValues, effectiveInputRows);

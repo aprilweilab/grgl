@@ -67,3 +67,38 @@ TEST(HapHelpers, bitwiseSubtract) {
     std::vector<size_t> expected = {4, 11, 77, 81};
     ASSERT_EQ(bitsSet, expected);
 }
+
+TEST(Util, vectReverse) {
+    grgl::NodeIDList theVect;
+
+    // Edge case: empty
+    vectReverse(theVect);
+    ASSERT_TRUE(theVect.empty());
+
+    // Edge case: 1 element
+    theVect = {91919191};
+    vectReverse(theVect);
+    ASSERT_EQ(theVect[0], 91919191);
+
+    // Edge case: 2 elements
+    theVect = {1001, 999};
+    vectReverse(theVect);
+    ASSERT_EQ(theVect[0], 999);
+    ASSERT_EQ(theVect[1], 1001);
+
+    // Odd # of elements
+    theVect = {1, 9, 2};
+    vectReverse(theVect);
+    ASSERT_EQ(theVect[0], 2);
+    ASSERT_EQ(theVect[1], 9);
+    ASSERT_EQ(theVect[2], 1);
+
+    // Even # of elements
+    theVect = {100, 66, 87, 33};
+    vectReverse(theVect);
+    ASSERT_EQ(theVect[0], 33);
+    ASSERT_EQ(theVect[1], 87);
+    ASSERT_EQ(theVect[2], 66);
+    ASSERT_EQ(theVect[3], 100);
+
+}
