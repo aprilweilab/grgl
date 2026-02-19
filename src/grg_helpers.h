@@ -56,8 +56,14 @@ inline const char* getProcessUniqueID() { return (const char*)&PROCESS_UNIQUE[0]
 #define STREAM_PUID "[" << grgl::getProcessUniqueID() << "] "
 
 inline void fastCompleteDFS(const GRGPtr& grg, GRGVisitor& visitor) {
+    // The visitor expects the direction to be "DOWN" (because a DFS goes down from the roots),
+    // but the actual traversal direction is "UP" in topological order (which DFS gives us).
     if (grg->nodesAreOrdered()) {
         for (grgl::NodeID i = 0; i < grg->numNodes(); i++) {
+            visitor.visit(grg, i, grgl::TraversalDirection::DIRECTION_DOWN, grgl::DfsPass::DFS_PASS_BACK_AGAIN);
+        }
+    } else if (grg->nodesAreTopo()) {
+        for (grgl::NodeID i : grg->getOrderedNodes(grgl::TraversalDirection::DIRECTION_UP)) {
             visitor.visit(grg, i, grgl::TraversalDirection::DIRECTION_DOWN, grgl::DfsPass::DFS_PASS_BACK_AGAIN);
         }
     } else {

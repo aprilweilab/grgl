@@ -51,34 +51,28 @@ using EdgeSizeT = uint64_t;
 #ifdef COMPACT_NODE_IDS
 using NodeID = uint32_t;
 using NodeIDSizeT = uint32_t;
+using SignedNodeID = int32_t;
 
 // We support about 2 billion nodes per graph.
 static constexpr NodeIDSizeT MAX_GRG_NODES = 0x7fffffffU - 1;
 static constexpr NodeID INVALID_NODE_ID = 0x7fffffffU;
-// The upper bit is available for flags.
-static constexpr NodeID GRG_NODE_FLAG_MASK = 0x80000000U;
 
-using NodeMark = NodeID;
-constexpr NodeMark NODE_MARK_1 = 0x80000000U;
+static constexpr NodeID GRG_NODE_IS_NEGATIVE = 0x80000000U;
+static constexpr NodeID GRG_NODE_NEGATIVE_MASK = 0x7fffffffU;
 #else
 using NodeID = uint64_t;
 using NodeIDSizeT = uint64_t;
+using SignedNodeID = int64_t;
 
 // We support about trillion nodes.
-#define MAX_GRG_NODES      (0x000000ffffffffff - 1)
-#define INVALID_NODE_ID    (0x000000ffffffffff)
-// The upper 24 bits are available for flags.
-#define GRG_NODE_FLAG_MASK (0xffffff0000000000)
+static constexpr NodeIDSizeT MAX_GRG_NODES = 0x000000ffffffffff - 1;
+static constexpr NodeID INVALID_NODE_ID = 0x000000ffffffffff;
 
-enum NodeMark {
-    NODE_MARK_1 = 0x0000010000000000,
-    NODE_MARK_2 = 0x0000020000000000,
-    NODE_MARK_3 = 0x0000040000000000,
-    NODE_MARK_4 = 0x0000080000000000,
-};
+static constexpr NodeID GRG_NODE_IS_NEGATIVE = 0x8000000000000000;
+static constexpr NodeID GRG_NODE_NEGATIVE_MASK = 0xffffff0000000000;
 #endif
 
-static_assert((INVALID_NODE_ID & GRG_NODE_FLAG_MASK) == 0, "Invalid masks");
+static_assert((INVALID_NODE_ID & ~GRG_NODE_NEGATIVE_MASK) == 0, "Invalid masks");
 
 using NodeIDList = std::vector<NodeID>;
 using NodeIDSetOrdered = std::set<NodeID>;
@@ -90,16 +84,29 @@ using NodeIDSet = std::unordered_set<NodeID>;
 
 using NodeIDListUPtr = std::unique_ptr<NodeIDList>;
 
-inline NodeID markNodeId(const NodeID nodeId, NodeMark markNum, bool value) {
-    if (value) {
-        return nodeId | markNum;
+// Just on the off case that someone was using this externally (highly, highly unlikely).
+// We used to have a bit that could be stolen generically for marking nodes.
+#define NODE_MARK_1 "THIS IS NO LONGER VALID! The node marks are not part of the public API"
+#define markNodeId  NODE_MARK_1
+#define hasMark     NODE_MARK_1
+#define removeMarks NODE_MARK_1
+
+/**
+ * Negative nodes, or "prepended nodes" are topologically beneath all the positive,
+ * or "regular" nodes. This is useful for when you need to build out a graph beneath
+ * the sample nodes.
+ */
+inline bool nodeIsNegative(const NodeID nodeId) { return (bool)(nodeId & GRG_NODE_IS_NEGATIVE); }
+
+/**
+ * Strip off the negative flag on a NodeID;
+ */
+inline NodeID nodeStripNegative(const NodeID nodeId) {
+    if (nodeIsNegative(nodeId)) {
+        return -nodeId;
     }
-    return nodeId & ~static_cast<NodeID>(markNum);
+    return nodeId;
 }
-
-inline bool hasMark(const NodeID nodeId, NodeMark markNum) { return (nodeId & markNum) > 0; }
-
-inline NodeID removeMarks(const NodeID nodeId) { return nodeId & (~GRG_NODE_FLAG_MASK); }
 
 class MutableGRG;
 

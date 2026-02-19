@@ -10,12 +10,12 @@ using namespace grgl;
 //               |---pn6---|
 //          |--pn4--|   |--pn5--|
 //         s0      s1  s2      s3
-inline MutableGRGPtr depth3BinTree(const bool keepNodeOrder = true) {
+inline MutableGRGPtr depth3BinTree() {
     const size_t nSamples = 4;
     MutableGRGPtr grg = std::make_shared<MutableGRG>(nSamples, 2);
-    NodeID pn4 = grg->makeNode(/*count=*/1, /*forceOrdered=*/keepNodeOrder);
-    NodeID pn5 = grg->makeNode(/*count=*/1, /*forceOrdered=*/keepNodeOrder);
-    NodeID pn6 = grg->makeNode(/*count=*/1, /*forceOrdered=*/keepNodeOrder);
+    NodeID pn4 = grg->makeNode(/*count=*/1);
+    NodeID pn5 = grg->makeNode(/*count=*/1);
+    NodeID pn6 = grg->makeNode(/*count=*/1);
     grg->connect((NodeID)4, (NodeID)0);
     grg->connect((NodeID)4, (NodeID)1);
     grg->connect((NodeID)5, (NodeID)2);
@@ -32,13 +32,13 @@ inline MutableGRGPtr depth3BinTree(const bool keepNodeOrder = true) {
 // pn11 -> (pn8, pn10, s6)
 // pn12 -> (pn10, s5)
 // pn13 -> (pn12, pn9)
-inline MutableGRGPtr sample8Grg(const bool keepNodeOrder = true) {
+inline MutableGRGPtr sample8Grg() {
     const size_t nSamples = 8;
     MutableGRGPtr grg = std::make_shared<MutableGRG>(nSamples, 2);
     // We force this graph to maintain the topological flag, which means we have to ensure
     // we never create an edge from n1->n2 where n1<=n2.
     for (size_t i = 8; i <= 13; i++) {
-        grg->makeNode(/*count=*/1, /*forceOrdered=*/keepNodeOrder);
+        grg->makeNode(/*count=*/1);
     }
     grg->connect((NodeID)8, (NodeID)0);
     grg->connect((NodeID)8, (NodeID)1);

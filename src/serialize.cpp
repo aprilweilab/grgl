@@ -241,6 +241,7 @@ std::vector<NodeIDSizeT> calculateCoalsForSamples(const GRGPtr& grg, const NodeI
 
 // Set which samples we want to keep; if never called then we keep all samples.
 NodeIDSizeT RenumberAndWriteVisitor::setKeepSamples(const grgl::GRGPtr& grg, grgl::NodeIDList sampleIDList, bool warn) {
+    // FIXME: this likely doesn't work properly if we setSamples(), needs to be thought through.
     NodeIDSizeT numSamples = 0;
     NodeID prevSampleId = INVALID_NODE_ID;
     std::sort(sampleIDList.begin(), sampleIDList.end());
@@ -394,8 +395,10 @@ bool RenumberAndWriteVisitor::visit(const grgl::GRGPtr& grg,
         if (noSamplesMapped) {
             const NodeIDSizeT numSamples = grg->numSamples();
             m_newSampleCount = numSamples;
-            m_nodeCounter = numSamples;
-            std::iota(m_nodeIdMap.begin(), m_nodeIdMap.begin() + numSamples, 0);
+            m_nodeCounter = 0;
+            for (NodeID sampleNode : grg->getSampleNodes()) {
+                m_nodeIdMap[sampleNode] = m_nodeCounter++;
+            }
             m_revIdMap.resize(grg->numSamples());
             for (NodeID sampleId = 0; sampleId < numSamples; sampleId++) {
                 m_newNodeData.setPopId(sampleId, grg->getPopulationId(nodeId));

@@ -260,8 +260,7 @@ void GRG::visitDfs(GRGVisitor& visitor, TraversalDirection direction, const Node
                     lifo.emplace_back(succId, 1);
                 }
             }
-            // Second (back up) pass.
-        } else {
+        } else { // Second (back up) pass.
             assert(visitedForward.at(nodeId));
             assert(nodeAndPass.second == 2);
             lifo.pop_back();
@@ -270,10 +269,16 @@ void GRG::visitDfs(GRGVisitor& visitor, TraversalDirection direction, const Node
     }
 }
 
-void MutableGRG::connect(const NodeID srcId, const NodeID tgtId) {
-    m_nodes.at(srcId)->addDownEdge(tgtId);
+void MutableGRG::connect(SignedNodeID srcId, SignedNodeID tgtId) {
+    // Check topological order conditions before stripping off negative part of NodeID.
+    if (this->m_nodesAreOrdered && srcId <= tgtId) {
+        this->m_nodesAreOrdered = false;
+    }
+    const NodeID src = nodeStripNegative((NodeID)srcId);
+    const NodeID tgt = nodeStripNegative((NodeID)tgtId);
+    m_nodes.at(src)->addDownEdge(tgt);
     if (m_hasUpEdges) {
-        m_nodes.at(tgtId)->addUpEdge(srcId);
+        m_nodes.at(tgt)->addUpEdge(src);
     }
 }
 

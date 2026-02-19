@@ -231,7 +231,7 @@ public:
         return true;
     }
 
-    std::vector<grgl::NodeID> m_nodeIds;
+    grgl::NodeIDList m_nodeIds;
     grgl::DfsPass m_dfsPass;
 };
 
@@ -239,6 +239,7 @@ std::vector<grgl::NodeID> getBfsOrder(const grgl::GRGPtr& grg,
                                       grgl::TraversalDirection direction,
                                       const grgl::NodeIDList& seedList,
                                       ssize_t maxQueueWidth = -1) {
+    api_exc_check(seedList.empty(), "Cannot do a BFS from empty list of seeds");
     NodeNumberingIterator iterator(grgl::DFS_PASS_NONE);
     grg->visitBfs(iterator, direction, seedList, maxQueueWidth);
     return std::move(iterator.m_nodeIds);
@@ -248,6 +249,7 @@ std::vector<grgl::NodeID> getDfsOrder(const grgl::GRGPtr& grg,
                                       grgl::TraversalDirection direction,
                                       const grgl::NodeIDList& seedList,
                                       bool forwardOnly = false) {
+    api_exc_check(seedList.empty(), "Cannot do a DFS from empty list of seeds");
     NodeNumberingIterator iterator(forwardOnly ? grgl::DFS_PASS_THERE : grgl::DFS_PASS_BACK_AGAIN);
     grg->visitDfs(iterator, direction, seedList, forwardOnly);
     return std::move(iterator.m_nodeIds);
@@ -255,6 +257,9 @@ std::vector<grgl::NodeID> getDfsOrder(const grgl::GRGPtr& grg,
 
 std::vector<grgl::NodeID>
 getTopoOrder(const grgl::GRGPtr& grg, grgl::TraversalDirection direction, const grgl::NodeIDList& seedList) {
+    if (seedList.empty()) {
+        return std::move(grg->getOrderedNodes(direction));
+    }
     NodeNumberingIterator iterator(grgl::DFS_PASS_NONE);
     grg->visitTopo(iterator, direction, seedList);
     return std::move(iterator.m_nodeIds);
@@ -445,6 +450,9 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: The list of NodeIDs that are sample nodes.
                 :rtype: List[int]
             )^")
+        .def_property_readonly("samples_are_ordered", &grgl::GRG::samplesAreOrdered, R"^(
+                Returns true if the sample nodes are numbered ``0...(numSamples - 1)``.
+            )^")
         .def("get_root_nodes", &grgl::GRG::getRootNodes, R"^(
                 Get the NodeIDs for nodes that have no up edges: the roots of the GRG.
 
@@ -470,8 +478,8 @@ PYBIND11_MODULE(_grgl, m) {
                 :rtype: List[Tuple[int, int]]
             )^")
         .def("get_node_mutation_miss", &grgl::GRG::getNodesAndMutations<grgl::GRG::NodeMutMiss>, R"^(
-                Get a list of triples (NodeID, MutationID, "missingness" NodeID). Each 
-                Mutation typically is associated to a single Node, but rarely it can 
+                Get a list of triples (NodeID, MutationID, "missingness" NodeID). Each
+                Mutation typically is associated to a single Node, but rarely it can
                 have more than one Node, in which case it will show up in more than one row.
                 Results are ordered by NodeID, ascending.
 
@@ -703,21 +711,43 @@ PYBIND11_MODULE(_grgl, m) {
                 nodes the graph will have, setting this to that number will speed things up.
             :type initial_node_capacity: int
         )^")
-        .def("make_node", &grgl::MutableGRG::makeNode, py::arg("count") = 1, py::arg("force_ordered") = false, R"^(
+        .def("make_node",
+             &grgl::MutableGRG::makeNode,
+             py::arg("count") = 1,
+             py::arg("negative") = false,
+             py::kw_only(),
+             R"^(
             Create one or more new nodes in the graph.
 
             :param count: How many nodes to create (optional, default to 1).
             :type count: int
-            :param force_ordered: Set to True if you are sure adding this node will maintain the topological
-                order of the NodeIDs within the graph.
-            :type count: bool
+            :param negative: Treat this node as a negative node, meaning that it is topologically
+                _before_ any other currently existing node. By default, nodes are "positive", meaning
+                they are topologically _after_ any currently existing node. In both cases (position and
+                negative), you don't have to maintain the topological order, and when you connect edges
+                it will detect whether you have maintained the order or not. If you violate the order,
+                then :py:attr:`nodes_are_ordered` will become False.
+            :type negative: bool
+            :return: The NodeID of the first newly created nodes. If you created ``count`` nodes, then
+                the ``count`` consecutive NodeIDs starting at this returned value correspond to the new nodes.
+            :rtype: int
         )^")
-        .def("connect", &grgl::MutableGRG::connect, py::arg("source"), py::arg("target"), R"^(
-            Add a down edge from source to target, and an up edge from target to source.
+        .def("connect",
+             &grgl::MutableGRG::connect,
+             py::arg("source"),
+             py::arg("target"),
+             R"^(
+            Add a down edge from source to target, and an up edge from target to source. If you create edges
+            that break the topological order of the nodes (where parent node > child node) this will detect
+            it and downstream analyses will have worse performance (:py:attr:`nodes_are_ordered` will become False).
 
-            :param source: The NodeID for the source node (edge starts here).
+            You must pass in the negative of a NodeID for either source or target, if that node has been created
+            as a negative (see make_node()). If you are inconsistent between make_node() and connect(), for
+            negative nodes, then the behavior of the topological order is undefined.
+
+            :param source: The NodeID for the source node (edge starts here). Can be negative.
             :type source: int
-            :param target: The NodeID for the target node (edge ends here).
+            :param target: The NodeID for the target node (edge ends here). Can be negative.
             :type target: int
         )^")
         .def("disconnect", &grgl::MutableGRG::disconnect, py::arg("source"), py::arg("target"), R"^(
@@ -727,6 +757,9 @@ PYBIND11_MODULE(_grgl, m) {
             :type source: int
             :param target: The NodeID for the target node (edge ends here).
             :type target: int
+            :return: Whether the edge was actually deleted. This will only be False if you asked for
+                deletion of a non-existent edge.
+            :rtype: bool
         )^")
         .def("merge",
              &grgl::MutableGRG::merge,
@@ -767,6 +800,19 @@ PYBIND11_MODULE(_grgl, m) {
                 the length of other_grg_files. Each position is an offset that is applied to all Mutation
                 positions in the corresponding GRG, before merging it in.
             :type position_adjust: List[int]
+        )^")
+        .def("set_samples", &grgl::MutableGRG::setSamples, py::arg("sample_nodes"), R"^(
+            Change which nodes in the graph are the sample nodes. These nodes do not need to be leaf nodes,
+            but they should not be reachable from each other (this is not checked: the user must ensure).
+
+            The order that the NodeIDs are passed in the input list is the order that the samples will be
+            numbered. So for example, sampleNodes[0] is sample 0, samplesNodes[1] is 1, etc. All methods
+            that deal with samples will treat them in this order, and when the GRG is written to disk the
+            nodes will be renumbered such that sampleNodes[0] becomes NodeID=0, and so on.
+
+            :param sample_nodes: The ordered list of new sample nodes. This list length must be evenly
+                divisible by getPloidy().
+            :type sample_nodes: List[int]
         )^")
         .def("reduce", &grgl::reduceGRG, R"^(
             Make a single pass over the mutable GRG and reduce the size by building hierarchy where there
@@ -963,7 +1009,8 @@ PYBIND11_MODULE(_grgl, m) {
         :type direction: pygrgl.TraversalDirection
         :param seed_list: The list of NodeIDs that represent the starting place of the traversal. For
             example, if you use pygrgl.GRG.get_sample_nodes() and pygrgl.TraversalDirection.UP then
-            the entire graph will be traversed from bottom to top.
+            the entire graph will be traversed from bottom to top. If you pass in empty list, then all
+            of the roots or leaves of the graph will be used as seeds.
         :type seed_list: List[int]
         :return: The ordered list of NodeIDs.
         :rtype: List[int]
