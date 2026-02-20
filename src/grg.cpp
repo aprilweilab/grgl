@@ -38,6 +38,43 @@ char PROCESS_UNIQUE[8] = {0};
 // know when the switch from dense to sparse is optimal. This only matters for large graphs.
 static constexpr size_t TOPO_DENSE_THRESHOLD = 10;
 
+void GRG::removeMutation(const MutationId mutId, const NodeID nodeId) {
+    api_exc_check(mutId < m_mutations.size(), "Invalid MutationId");
+    // Clear out the mutation. This will cause it to be sorted to the end of the list, when the
+    // mutations are sorted.
+    m_mutations.ref(mutId) = Mutation();
+
+    // Remove the node mapping.
+    if (nodeId != INVALID_NODE_ID) {
+        bool deleted = false;
+        if (!m_mutIdsByNodeId.empty()) {
+            const NodeAndMut query = {nodeId, 0};
+            auto mutIdIt = std::lower_bound(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end(), query);
+            while (mutIdIt != m_mutIdsByNodeId.end() && mutIdIt->first == nodeId) {
+                if (mutIdIt->second == mutId) {
+                    m_mutIdsByNodeId.erase(mutIdIt);
+                    deleted = true;
+                    break;
+                }
+                mutIdIt++;
+            }
+        } else {
+            const NodeMutMiss query = {nodeId, 0, 0};
+            auto mutIdIt = std::lower_bound(m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end(), query);
+            while (mutIdIt != m_mutIdsByNodeIdAndMiss.end() && std::get<0>(*mutIdIt) == nodeId) {
+                if (std::get<1>(*mutIdIt) == mutId) {
+                    m_mutIdsByNodeIdAndMiss.erase(mutIdIt);
+                    deleted = true;
+                    break;
+                }
+                mutIdIt++;
+            }
+        }
+        api_exc_check(deleted, "Could not find NodeId " << nodeId << " in mutation mapping");
+    }
+    m_mutsAreOrdered = false;
+}
+
 MutationId GRG::addMutation(const Mutation& mutation, const NodeID nodeId, const NodeID missNodeId) {
     const MutationId mutId = m_mutations.size();
     m_mutations.push_back(mutation);
@@ -61,6 +98,31 @@ MutationId GRG::addMutation(const Mutation& mutation, const NodeID nodeId, const
         m_mutsAreOrdered = false;
     }
     return mutId;
+}
+
+void GRG::sortMutations() {
+    if (!m_mutsAreOrdered) {
+        EagerFileVector<Mutation> newMutations;
+        const bool hasMissing = !m_mutIdsByNodeIdAndMiss.empty();
+        std::vector<NodeMutMiss> mutIdsByNodeIdAndMiss;
+        std::vector<NodeAndMut> mutIdsByNodeId;
+        // Re-iterate all the (mutation, node, missing node) triples in the correct order.
+        for (const auto& triple : getMutationsToNodeOrdered<MutNodeMiss>()) {
+            const MutationId newMutId = newMutations.size();
+            const MutationId oldMutId = std::get<0>(triple);
+            newMutations.push_back(std::move(m_mutations.atRef(oldMutId)));
+            if (hasMissing) {
+                mutIdsByNodeIdAndMiss.emplace_back(std::get<1>(triple), newMutId, std::get<2>(triple));
+            } else {
+                mutIdsByNodeId.emplace_back(std::get<1>(triple), newMutId);
+            }
+        }
+        m_mutations = std::move(newMutations);
+        m_mutIdsByNodeIdAndMiss = std::move(mutIdsByNodeIdAndMiss);
+        m_mutIdsByNodeId = std::move(mutIdsByNodeId);
+        sortMutIdsByNodeID();
+        m_mutsAreOrdered = true;
+    }
 }
 
 struct MutIdAndNodeLt {
