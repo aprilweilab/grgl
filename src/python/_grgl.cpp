@@ -899,7 +899,9 @@ PYBIND11_MODULE(_grgl, m) {
           py::arg("forward_only") = false,
           R"^(
         Get a list of NodeIDs in depth-first-search (DFS) order, starting from the given
-        seeds and traversing in the provided TraversalDirection (up or down).
+        seeds and traversing in the provided TraversalDirection (up or down). A node never
+        appears more than one time, unless forward_only is True.
+
 
         :param grg: The GRG to get nodes for.
         :type grg: pygrgl.GRG or pygrgl.MutableGRG
