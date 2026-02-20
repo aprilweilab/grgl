@@ -38,8 +38,6 @@ char PROCESS_UNIQUE[8] = {0};
 // know when the switch from dense to sparse is optimal. This only matters for large graphs.
 static constexpr size_t TOPO_DENSE_THRESHOLD = 10;
 
-using bitvect = std::vector<bool>;
-
 MutationId GRG::addMutation(const Mutation& mutation, const NodeID nodeId, const NodeID missNodeId) {
     const MutationId mutId = m_mutations.size();
     m_mutations.push_back(mutation);
@@ -167,42 +165,45 @@ void GRG::visitBfs(GRGVisitor& visitor,
 
 void GRG::visitDfs(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList, bool forwardOnly) {
     GRGPtr sharedThis = shared_from_this();
-    const NodeMark is2ndPass = NODE_MARK_1;
-    // Most STL implementations implement this as a packed bitvector.
-    std::unique_ptr<bitvect> alreadySeen(new bitvect(this->numNodes()));
-    std::list<NodeID> lifo;
+    std::vector<bool> visitedForward(this->numNodes());
+    // Stack with node IDs and which pass it is on (forward=1, backward=2)
+    std::vector<std::pair<NodeID, uint8_t>> lifo;
     for (const auto& nodeId : seedList) {
-        assert(!alreadySeen->at(nodeId));
-        lifo.push_back(nodeId);
+        assert(!visitedForward.at(nodeId));
+        lifo.emplace_back(nodeId, 1);
     }
     while (!lifo.empty()) {
-        const auto markedNodeId = lifo.back();
-        const auto nodeId = removeMarks(markedNodeId);
+        const auto nodeAndPass = lifo.back();
+        const auto nodeId = nodeAndPass.first;
         assert(nodeId < this->numNodes());
-        if (!hasMark(markedNodeId, is2ndPass)) {
-            // First (forward) pass.
-            if (alreadySeen->at(nodeId)) {
+        // First (forward) pass.
+        if (nodeAndPass.second == 1) {
+            if (visitedForward.at(nodeId)) {
                 lifo.pop_back();
                 continue;
             }
             if (forwardOnly) {
                 lifo.pop_back();
             } else {
-                lifo.back() = markNodeId(nodeId, is2ndPass, true);
+                lifo.back() = {nodeId, 2};
+                // We only set this when we're doing forward+backward passes; the forwardOnly
+                // is an expensive traversal that hits nodes many times.
+                visitedForward[nodeId] = true;
             }
             bool keepGoing = visitor.visit(sharedThis, nodeId, direction, DFS_PASS_THERE);
             if (keepGoing) {
                 const auto& successors =
                     (direction == DIRECTION_UP) ? this->getUpEdges(nodeId) : this->getDownEdges(nodeId);
                 for (const auto& succId : successors) {
-                    lifo.push_back(succId);
+                    lifo.emplace_back(succId, 1);
                 }
             }
-        } else {
             // Second (back up) pass.
+        } else {
+            assert(visitedForward.at(nodeId));
+            assert(nodeAndPass.second == 2);
             lifo.pop_back();
             visitor.visit(sharedThis, nodeId, direction, DFS_PASS_BACK_AGAIN);
-            alreadySeen->at(nodeId) = true;
         }
     }
 }

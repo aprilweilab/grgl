@@ -475,7 +475,8 @@ public:
 
     /**
      * Visit nodes depth-first, starting at the given nodes and following up or
-     * down edges.
+     * down edges. A node is never visited more than one time in either pass (forward
+     * or backward), unless forwardOnly is true.
      *
      * @param[in] visitor The visitor that will be called back. Typically owns any state
      *      that is being computed.
