@@ -38,7 +38,42 @@ char PROCESS_UNIQUE[8] = {0};
 // know when the switch from dense to sparse is optimal. This only matters for large graphs.
 static constexpr size_t TOPO_DENSE_THRESHOLD = 10;
 
-using bitvect = std::vector<bool>;
+void GRG::removeMutation(const MutationId mutId, const NodeID nodeId) {
+    api_exc_check(mutId < m_mutations.size(), "Invalid MutationId");
+    // Clear out the mutation. This will cause it to be sorted to the end of the list, when the
+    // mutations are sorted.
+    m_mutations.ref(mutId) = Mutation();
+
+    // Remove the node mapping.
+    if (nodeId != INVALID_NODE_ID) {
+        bool deleted = false;
+        if (!m_mutIdsByNodeId.empty()) {
+            const NodeAndMut query = {nodeId, 0};
+            auto mutIdIt = std::lower_bound(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end(), query);
+            while (mutIdIt != m_mutIdsByNodeId.end() && mutIdIt->first == nodeId) {
+                if (mutIdIt->second == mutId) {
+                    m_mutIdsByNodeId.erase(mutIdIt);
+                    deleted = true;
+                    break;
+                }
+                mutIdIt++;
+            }
+        } else {
+            const NodeMutMiss query = {nodeId, 0, 0};
+            auto mutIdIt = std::lower_bound(m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end(), query);
+            while (mutIdIt != m_mutIdsByNodeIdAndMiss.end() && std::get<0>(*mutIdIt) == nodeId) {
+                if (std::get<1>(*mutIdIt) == mutId) {
+                    m_mutIdsByNodeIdAndMiss.erase(mutIdIt);
+                    deleted = true;
+                    break;
+                }
+                mutIdIt++;
+            }
+        }
+        api_exc_check(deleted, "Could not find NodeId " << nodeId << " in mutation mapping");
+    }
+    m_mutsAreOrdered = false;
+}
 
 MutationId GRG::addMutation(const Mutation& mutation, const NodeID nodeId, const NodeID missNodeId) {
     const MutationId mutId = m_mutations.size();
@@ -63,6 +98,31 @@ MutationId GRG::addMutation(const Mutation& mutation, const NodeID nodeId, const
         m_mutsAreOrdered = false;
     }
     return mutId;
+}
+
+void GRG::sortMutations() {
+    if (!m_mutsAreOrdered) {
+        EagerFileVector<Mutation> newMutations;
+        const bool hasMissing = !m_mutIdsByNodeIdAndMiss.empty();
+        std::vector<NodeMutMiss> mutIdsByNodeIdAndMiss;
+        std::vector<NodeAndMut> mutIdsByNodeId;
+        // Re-iterate all the (mutation, node, missing node) triples in the correct order.
+        for (const auto& triple : getMutationsToNodeOrdered<MutNodeMiss>()) {
+            const MutationId newMutId = newMutations.size();
+            const MutationId oldMutId = std::get<0>(triple);
+            newMutations.push_back(std::move(m_mutations.atRef(oldMutId)));
+            if (hasMissing) {
+                mutIdsByNodeIdAndMiss.emplace_back(std::get<1>(triple), newMutId, std::get<2>(triple));
+            } else {
+                mutIdsByNodeId.emplace_back(std::get<1>(triple), newMutId);
+            }
+        }
+        m_mutations = std::move(newMutations);
+        m_mutIdsByNodeIdAndMiss = std::move(mutIdsByNodeIdAndMiss);
+        m_mutIdsByNodeId = std::move(mutIdsByNodeId);
+        sortMutIdsByNodeID();
+        m_mutsAreOrdered = true;
+    }
 }
 
 struct MutIdAndNodeLt {
@@ -167,42 +227,45 @@ void GRG::visitBfs(GRGVisitor& visitor,
 
 void GRG::visitDfs(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList, bool forwardOnly) {
     GRGPtr sharedThis = shared_from_this();
-    const NodeMark is2ndPass = NODE_MARK_1;
-    // Most STL implementations implement this as a packed bitvector.
-    std::unique_ptr<bitvect> alreadySeen(new bitvect(this->numNodes()));
-    std::list<NodeID> lifo;
+    std::vector<bool> visitedForward(this->numNodes());
+    // Stack with node IDs and which pass it is on (forward=1, backward=2)
+    std::vector<std::pair<NodeID, uint8_t>> lifo;
     for (const auto& nodeId : seedList) {
-        assert(!alreadySeen->at(nodeId));
-        lifo.push_back(nodeId);
+        assert(!visitedForward.at(nodeId));
+        lifo.emplace_back(nodeId, 1);
     }
     while (!lifo.empty()) {
-        const auto markedNodeId = lifo.back();
-        const auto nodeId = removeMarks(markedNodeId);
+        const auto nodeAndPass = lifo.back();
+        const auto nodeId = nodeAndPass.first;
         assert(nodeId < this->numNodes());
-        if (!hasMark(markedNodeId, is2ndPass)) {
-            // First (forward) pass.
-            if (alreadySeen->at(nodeId)) {
+        // First (forward) pass.
+        if (nodeAndPass.second == 1) {
+            if (visitedForward.at(nodeId)) {
                 lifo.pop_back();
                 continue;
             }
             if (forwardOnly) {
                 lifo.pop_back();
             } else {
-                lifo.back() = markNodeId(nodeId, is2ndPass, true);
+                lifo.back() = {nodeId, 2};
+                // We only set this when we're doing forward+backward passes; the forwardOnly
+                // is an expensive traversal that hits nodes many times.
+                visitedForward[nodeId] = true;
             }
             bool keepGoing = visitor.visit(sharedThis, nodeId, direction, DFS_PASS_THERE);
             if (keepGoing) {
                 const auto& successors =
                     (direction == DIRECTION_UP) ? this->getUpEdges(nodeId) : this->getDownEdges(nodeId);
                 for (const auto& succId : successors) {
-                    lifo.push_back(succId);
+                    lifo.emplace_back(succId, 1);
                 }
             }
-        } else {
             // Second (back up) pass.
+        } else {
+            assert(visitedForward.at(nodeId));
+            assert(nodeAndPass.second == 2);
             lifo.pop_back();
             visitor.visit(sharedThis, nodeId, direction, DFS_PASS_BACK_AGAIN);
-            alreadySeen->at(nodeId) = true;
         }
     }
 }
