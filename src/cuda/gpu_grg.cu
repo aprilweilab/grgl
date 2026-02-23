@@ -100,7 +100,8 @@ GPUGRG loadGPUGRGFromDisk(const std::string& filename) {
 
     if (magic != GPUGRG_MAGIC) {
         if ((magic & 0xFF) != (GPUGRG_MAGIC & 0xFF)) {
-            throw std::runtime_error("Unsupported GPUGRG version: " + std::to_string(magic & 0xFF) + " for file: " + filename);
+            throw std::runtime_error("Unsupported GPUGRG version: " + std::to_string(magic & 0xFF) +
+                                     " for file: " + filename);
         }
         throw std::runtime_error("Invalid file format: " + filename);
     }

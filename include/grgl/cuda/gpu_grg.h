@@ -199,7 +199,10 @@ public:
                    cudaMemcpyHostToDevice);
         CHECK_CUDA_LAST_ERROR();
         if (missingMutAndNewMapping != nullptr) {
-            cudaMemcpy(this->getMissingMutAndNewMapping(), missingMutAndNewMapping, m_numMissings * 2 * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
+            cudaMemcpy(this->getMissingMutAndNewMapping(),
+                       missingMutAndNewMapping,
+                       m_numMissings * 2 * sizeof(NodeIDSizeT),
+                       cudaMemcpyHostToDevice);
         } else {
             if (this->m_numMissings != 0) {
                 throw ApiMisuseFailure("Missing and new mapping is not provided but numMissing is not zero");
@@ -207,7 +210,10 @@ public:
         }
         CHECK_CUDA_LAST_ERROR();
         if (individualCoalsDoubled != nullptr) {
-            cudaMemcpy(this->getNumIndividualCoalsDoubled(), individualCoalsDoubled, m_numNodes * sizeof(NodeIDSizeT), cudaMemcpyHostToDevice);
+            cudaMemcpy(this->getNumIndividualCoalsDoubled(),
+                       individualCoalsDoubled,
+                       m_numNodes * sizeof(NodeIDSizeT),
+                       cudaMemcpyHostToDevice);
         } else {
             throw ApiMisuseFailure("Individual coals doubled is not provided.");
         }
@@ -270,10 +276,13 @@ public:
         if (numRows == 0 || numCols == 0) {
             throw ApiMisuseFailure("inputMatrix must have non-zero rows and columns");
         }
-        const size_t outSize =
-            (numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? (this->m_numSamples / (byIndividual ? this->getPloidy() : 1)) : this->m_numMutations));
+        const size_t outSize = (numRows * ((direction == TraversalDirection::DIRECTION_DOWN)
+                                               ? (this->m_numSamples / (byIndividual ? this->getPloidy() : 1))
+                                               : this->m_numMutations));
 
-        const size_t inputEntries = numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? this->m_numMutations : (this->m_numSamples / (byIndividual ? this->getPloidy() : 1)));
+        const size_t inputEntries = numRows * ((direction == TraversalDirection::DIRECTION_DOWN)
+                                                   ? this->m_numMutations
+                                                   : (this->m_numSamples / (byIndividual ? this->getPloidy() : 1)));
         CudaBuffer<T> d_inputMatrix(inputEntries);
         CudaBuffer<T> d_outputMatrix(outSize);
         cudaMemcpy(d_inputMatrix.get(), inputMatrix, inputEntries * sizeof(T), cudaMemcpyHostToDevice);
@@ -322,8 +331,9 @@ public:
         if (numRows == 0 || (inputMatrix.size() % numRows != 0)) {
             throw ApiMisuseFailure("inputMatrix must be divisible by numRows");
         }
-        size_t outCols =
-            (direction == TraversalDirection::DIRECTION_DOWN) ? (this->m_numSamples / (byIndividual ? this->getPloidy() : 1)) : this->m_numMutations;
+        size_t outCols = (direction == TraversalDirection::DIRECTION_DOWN)
+                             ? (this->m_numSamples / (byIndividual ? this->getPloidy() : 1))
+                             : this->m_numMutations;
         const size_t outSize = numRows * outCols;
         const size_t numCols = inputMatrix.size() / numRows;
         std::vector<T> result(outSize);
@@ -557,7 +567,7 @@ protected:
     NodeIDSizeT m_numNodes;     // Number of rows, i.e. number of nodes
     NodeIDSizeT m_numSamples;   // Number of samples, i.e. number of leaf nodes
     NodeIDSizeT m_numMutations; // Number of mutations. may NOT correspond to number of non-leaf nodes
-    NodeIDSizeT m_numMissings;   // Number of missing nodes
+    NodeIDSizeT m_numMissings;  // Number of missing nodes
     size_t m_numEdges;          // Number of non-zero elements, i.e. number of edges
     NodeIDSizeT m_maxHeight;
     uint16_t m_ploidy;
@@ -567,10 +577,10 @@ protected:
     // these are resident GPU pointers
     CudaNodeIDBufferPtr rowOffsets; // Device pointer to row offsets (size: num_rows + 1)
     CudaNodeIDBufferPtr oldToNewMapping;
-    CudaNodeIDBufferPtr newToOldMapping;            // This is not used actually
-    CudaNodeIDBufferPtr mutationAndNewMapping;      // Mapping between mutation id and new node id (in pairs)
-    CudaNodeIDBufferPtr missingMutAndNewMapping;    // Mapping between missingness node and new node if (in pairs)
-    CudaNodeIDBufferPtr individualCoalsDoubled;     // Used for XTX initialization 
+    CudaNodeIDBufferPtr newToOldMapping;         // This is not used actually
+    CudaNodeIDBufferPtr mutationAndNewMapping;   // Mapping between mutation id and new node id (in pairs)
+    CudaNodeIDBufferPtr missingMutAndNewMapping; // Mapping between missingness node and new node if (in pairs)
+    CudaNodeIDBufferPtr individualCoalsDoubled;  // Used for XTX initialization
 
     // Since col indices may be large, this data may not be resident on GPU
     CudaNodeIDBufferPtr colIndices; // Device pointer to column indices (size: nnz)
@@ -846,7 +856,8 @@ public:
         std::cout << "Constructing GPUGRG with " << h_numNodes << " nodes, " << h_numEdges << " elements, max height "
                   << h_maxHeight << std::endl;
 #endif
-        gpu_grg.init(h_numNodes, grg->numSamples(), h_numEdges, numValidMutations, numMissing, h_maxHeight, grg->getPloidy());
+        gpu_grg.init(
+            h_numNodes, grg->numSamples(), h_numEdges, numValidMutations, numMissing, h_maxHeight, grg->getPloidy());
 
         gpu_grg.copyToDevice(h_rowOffsets.data(),
                              getNewId().data(),

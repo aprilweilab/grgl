@@ -15,12 +15,16 @@ namespace grgl {
 
 #define COL_BUFFER_ITER 16
 
-
 // INPUT_CONSECUTIVE_FEATURES: values for the same node are stored consecutively
 // PERMUTATION_IS_SRC_TO_DEST: the permutation maps source nodes to destination nodes
 // OP_TYPE: (0: Assign, 1: Add, 2: Atomic Add)
-// COMPACTION_TYPE: (0: No Compaction, 1: Source Compaction by Division, 2: Source Compaction by Modulo, 3: Destination Compaction by Division)
-template <class data_t, bool INPUT_CONSECUTIVE_FEATURES, bool PERMUTATION_IS_SRC_TO_DST, int OP_TYPE = 0, int COMPACTION_TYPE=0>
+// COMPACTION_TYPE: (0: No Compaction, 1: Source Compaction by Division, 2: Source Compaction by Modulo, 3: Destination
+// Compaction by Division)
+template <class data_t,
+          bool INPUT_CONSECUTIVE_FEATURES,
+          bool PERMUTATION_IS_SRC_TO_DST,
+          int OP_TYPE = 0,
+          int COMPACTION_TYPE = 0>
 __global__ void cudaReorderMapKernel(data_t* dst,
                                      const data_t* src,
                                      const NodeIDSizeT* permutation,
@@ -29,10 +33,10 @@ __global__ void cudaReorderMapKernel(data_t* dst,
                                      size_t numUnits,
                                      size_t numNodes,
                                      NodeIDSizeT nodePerBlock,
-                                     size_t comp_div=0
-                                    ) {
-    static_assert(INPUT_CONSECUTIVE_FEATURES == !PERMUTATION_IS_SRC_TO_DST,
-                  "For multi-element reorder, INPUT_CONSECUTIVE_FEATURES must be opposite to PERMUTATION_IS_SRC_TO_DST");
+                                     size_t comp_div = 0) {
+    static_assert(
+        INPUT_CONSECUTIVE_FEATURES == !PERMUTATION_IS_SRC_TO_DST,
+        "For multi-element reorder, INPUT_CONSECUTIVE_FEATURES must be opposite to PERMUTATION_IS_SRC_TO_DST");
     NodeIDSizeT myNode = st + blockIdx.x * nodePerBlock + threadIdx.x / numUnits;
     if (myNode >= ed) {
         return;
