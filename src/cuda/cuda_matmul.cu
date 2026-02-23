@@ -246,6 +246,9 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
                                   size_t outputSize,
                                   bool emitAllNodes,
                                   bool byIndividual,
+                                  const data_t* initMatrix,
+                                  NodeInitEnum nodeInit,
+                                  data_t* missMatrix,
                                   data_t* buffer,
                                   size_t buffer_size) {
 
@@ -266,6 +269,71 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
 
     const auto numFeatures = inputRows;
 
+    switch (nodeInit) {
+    case NIE_XTX:
+        // TODO: make sure this is the intended behavior
+        {
+        const int nodePerBlock = 128 / numFeatures;
+        const int blockSize = nodePerBlock * numFeatures;
+        int numBlocks = (this->numNodes() + nodePerBlock - 1) / nodePerBlock;
+        /*
+        cudaReorderMapKernel<data_t, false, true, 0, 2>
+            <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>> (
+                buffer,
+                this->getNumIndividualCoalsDoubled(),
+                this->getOldToNewMapping(),
+                0,
+                this->numNodes(),
+                numFeatures,
+                this->numNodes(),
+                nodePerBlock,
+                this->numNodes()
+            );
+            */
+        throw std::runtime_error("NIE_XTX is not supported yet.");
+        }
+        break;
+    case NIE_VECTOR:
+        {
+        const int nodePerBlock = 128 / numFeatures;
+        const int blockSize = nodePerBlock * numFeatures;
+        int numBlocks = (this->numNodes() + nodePerBlock - 1) / nodePerBlock;
+        cudaReorderMapKernel<data_t, false, true, 0, 2>
+            <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>> (
+                buffer,
+                initMatrix,
+                this->getOldToNewMapping(),
+                0,
+                this->numNodes(),
+                numFeatures,
+                this->numNodes(),
+                nodePerBlock,
+                this->numNodes()
+            );
+        }
+        break;
+    case NIE_MATRIX:
+        {
+        const int nodePerBlock = 128 / numFeatures;
+        const int blockSize = nodePerBlock * numFeatures;
+        int numBlocks = (this->numNodes() + nodePerBlock - 1) / nodePerBlock;
+        cudaReorderMapKernel<data_t, false, true>
+            <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(
+                buffer,
+                initMatrix,
+                this->getOldToNewMapping(),
+                0,
+                this->numNodes(),
+                numFeatures,
+                this->numNodes(),
+                nodePerBlock
+            );
+        }
+        break;
+    case NIE_ZERO:
+    default: break;
+    }
+
     if (direction == DIRECTION_DOWN) {
 
         // Downward, we are calculating "how do the mutations impact the samples?"
@@ -285,6 +353,22 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
                                                                   nodePerBlock);
         CHECK_CUDA_LAST_ERROR();
 
+        if (missMatrix!=nullptr) {
+            const int nodePerBlock = 128 / numFeatures;
+            const int blockSize = nodePerBlock * numFeatures;
+            int numBlocks = (this->numMissings() + nodePerBlock - 1) / nodePerBlock;
+            cudaReorderPermutationPairKernel<data_t, false, true, true>
+                <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(buffer,
+                                                                    missMatrix,
+                                                                    this->getMissingMutAndNewMapping(),
+                                                                    0,
+                                                                    this->numMissings(),
+                                                                    numFeatures,
+                                                                    inputCols,
+                                                                    nodePerBlock);
+        }
+        CHECK_CUDA_LAST_ERROR();
+
         cudaTraverseDOWN<data_t>(*this, buffer, *(this->workStreamPtr), numFeatures);
         CHECK_CUDA_LAST_ERROR();
 
@@ -302,15 +386,34 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
         } else {
             cudaMemsetAsync(outputMatrix, 0, this->numSamples() * numFeatures * sizeof(data_t), *(this->workStreamPtr));
             numBlocks = (this->numSamples() + nodePerBlock - 1) / nodePerBlock;
-            cudaReorderMapKernel<data_t, true, false>
-                <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(outputMatrix,
-                                                                      reinterpret_cast<data_t*>(buffer),
-                                                                      this->getOldToNewMapping(),
-                                                                      0,
-                                                                      this->numSamples(),
-                                                                      numFeatures,
-                                                                      this->numSamples(),
-                                                                      nodePerBlock);
+            if (byIndividual) {
+                if (outputCols != this->numSamples() / this->getPloidy()) {
+                    throw std::runtime_error("Incompatible output column size");
+                }
+                cudaReorderMapKernel<data_t, true, false, 2, 3>
+                    <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(outputMatrix,
+                                                                        reinterpret_cast<data_t*>(buffer),
+                                                                        this->getOldToNewMapping(),
+                                                                        0,
+                                                                        this->numSamples(),
+                                                                        numFeatures,
+                                                                        this->numSamples(),
+                                                                        nodePerBlock,
+                                                                        this->getPloidy());
+            } else {
+                if (outputCols != this->numSamples()) {
+                    throw std::runtime_error("Incompatible output column size");
+                }
+                cudaReorderMapKernel<data_t, true, false>
+                    <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(outputMatrix,
+                                                                        reinterpret_cast<data_t*>(buffer),
+                                                                        this->getOldToNewMapping(),
+                                                                        0,
+                                                                        this->numSamples(),
+                                                                        numFeatures,
+                                                                        this->numSamples(),
+                                                                        nodePerBlock);
+            }
         }
         CHECK_CUDA_LAST_ERROR();
 
@@ -320,16 +423,35 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
         const int blockSize = nodePerBlock * numFeatures;
         int numBlocks = (this->numSamples() + nodePerBlock - 1) / nodePerBlock;
 
-        cudaReorderMapKernel<data_t, false, true>
-            <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(reinterpret_cast<data_t*>(buffer),
-                                                                  inputMatrix,
-                                                                  this->getOldToNewMapping(),
-                                                                  0,
-                                                                  this->numSamples(),
-                                                                  numFeatures,
-                                                                  this->numSamples(),
-                                                                  nodePerBlock);
-
+        if (byIndividual) {
+            if (inputCols != this->numSamples() / this->getPloidy()) {
+                throw std::runtime_error("Incompatible input column size");
+            }
+            cudaReorderMapKernel<data_t, false, true, 0, 1>
+                <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(reinterpret_cast<data_t*>(buffer),
+                                                                    inputMatrix,
+                                                                    this->getOldToNewMapping(),
+                                                                    0,
+                                                                    this->numSamples(),
+                                                                    numFeatures,
+                                                                    this->numSamples(),
+                                                                    nodePerBlock,
+                                                                    this->getPloidy()
+                                                                );
+        } else {
+            if (inputCols != this->numSamples()) {
+                throw std::runtime_error("Incompatible input column size");
+            }
+            cudaReorderMapKernel<data_t, false, true>
+                <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(reinterpret_cast<data_t*>(buffer),
+                                                                    inputMatrix,
+                                                                    this->getOldToNewMapping(),
+                                                                    0,
+                                                                    this->numSamples(),
+                                                                    numFeatures,
+                                                                    this->numSamples(),
+                                                                    nodePerBlock);
+        }
         CHECK_CUDA_LAST_ERROR();
 
         cudaTraverseUP<data_t>(*this, buffer, *(this->workStreamPtr), numFeatures);
@@ -348,6 +470,9 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
                                                                       numFeatures,
                                                                       this->numNodes(),
                                                                       nodePerBlock);
+            if (missMatrix != nullptr) {
+                throw std::runtime_error("emitAllNodes is not compatible with missMatrix.");
+            }
         } else {
             cudaMemsetAsync(
                 outputMatrix, 0, this->numMutations() * numFeatures * sizeof(data_t), *(this->workStreamPtr));
@@ -361,6 +486,19 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
                                                                       numFeatures,
                                                                       this->numMutations(),
                                                                       nodePerBlock);
+            CHECK_CUDA_LAST_ERROR();
+            if (missMatrix) {
+                numBlocks = (this->numMissings() + nodePerBlock - 1) / nodePerBlock;
+                cudaReorderPermutationPairKernel<data_t, true, false, true>
+                    <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(outputMatrix,
+                                                                        missMatrix,
+                                                                        this->getMutationAndNewMapping(),
+                                                                        0,
+                                                                        this->numMissings(),
+                                                                        numFeatures,
+                                                                        outputCols,
+                                                                        nodePerBlock);
+            }
         }
         CHECK_CUDA_LAST_ERROR();
     }
@@ -369,7 +507,7 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
 
 #define MATMUL_TEMPLATE(T)                                                                                             \
     template void GPUGRG::matrixMultiplication<T>(                                                                     \
-        const T*, size_t, size_t, TraversalDirection, T*, size_t, bool, bool, T*, size_t)
+        const T*, size_t, size_t, TraversalDirection, T*, size_t, bool, bool, const T*, NodeInitEnum, T*, T*, size_t)
 
 MATMUL_TEMPLATE(float);
 MATMUL_TEMPLATE(double);

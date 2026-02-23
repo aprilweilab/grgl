@@ -15,7 +15,12 @@ namespace grgl {
 
 #define COL_BUFFER_ITER 16
 
-template <class data_t, bool INPUT_NODE_MAJOR, bool PERMUTATION_IS_SRC_TO_DST, bool ATOMIC_ADD = false>
+
+// INPUT_NODE_MAJOR: values for the same node are stored consecutively
+// PERMUTATION_IS_SRC_TO_DEST: the permutation maps source nodes to destination nodes
+// OP_TYPE: (0: Assign, 1: Add, 2: Atomic Add)
+// COMPACTION_TYPE: (0: No Compaction, 1: Source Compaction by Division, 2: Source Compaction by Modulo, 3: Destination Compaction by Division)
+template <class data_t, bool INPUT_NODE_MAJOR, bool PERMUTATION_IS_SRC_TO_DST, int OP_TYPE = 0, int COMPACTION_TYPE=0>
 __global__ void cudaReorderMapKernel(data_t* dst,
                                      const data_t* src,
                                      const NodeIDSizeT* permutation,
@@ -23,7 +28,9 @@ __global__ void cudaReorderMapKernel(data_t* dst,
                                      size_t ed,
                                      size_t numUnits,
                                      size_t numNodes,
-                                     NodeIDSizeT nodePerBlock) {
+                                     NodeIDSizeT nodePerBlock,
+                                     size_t comp_div=0
+                                    ) {
     static_assert(INPUT_NODE_MAJOR == !PERMUTATION_IS_SRC_TO_DST,
                   "For multi-element reorder, INPUT_NODE_MAJOR must be opposite to PERMUTATION_IS_SRC_TO_DST");
     NodeIDSizeT myNode = st + blockIdx.x * nodePerBlock + threadIdx.x / numUnits;
@@ -35,7 +42,7 @@ __global__ void cudaReorderMapKernel(data_t* dst,
     NodeIDSizeT srcID;
     NodeIDSizeT dstID;
 
-    if (INPUT_NODE_MAJOR) {
+    if (!PERMUTATION_IS_SRC_TO_DST) {
         srcID = permutation[myNode] * numUnits + myElementPos;
         dstID = myNode + myElementPos * numNodes;
     } else {
@@ -43,9 +50,19 @@ __global__ void cudaReorderMapKernel(data_t* dst,
         dstID = permutation[myNode] * numUnits + myElementPos;
     }
 
-    if (!ATOMIC_ADD)
+    if (COMPACTION_TYPE == 1) {
+        srcID /= comp_div;
+    } else if (COMPACTION_TYPE == 2) {
+        srcID %= comp_div;
+    } else if (COMPACTION_TYPE == 3) {
+        dstID /= comp_div;
+    }
+
+    if (OP_TYPE == 0)
         dst[dstID] = src[srcID];
-    else
+    else if (OP_TYPE == 1)
+        dst[dstID] += src[srcID];
+    else if (OP_TYPE == 2)
         atomicAdd(&dst[dstID], src[srcID]);
 }
 

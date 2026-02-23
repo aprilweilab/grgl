@@ -20,6 +20,7 @@ void storeGPUGRGToDisk(GPUGRG& gpuGRG, const std::string& filename) {
     const uint64_t maxHeight = gpuGRG.m_maxHeight;
     const uint64_t numSamples = gpuGRG.m_numSamples;
     const uint64_t numMutations = gpuGRG.m_numMutations;
+    const uint64_t numMissings = gpuGRG.m_numMissings;
     const uint64_t indexSize = sizeof(NodeIDSizeT);
     const uint64_t ploidy = gpuGRG.m_ploidy;
 
@@ -29,6 +30,7 @@ void storeGPUGRGToDisk(GPUGRG& gpuGRG, const std::string& filename) {
     file.write(reinterpret_cast<const char*>(&maxHeight), sizeof(maxHeight));
     file.write(reinterpret_cast<const char*>(&numSamples), sizeof(numSamples));
     file.write(reinterpret_cast<const char*>(&numMutations), sizeof(numMutations));
+    file.write(reinterpret_cast<const char*>(&numMissings), sizeof(numMissings));
     file.write(reinterpret_cast<const char*>(&indexSize), sizeof(indexSize));
     file.write(reinterpret_cast<const char*>(&ploidy), sizeof(ploidy));
 
@@ -38,6 +40,8 @@ void storeGPUGRGToDisk(GPUGRG& gpuGRG, const std::string& filename) {
     std::vector<NodeIDSizeT> h_oldToNewMapping(numRows);
     std::vector<NodeIDSizeT> h_newToOldMapping(numRows);
     std::vector<NodeIDSizeT> h_mutationNewPairs(numMutations * 2);
+    std::vector<NodeIDSizeT> h_missingAndNewMapping(numMissings * 2);
+    std::vector<NodeIDSizeT> h_individualCoalsDoubled(numRows);
 
     cudaMemcpy(
         h_RowOffsets.data(), gpuGRG.getRowOffsets(), (numRows + 1) * sizeof(NodeIDSizeT), cudaMemcpyDeviceToHost);
@@ -61,6 +65,8 @@ void storeGPUGRGToDisk(GPUGRG& gpuGRG, const std::string& filename) {
     file.write(reinterpret_cast<const char*>(h_oldToNewMapping.data()), numRows * sizeof(NodeIDSizeT));
     file.write(reinterpret_cast<const char*>(h_newToOldMapping.data()), numRows * sizeof(NodeIDSizeT));
     file.write(reinterpret_cast<const char*>(h_mutationNewPairs.data()), numMutations * 2 * sizeof(NodeIDSizeT));
+    file.write(reinterpret_cast<const char*>(h_missingAndNewMapping.data()), numMissings * 2 * sizeof(NodeIDSizeT));
+    file.write(reinterpret_cast<const char*>(h_individualCoalsDoubled.data()), numRows * sizeof(NodeIDSizeT));
 
     if (!file.good()) {
         throw std::runtime_error("Error writing to file: " + filename);
@@ -76,7 +82,7 @@ GPUGRG loadGPUGRGFromDisk(const std::string& filename) {
     }
 
     // Read and validate header
-    uint64_t magic, numRows, numEdges, maxHeight, numSamples, numMutations, indexSize, ploidy;
+    uint64_t magic, numRows, numEdges, maxHeight, numSamples, numMutations, numMissings, indexSize, ploidy;
 
     file.read(reinterpret_cast<char*>(&magic), sizeof(magic));
     file.read(reinterpret_cast<char*>(&numRows), sizeof(numRows));
@@ -84,6 +90,7 @@ GPUGRG loadGPUGRGFromDisk(const std::string& filename) {
     file.read(reinterpret_cast<char*>(&maxHeight), sizeof(maxHeight));
     file.read(reinterpret_cast<char*>(&numSamples), sizeof(numSamples));
     file.read(reinterpret_cast<char*>(&numMutations), sizeof(numMutations));
+    file.read(reinterpret_cast<char*>(&numMissings), sizeof(numMissings));
     file.read(reinterpret_cast<char*>(&indexSize), sizeof(indexSize));
     file.read(reinterpret_cast<char*>(&ploidy), sizeof(ploidy));
 
@@ -92,6 +99,9 @@ GPUGRG loadGPUGRGFromDisk(const std::string& filename) {
     }
 
     if (magic != GPUGRG_MAGIC) {
+        if ((magic & 0xFF) != (GPUGRG_MAGIC & 0xFF)) {
+            throw std::runtime_error("Unsupported GPUGRG version: " + std::to_string(magic & 0xFF) + " for file: " + filename);
+        }
         throw std::runtime_error("Invalid file format: " + filename);
     }
 
@@ -101,7 +111,7 @@ GPUGRG loadGPUGRGFromDisk(const std::string& filename) {
 
     // Create and allocate GPUGRG structure
     GPUGRG gpuGRG;
-    gpuGRG.init(numRows, numSamples, numEdges, numMutations, maxHeight, ploidy);
+    gpuGRG.init(numRows, numSamples, numEdges, numMutations, numMissings, maxHeight, ploidy);
 
     // Read data sections
     std::vector<NodeIDSizeT> h_rowOffsets(numRows + 1);
@@ -112,6 +122,8 @@ GPUGRG loadGPUGRGFromDisk(const std::string& filename) {
     std::vector<NodeIDSizeT> h_oldToNewMapping(numRows);
     std::vector<NodeIDSizeT> h_newToOldMapping(numRows);
     std::vector<NodeIDSizeT> h_mutationNewPairs(numMutations * 2);
+    std::vector<NodeIDSizeT> h_missingAndNewMapping(numMissings * 2);
+    std::vector<NodeIDSizeT> h_individualCoalsDoubled(numRows);
 
     file.read(reinterpret_cast<char*>(h_rowOffsets.data()), (numRows + 1) * sizeof(NodeIDSizeT));
     file.read(reinterpret_cast<char*>(h_colIndices.data()), numEdges * sizeof(NodeIDSizeT));
@@ -121,6 +133,8 @@ GPUGRG loadGPUGRGFromDisk(const std::string& filename) {
     file.read(reinterpret_cast<char*>(h_oldToNewMapping.data()), numRows * sizeof(NodeIDSizeT));
     file.read(reinterpret_cast<char*>(h_newToOldMapping.data()), numRows * sizeof(NodeIDSizeT));
     file.read(reinterpret_cast<char*>(h_mutationNewPairs.data()), numMutations * 2 * sizeof(NodeIDSizeT));
+    file.read(reinterpret_cast<char*>(h_missingAndNewMapping.data()), numMissings * 2 * sizeof(NodeIDSizeT));
+    file.read(reinterpret_cast<char*>(h_individualCoalsDoubled.data()), numRows * sizeof(NodeIDSizeT));
 
     if (!file.good()) {
         throw std::runtime_error("Error reading file data: " + filename);
@@ -133,6 +147,8 @@ GPUGRG loadGPUGRGFromDisk(const std::string& filename) {
                         h_oldToNewMapping.data(),
                         h_newToOldMapping.data(),
                         h_mutationNewPairs.data(),
+                        h_missingAndNewMapping.data(),
+                        h_individualCoalsDoubled.data(),
                         h_heightCutoffs.data(),
                         h_heavyCutoffs.data(),
                         h_avgChildCounts.data(),
