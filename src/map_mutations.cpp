@@ -651,7 +651,7 @@ static NodeIDList processCandidateSet(const MutableGRGPtr& grg,
     BitVecCoverageSet coalTrackingSet{grg->numSamples(), batchBitCount};
     BitVecCoverageSet coverageSet{grg->numSamples(), batchBitCount};
 
-    const NodeID mutNodeId = grg->makeNode(1, true);
+    const NodeID mutNodeId = grg->makeNode(1);
     if (!newMutation.isMissing()) {
         grg->addMutation(newMutation, mutNodeId, missingnessNode);
     } else {

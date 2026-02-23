@@ -12,6 +12,7 @@
 #include "grg_helpers.h"
 
 #include <fstream>
+#include <memory>
 
 namespace grgl {
 
@@ -37,10 +38,18 @@ TEST(GRG, Mutations) {
     }
 }
 
+inline void breakOrder(GRGPtr& grg) {
+    // We can break the topological order by adding a useless node and edge
+    MutableGRGPtr mutGRG = std::dynamic_pointer_cast<MutableGRG>(grg);
+    const NodeID newNodeId = mutGRG->makeNode();
+    mutGRG->connect(grg->numNodes() - 1, newNodeId); // Breaks topo order!
+}
+
 TEST(GRG, DotProductGood) {
-    GRGPtr grg = depth3BinTree(/*keepNodeOrder=*/false);
+    GRGPtr grg = depth3BinTree();
     ASSERT_TRUE(grg->numEdges() == 6);
     ASSERT_TRUE(grg->numNodes() == 7);
+    breakOrder(grg);
     ASSERT_FALSE(grg->nodesAreOrdered());
 
     Mutation m1(5, "A", "G");
@@ -89,9 +98,10 @@ TEST(GRG, DotProductGood) {
 }
 
 TEST(GRG, MatrixMultGood) {
-    GRGPtr grg = depth3BinTree(/*keepNodeOrder=*/false);
+    GRGPtr grg = depth3BinTree();
     ASSERT_TRUE(grg->numEdges() == 6);
     ASSERT_TRUE(grg->numNodes() == 7);
+    breakOrder(grg);
     ASSERT_FALSE(grg->nodesAreOrdered());
 
     Mutation m1(5, "A", "G");
@@ -255,4 +265,150 @@ TEST(GRGHelper, CoalsForParent) {
     ASSERT_EQ(coals3, 0);
     expected = {0, 1, 2, 3};
     ASSERT_EQ(uncoalesced, expected);
+}
+
+TEST(GRG, NegativeNodes) {
+    GRGPtr grg = depth3BinTree();
+    ASSERT_TRUE(grg->numEdges() == 6);
+    ASSERT_TRUE(grg->numNodes() == 7);
+    ASSERT_TRUE(grg->nodesAreOrdered());
+
+    MutableGRGPtr mutGRG = std::dynamic_pointer_cast<MutableGRG>(grg);
+    // We can maintain the topological order if we:
+    // 1: Add a new node and connect it as a parent
+    const NodeID node1 = mutGRG->makeNode();
+    mutGRG->connect(node1, grg->numNodes() - 2);
+    ASSERT_TRUE(grg->nodesAreOrdered());
+    // 2: Add a new "negative" node and connect it as a child
+    // Nodes are no longer ordered by ID, but they are still trivially topologically ordered
+    const NodeID node2 = mutGRG->makeNode(1, /*negative=*/true);
+    mutGRG->connect(0, -node2);
+    ASSERT_FALSE(grg->nodesAreOrdered());
+    ASSERT_TRUE(grg->nodesAreTopo());
+
+    // But we will break it if we add a negative node as a parent!
+    mutGRG->connect(-node2, 3);
+    ASSERT_FALSE(grg->nodesAreTopo());
+
+    // Just check some helper methods
+    const NodeID smallNode = 1;
+    const NodeID bigNode = MAX_GRG_NODES - 1;
+    const NodeID smallNeg = -smallNode;
+    const NodeID bigNeg = -bigNode;
+    // Type casting should work
+    ASSERT_TRUE((SignedNodeID)bigNeg < (SignedNodeID)smallNeg);
+    ASSERT_TRUE(nodeIsNegative(bigNeg));
+    ASSERT_TRUE(nodeIsNegative(smallNeg));
+    ASSERT_FALSE(nodeIsNegative(bigNode));
+    ASSERT_FALSE(nodeIsNegative(smallNode));
+    ASSERT_EQ(nodeStripNegative(bigNeg), bigNode);
+    ASSERT_EQ(nodeStripNegative(smallNeg), smallNode);
+}
+
+TEST(GRG, ChangeSamples) {
+    MutableGRGPtr grg = std::dynamic_pointer_cast<MutableGRG>(depth3BinTree());
+    ASSERT_EQ(grg->numSamples(), 4);
+    ASSERT_EQ(grg->numNodes(), 7);
+    // Lets add some mutations just so we can test matrix multiplication
+    grg->addMutation(Mutation(1, "A", "G"), 6);
+    grg->addMutation(Mutation(2, "T", "G"), 5);
+    grg->addMutation(Mutation(3, "A", "C"), 4);
+    ASSERT_EQ(grg->numMutations(), 3);
+
+    // Create 4 new nodes, beneath the old samples, and turn them into samples.
+    NodeID newest = grg->makeNode(4, /*negative=*/true);
+    ASSERT_EQ(grg->numNodes(), 11);
+    grg->connect(0, -newest);
+    newest++;
+    grg->connect(1, -newest);
+    newest++;
+    grg->connect(2, -newest);
+    newest++;
+    grg->connect(3, -newest);
+    ASSERT_LT(newest, grg->numNodes());
+    // Nodes are no longer ordered according to NodeID, but they are still trivially
+    // topologically ordered.
+    ASSERT_FALSE(grg->nodesAreOrdered());
+    ASSERT_TRUE(grg->nodesAreTopo());
+
+    // Get the old samples
+    NodeIDList expected = {0, 1, 2, 3};
+    ASSERT_EQ(expected, grg->getSampleNodes());
+
+    // Test a matmul with the old samples
+    std::vector<int64_t> inputVect = {11, 41, 37, 73};
+    std::vector<int64_t> outputVect(3);
+    grg->matrixMultiplication<int64_t, int64_t, false>(inputVect.data(), 4, 1, TraversalDirection::DIRECTION_UP, outputVect.data(), 3);
+    const std::vector<int64_t> expectedMat = {162, 110, 52};
+    ASSERT_EQ(expectedMat, outputVect);
+
+    // Make new samples
+    NodeIDList newSamples = {7, 8, 9, 10};
+    ASSERT_EQ(newest, newSamples.back());
+    grg->setSamples(newSamples);
+    ASSERT_EQ(newSamples, grg->getSampleNodes());
+    ASSERT_TRUE(grg->isSample(7));
+    ASSERT_TRUE(grg->isSample(10));
+    ASSERT_FALSE(grg->isSample(0));
+    ASSERT_FALSE(grg->isSample(3));
+
+    // Get the topological order
+    NodeIDList topo = grg->getOrderedNodes(TraversalDirection::DIRECTION_UP);
+    std::vector<bool> saw(grg->numNodes(), false);
+    ASSERT_EQ(topo.size(), grg->numNodes());
+    for (NodeID node : topo) {
+        ASSERT_FALSE(saw.at(node));
+        switch (node) {
+            case 0:
+                ASSERT_TRUE(saw.at(7));
+                break;
+            case 1:
+                ASSERT_TRUE(saw.at(8));
+                break;
+            case 2:
+                ASSERT_TRUE(saw.at(9));
+                break;
+            case 3:
+                ASSERT_TRUE(saw.at(10));
+                break;
+            default:
+                break;
+        }
+        saw.at(node) = true;
+    }
+
+    // Test a matmul with the new samples!
+    outputVect[0] = 0;
+    outputVect[1] = 0;
+    outputVect[2] = 0;
+    grg->matrixMultiplication<int64_t, int64_t, false>(inputVect.data(), 4, 1, TraversalDirection::DIRECTION_UP, outputVect.data(), 3);
+    ASSERT_EQ(expectedMat, outputVect);
+
+    // Now truly break the topological order and ensure that matmul STILL works (it will use
+    // a visitor)
+    grg->connect(grg->numNodes() - 1, grg->makeNode());
+    ASSERT_FALSE(grg->nodesAreTopo());
+    outputVect[0] = 0;
+    outputVect[1] = 0;
+    outputVect[2] = 0;
+    grg->matrixMultiplication<int64_t, int64_t, false>(inputVect.data(), 4, 1, TraversalDirection::DIRECTION_UP, outputVect.data(), 3);
+    ASSERT_EQ(expectedMat, outputVect);
+
+    // Now write this GRG to disk, _WITHOUT_ simplification. Reload it, and we should still get
+    // the same matmul result
+    std::string testFile = "test.change_samples.grg";
+    saveGRG(grg, testFile, /*allowSimplify=*/false);
+    GRGPtr grg2 = loadImmutableGRG(testFile);
+    ASSERT_TRUE(grg2->nodesAreOrdered()); // Serializing re-ordered everything.
+    ASSERT_EQ(grg2->numSamples(), 4);
+    ASSERT_EQ(grg2->numNodes(), 11);
+    outputVect[0] = 0;
+    outputVect[1] = 0;
+    outputVect[2] = 0;
+    grg2->matrixMultiplication<int64_t, int64_t, false>(inputVect.data(), 4, 1, TraversalDirection::DIRECTION_UP, outputVect.data(), 3);
+    ASSERT_EQ(expectedMat, outputVect);
+
+    // Samples should have been renumbered!
+    expected = {0, 1, 2, 3};
+    ASSERT_EQ(expected, grg2->getSampleNodes());
 }

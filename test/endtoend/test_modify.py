@@ -111,6 +111,62 @@ class TestGrgModify(unittest.TestCase):
                 (mut.position, mut.allele),
             )
 
+    def test_set_samples(self):
+        grg = pygrgl.load_mutable_grg(self.grg_filename, load_up_edges=True)
+        self.assertEqual(grg.num_samples, 400)
+        self.assertTrue(grg.samples_are_ordered)
+        # Just remove a couple samples, don't reorder them.
+        grg.set_samples(list(range(50, grg.num_samples)))
+        self.assertEqual(grg.num_samples, 350)
+        self.assertFalse(grg.samples_are_ordered)
+
+        # Do matmul and get the value for sample 10 (which is "old" sample 60)
+        inmat = numpy.ones( (1, grg.num_mutations) )
+        result = pygrgl.matmul(grg, inmat, pygrgl.TraversalDirection.DOWN)[0]
+        old_value = result[10]
+
+        # Now reorder the samples by swapping sample 10 and 11 (60 and 61)
+        new_samples = grg.get_sample_nodes()
+        tmp = new_samples[10]
+        new_samples[10] = new_samples[11]
+        new_samples[11] = tmp
+        grg.set_samples(new_samples)
+        self.assertEqual(grg.num_samples, 350)
+        self.assertFalse(grg.samples_are_ordered)
+
+        # Check that the value followed the node, not the sample "index"!
+        result = pygrgl.matmul(grg, inmat, pygrgl.TraversalDirection.DOWN)[0]
+        wrong_value = result[10]
+        new_value = result[11]
+        self.assertEqual(old_value, new_value)
+        self.assertNotEqual(old_value, wrong_value)
+
+    def test_negative_nodes(self):
+        grg = pygrgl.load_mutable_grg(self.grg_filename, load_up_edges=True)
+        self.assertTrue(grg.nodes_are_ordered)
+
+        regular_new = grg.make_node()
+        self.assertTrue(grg.nodes_are_ordered)
+        grg.connect(regular_new, grg.num_nodes - 2)  # Connect as parent: ok
+        self.assertTrue(grg.nodes_are_ordered)
+
+        negative_new = grg.make_node(negative=True)
+        self.assertFalse(grg.nodes_are_ordered)
+        grg.connect(0, -negative_new)                # Connect negative as child: breaks counting order
+        self.assertFalse(grg.nodes_are_ordered)
+
+        topo_list = pygrgl.get_topo_order(grg, pygrgl.TraversalDirection.UP, [])
+        self.assertEqual(len(topo_list), grg.num_nodes)
+        self.assertEqual(topo_list[0], negative_new)
+
+        # Now TRULY break the topological order, which will force the get_topo_order() to run a DFS
+        # and produce a new order
+        negative_new = grg.make_node(negative=True)
+        grg.connect(-negative_new, 10)                # Break the order entirely
+
+        # FIXME: this will barf right now
+        topo_list = pygrgl.get_topo_order(grg, pygrgl.TraversalDirection.UP, [])
+
 
 if __name__ == "__main__":
     unittest.main()
