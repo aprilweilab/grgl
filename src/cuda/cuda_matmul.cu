@@ -255,7 +255,8 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
     // make sure IOType and NodeValueType are the same type
     // static_assert(std::is_same<IOType, NodeValueType>::value, "IOType and NodeValueType must be the same type for GPU
     // matmul."); make data_t an alias for IOType/NodeValueType
-    api_exc_check(!byIndividual, "by_individual is not yet supported: TODO");
+    api_exc_check(!initMatrix, "initMatrix is not yet supported: TODO");
+    api_exc_check(!missMatrix, "missMatrix is not yet supported: TODO");
 
     release_assert(inputCols > 0);
     release_assert(inputRows > 0);
@@ -273,10 +274,10 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
     case NIE_XTX:
         // TODO: make sure this is the intended behavior
         {
+        /*
         const int nodePerBlock = 128 / numFeatures;
         const int blockSize = nodePerBlock * numFeatures;
         int numBlocks = (this->numNodes() + nodePerBlock - 1) / nodePerBlock;
-        /*
         cudaReorderMapKernel<data_t, false, true, 0, 2>
             <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>> (
                 buffer,
@@ -289,8 +290,8 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
                 nodePerBlock,
                 this->numNodes()
             );
-            */
-        throw std::runtime_error("NIE_XTX is not supported yet.");
+        */
+        throw std::runtime_error("NIE_XTX is not supported due to datatype inconsistency.");
         }
         break;
     case NIE_VECTOR:
@@ -383,16 +384,19 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
                                                                       numFeatures,
                                                                       this->numNodes(),
                                                                       nodePerBlock);
+            CHECK_CUDA_LAST_ERROR();
         } else {
-            cudaMemsetAsync(outputMatrix, 0, this->numSamples() * numFeatures * sizeof(data_t), *(this->workStreamPtr));
+            cudaMemsetAsync(outputMatrix, 0, outputCols * numFeatures * sizeof(data_t), *(this->workStreamPtr));
+            CHECK_CUDA_LAST_ERROR();
             numBlocks = (this->numSamples() + nodePerBlock - 1) / nodePerBlock;
+
             if (byIndividual) {
                 if (outputCols != this->numSamples() / this->getPloidy()) {
                     throw std::runtime_error("Incompatible output column size");
                 }
                 cudaReorderMapKernel<data_t, true, false, 2, 3>
                     <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(outputMatrix,
-                                                                        reinterpret_cast<data_t*>(buffer),
+                                                                        buffer,
                                                                         this->getOldToNewMapping(),
                                                                         0,
                                                                         this->numSamples(),
@@ -406,7 +410,7 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
                 }
                 cudaReorderMapKernel<data_t, true, false>
                     <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(outputMatrix,
-                                                                        reinterpret_cast<data_t*>(buffer),
+                                                                        buffer,
                                                                         this->getOldToNewMapping(),
                                                                         0,
                                                                         this->numSamples(),
@@ -414,9 +418,8 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
                                                                         this->numSamples(),
                                                                         nodePerBlock);
             }
+            CHECK_CUDA_LAST_ERROR();
         }
-        CHECK_CUDA_LAST_ERROR();
-
     } else {
         // Upward, we are calculating "how do the samples impact the mutations?"
         const int nodePerBlock = 128 / numFeatures;

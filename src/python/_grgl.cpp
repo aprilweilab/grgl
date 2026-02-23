@@ -243,7 +243,7 @@ gpuMatMul(grgl::GPUGRG& grg, py::handle input, grgl::TraversalDirection directio
     const size_t rows = buffer.shape.at(0);
     const size_t cols = buffer.shape.at(1);
     api_exc_check(rows != 0 && cols != 0, "matmul() requires non-zero dimensions.");
-    const size_t numSamples = grg.numSamples();
+    const size_t numSamples = byIndividual ? grg.numIndividuals() : grg.numSamples();
     const size_t outCols = (direction == grgl::TraversalDirection::DIRECTION_DOWN) ? numSamples : grg.numMutations();
 
     if (py::isinstance<py::array_t<double>>(input)) {

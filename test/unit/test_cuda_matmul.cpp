@@ -217,7 +217,7 @@ TEST(GPUGRG, MatMulEnvVar) {
                       << ", CPU result = " << result3[i] << std::endl;
         }
     }
-        */
+    */
 
     ASSERT_EQ(result2, result3);
     
@@ -283,19 +283,51 @@ TEST(GPUGRG, MatMulEnvVarMultiRow) {
     auto result2 = gpu_grg.matMulBlocking(sampleValues, rowCount, TraversalDirection::DIRECTION_UP, false);
     auto result3 = grg->matMul(sampleValues, rowCount, TraversalDirection::DIRECTION_UP);
     ASSERT_EQ(result2.size(), result3.size());
-    // manually compare all elements and print any differences
-    /*
-    for (size_t i = 0; i < result2.size(); i++) {
-        if (result2[i] != result3[i]) {
-            std::cout << "Difference at index " << i << ": GPU result = " << result2[i]
-                      << ", CPU result = " << result3[i] << std::endl;
-        }
-    }
-    */
-
     ASSERT_EQ(result2, result3);
+    std::cout << "Basic Tests Completed" << std::endl;
     
-    std::cout << "matMul function successfully executed on GRG from file: " << testFile << std::endl;
+    // Top-down dot-product with byIndividual
+    size_t numCols = grg->numMutations();
+    size_t outSize = rowCount * grg->numSamples() / grg->getPloidy();
+    auto result4 = gpu_grg.matMulBlocking(mutValues, rowCount, TraversalDirection::DIRECTION_DOWN, true);
+    std::vector<double> result5(outSize);
+    grg->matrixMultiplication<double, double, false>(
+        mutValues.data(),
+        numCols,
+        rowCount,
+        TraversalDirection::DIRECTION_DOWN,
+        result5.data(),
+        outSize,
+        false,
+        true
+    );
+    ASSERT_EQ(result4.size(), result5.size());
+    ASSERT_EQ(result4, result5);
+
+    numCols = grg->numSamples() / grg->getPloidy();
+    outSize = rowCount * grg->numMutations();
+    std::vector<double> sampleValuesInd(numCols * rowCount, 3.25);
+    sampleValuesInd[0] = 2.0; // make sure input vector is not all ones
+    sampleValuesInd[1] = 3.0;
+    sampleValuesInd[numCols - 3] = 4.0;
+    sampleValuesInd[numCols * rowCount - 2] = 5.0;
+
+    std::vector<double> result6 = gpu_grg.matMulBlocking(sampleValuesInd, rowCount, TraversalDirection::DIRECTION_UP, true);
+    std::vector<double> result7(outSize);
+    grg->matrixMultiplication<double, double, false>(
+        sampleValuesInd.data(),
+        numCols,
+        rowCount,
+        TraversalDirection::DIRECTION_UP,
+        result7.data(),
+        outSize,
+        false,
+        true
+    );
+    ASSERT_EQ(result6.size(), result7.size());
+    ASSERT_EQ(result6, result7);
+    std::cout << "ByIndividual Test Completed." << std::endl;
+
 }
 
 TEST(GPUGRG, BenchMatMul) {

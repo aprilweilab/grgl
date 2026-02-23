@@ -113,7 +113,7 @@ public:
 
     NodeIDSizeT maxHeight() const { return m_maxHeight; }
 
-    NodeIDSizeT numIndividuals() const { return m_numSamples * m_ploidy; }
+    NodeIDSizeT numIndividuals() const { return m_numSamples / m_ploidy; }
 
     uint16_t getPloidy() const { return m_ploidy; }
 
@@ -265,15 +265,15 @@ public:
         release_assert(numCols > 0);
         release_assert(numRows > 0);
         const size_t outputSize = numRows * outCols;
-        validateMatMulInputs<GPUGRG>(this, numCols, numRows, direction, outputSize, false, false, outCols);
+        validateMatMulInputs<GPUGRG>(this, numCols, numRows, direction, outputSize, false, byIndividual, outCols);
         CHECK_CUDA_LAST_ERROR();
         if (numRows == 0 || numCols == 0) {
             throw ApiMisuseFailure("inputMatrix must have non-zero rows and columns");
         }
         const size_t outSize =
-            (numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? this->m_numSamples : this->m_numMutations));
+            (numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? (this->m_numSamples / (byIndividual ? this->getPloidy() : 1)) : this->m_numMutations));
 
-        const size_t inputEntries = numRows * numCols; // FIXME
+        const size_t inputEntries = numRows * ((direction == TraversalDirection::DIRECTION_DOWN) ? this->m_numMutations : (this->m_numSamples / (byIndividual ? this->getPloidy() : 1)));
         CudaBuffer<T> d_inputMatrix(inputEntries);
         CudaBuffer<T> d_outputMatrix(outSize);
         cudaMemcpy(d_inputMatrix.get(), inputMatrix, inputEntries * sizeof(T), cudaMemcpyHostToDevice);
@@ -322,8 +322,8 @@ public:
         if (numRows == 0 || (inputMatrix.size() % numRows != 0)) {
             throw ApiMisuseFailure("inputMatrix must be divisible by numRows");
         }
-        const size_t outCols =
-            (direction == TraversalDirection::DIRECTION_DOWN) ? this->m_numSamples : this->m_numMutations;
+        size_t outCols =
+            (direction == TraversalDirection::DIRECTION_DOWN) ? (this->m_numSamples / (byIndividual ? this->getPloidy() : 1)) : this->m_numMutations;
         const size_t outSize = numRows * outCols;
         const size_t numCols = inputMatrix.size() / numRows;
         std::vector<T> result(outSize);

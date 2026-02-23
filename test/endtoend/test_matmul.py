@@ -355,6 +355,28 @@ class TestMatrixMultiplication(unittest.TestCase):
         )
         np.testing.assert_allclose(cpu_result, gpu_result)
 
+        in_vector = np.random.standard_normal((K, self.grg.num_samples))
+        cpu_result = pygrgl.matmul(self.grg, in_vector, pygrgl.TraversalDirection.UP)
+        gpu_grg = pygrgl.grg_to_gpu(self.grg)
+        gpu_result = gpu_grg.matmul(in_vector, pygrgl.TraversalDirection.UP)
+        np.testing.assert_allclose(cpu_result, gpu_result)
+
+        in_vector = np.random.standard_normal((K, self.grg.num_individuals))
+        cpu_result = pygrgl.matmul(
+            self.grg,
+            in_vector,
+            pygrgl.TraversalDirection.UP,
+            by_individual=True,
+        )
+        gpu_grg = pygrgl.grg_to_gpu(self.grg)
+        gpu_result = gpu_grg.matmul(
+            in_vector,
+            pygrgl.TraversalDirection.UP,
+            by_individual=True,
+        )
+        np.testing.assert_allclose(cpu_result, gpu_result)
+
+
     @classmethod
     def tearDownClass(cls):
         if CLEANUP:
