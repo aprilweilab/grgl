@@ -190,6 +190,7 @@ TEST(GPUGRG, MatMulEnvVar) {
 
     GPUGRG gpu_grg = convertGRGToGPUGRG(grg);
     std::cout << "Loaded and converted GRG from file: " << testFile << std::endl;
+
     // Top-down dot-product
     std::vector<double> mutValues(grg->numMutations(), 1.0);
     mutValues[0] = 2.0; // make sure input vector is not all ones
@@ -201,7 +202,6 @@ TEST(GPUGRG, MatMulEnvVar) {
     ASSERT_EQ(result0, result1);
 
     // Bottom-up dot-product
-    
     std::vector<double> sampleValues(grg->numSamples(), 1.0);
     sampleValues[0] = 2.0; // make sure input vector is not all ones
     sampleValues[1] = 3.0;
@@ -209,19 +209,49 @@ TEST(GPUGRG, MatMulEnvVar) {
     auto result2 = gpu_grg.matMulBlocking(sampleValues, 1, TraversalDirection::DIRECTION_UP, false);
     auto result3 = grg->matMul(sampleValues, 1, TraversalDirection::DIRECTION_UP);
     ASSERT_EQ(result2.size(), result3.size());
-    // manually compare all elements and print any differences
-    /*
-    for (size_t i = 0; i < result2.size(); i++) {
-        if (result2[i] != result3[i]) {
-            std::cout << "Difference at index " << i << ": GPU result = " << result2[i]
-                      << ", CPU result = " << result3[i] << std::endl;
-        }
-    }
-    */
-
     ASSERT_EQ(result2, result3);
     
     std::cout << "matMul function successfully executed on GRG from file: " << testFile << std::endl;
+
+    // EXTRA XTX tests
+    // Top-down dot-product
+    result0 = gpu_grg.matMulBlocking(mutValues, 1, TraversalDirection::DIRECTION_DOWN, false, GPUGRG::NIE_XTX);
+    result1.clear();
+    result1.resize(grg->numSamples(), 0.0);
+    grg->matrixMultiplication<double, double, false>(
+        mutValues.data(),
+        grg->numMutations(),
+        1,
+        TraversalDirection::DIRECTION_DOWN,
+        result1.data(),
+        grg->numSamples(),
+        false,
+        false,
+        nullptr,
+        GRG::NIE_XTX
+    );
+    ASSERT_EQ(result0.size(), result1.size());
+    ASSERT_EQ(result0, result1);
+
+    // Bottom-up dot-product
+    result2 = gpu_grg.matMulBlocking(sampleValues, 1, TraversalDirection::DIRECTION_UP, false, GPUGRG::NIE_XTX);
+    result3.clear();
+    result3.resize(grg->numMutations(), 0.0);
+    grg->matrixMultiplication<double, double, false>(
+        sampleValues.data(),
+        grg->numSamples(),
+        1,
+        TraversalDirection::DIRECTION_UP,
+        result3.data(),
+        grg->numMutations(),
+        false,
+        false,
+        nullptr,
+        GRG::NIE_XTX
+    );
+    ASSERT_EQ(result2.size(), result3.size());
+    ASSERT_EQ(result2, result3);
+    std::cout << "XTX initialization tests completed successfully" << std::endl;
 }
 
 TEST(GPUGRG, MatMulEnvVarMultiRow) {
@@ -252,8 +282,8 @@ TEST(GPUGRG, MatMulEnvVarMultiRow) {
     storeGPUGRGToDisk(gpu_grg_a, gpuGrgFile);
     GPUGRG gpu_grg = loadGPUGRGFromDisk(gpuGrgFile);
     std::cout << "Loaded GPUGRG from disk: " << gpuGrgFile << std::endl;
+
     // Top-down dot-product
-    
     std::vector<double> mutValues(grg->numMutations() * rowCount, 2.0);
     mutValues[0] = 2.0; // make sure input vector is not all ones
     mutValues[1] = 3.0;
@@ -262,19 +292,9 @@ TEST(GPUGRG, MatMulEnvVarMultiRow) {
     auto result0 = gpu_grg.matMulBlocking(mutValues, rowCount, TraversalDirection::DIRECTION_DOWN, false);
     auto result1 = grg->matMul(mutValues, rowCount, TraversalDirection::DIRECTION_DOWN);
     ASSERT_EQ(result0.size(), result1.size());
-    /*
-    for (size_t i = 0; i < result0.size(); i++) {
-        if (result0[i] != result1[i]) {
-            std::cout << "Difference at index " << i << ": GPU result = " << result0[i]
-                      << ", CPU result = " << result1[i] << std::endl;
-        }
-    }
-        */
     ASSERT_EQ(result0, result1);
-    
 
     // Bottom-up dot-product
-
     std::vector<double> sampleValues(grg->numSamples() * rowCount, 4.0);
     sampleValues[0] = 2.0; // make sure input vector is not all ones
     sampleValues[1] = 3.0;
@@ -285,10 +305,111 @@ TEST(GPUGRG, MatMulEnvVarMultiRow) {
     ASSERT_EQ(result2.size(), result3.size());
     ASSERT_EQ(result2, result3);
     std::cout << "Basic Tests Completed" << std::endl;
-    
+
+    /* Start Init Tests */
+    size_t numCols;
+    size_t outSize;
+
+    // Init by vector
+    // Top-down dot-product
+    numCols = grg->numMutations();
+    outSize = rowCount * grg->numSamples();
+    std::vector<double> initVector(rowCount, 1.75);
+    initVector[0] = 1.0;
+    initVector[3] = 2.25;
+    initVector[rowCount-2] = 10.0;
+    result0 = gpu_grg.matMulBlocking(mutValues, rowCount, TraversalDirection::DIRECTION_DOWN, false, GPUGRG::NIE_VECTOR, initVector.data());
+    result1.clear();
+    result1.resize(rowCount * grg->numSamples(), 0.0);
+    grg->matrixMultiplication<double, double, false>(
+        mutValues.data(),
+        numCols,
+        rowCount,
+        TraversalDirection::DIRECTION_DOWN,
+        result1.data(),
+        outSize,
+        false,
+        false,
+        initVector.data(),
+        GRG::NIE_VECTOR
+    );
+    ASSERT_EQ(result0.size(), result1.size());
+    ASSERT_EQ(result0, result1);
+
+    // Bottom-up dot-product
+    numCols = grg->numSamples();
+    outSize = rowCount * grg->numMutations();
+    result2 = gpu_grg.matMulBlocking(sampleValues, rowCount, TraversalDirection::DIRECTION_UP, false, GPUGRG::NIE_VECTOR, initVector.data());
+    result3.clear();
+    result3.resize(rowCount * grg->numMutations(), 0.0);
+    grg->matrixMultiplication<double, double, false>(
+        sampleValues.data(),
+        numCols,
+        rowCount,
+        TraversalDirection::DIRECTION_UP,
+        result3.data(),
+        outSize,
+        false,
+        false,
+        initVector.data(),
+        GRG::NIE_VECTOR
+    );
+    ASSERT_EQ(result2.size(), result3.size());
+    ASSERT_EQ(result2, result3);
+    std::cout << "Init by Vector Test Completed." << std::endl;
+
+    // Init by matrix
+    // Top-down dot-product
+    numCols = grg->numMutations();
+    outSize = rowCount * grg->numSamples();
+    std::vector<double> initMatrix(grg->numNodes() * rowCount, 2.5);
+    initMatrix[0] = 5.0;
+    initMatrix[grg->numNodes() - 1] = 6.0;
+    initMatrix[grg->numNodes() * rowCount - 2] = 12.0;
+    result0 = gpu_grg.matMulBlocking(mutValues, rowCount, TraversalDirection::DIRECTION_DOWN, false, GPUGRG::NIE_MATRIX, initMatrix.data());
+    result1.clear();
+    result1.resize(rowCount * grg->numSamples(), 0.0);
+    grg->matrixMultiplication<double, double, false>(
+        mutValues.data(),
+        numCols,
+        rowCount,
+        TraversalDirection::DIRECTION_DOWN,
+        result1.data(),
+        outSize,
+        false,
+        false,
+        initMatrix.data(),
+        GRG::NIE_MATRIX
+    );
+    ASSERT_EQ(result0.size(), result1.size());
+    ASSERT_EQ(result0, result1);
+
+    // Bottom-up dot-product
+    numCols = grg->numSamples();
+    outSize = rowCount * grg->numMutations();
+    result2 = gpu_grg.matMulBlocking(sampleValues, rowCount, TraversalDirection::DIRECTION_UP, false, GPUGRG::NIE_MATRIX, initMatrix.data());
+    result3.clear();
+    result3.resize(rowCount * grg->numMutations(), 0.0);
+    grg->matrixMultiplication<double, double, false>(
+        sampleValues.data(),
+        numCols,
+        rowCount,
+        TraversalDirection::DIRECTION_UP,
+        result3.data(),
+        outSize,
+        false,
+        false,
+        initMatrix.data(),
+        GRG::NIE_MATRIX
+    );
+    ASSERT_EQ(result2.size(), result3.size());
+    ASSERT_EQ(result2, result3);
+    std::cout << "Init by Matrix Test Completed." << std::endl;
+
+    /* Start ByIndividual Tests */
     // Top-down dot-product with byIndividual
-    size_t numCols = grg->numMutations();
-    size_t outSize = rowCount * grg->numSamples() / grg->getPloidy();
+    numCols = grg->numMutations();
+    outSize = rowCount * grg->numSamples() / grg->getPloidy();
     auto result4 = gpu_grg.matMulBlocking(mutValues, rowCount, TraversalDirection::DIRECTION_DOWN, true);
     std::vector<double> result5(outSize);
     grg->matrixMultiplication<double, double, false>(

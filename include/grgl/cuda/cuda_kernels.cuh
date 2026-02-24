@@ -20,13 +20,14 @@ namespace grgl {
 // OP_TYPE: (0: Assign, 1: Add, 2: Atomic Add)
 // COMPACTION_TYPE: (0: No Compaction, 1: Source Compaction by Division, 2: Source Compaction by Modulo, 3: Destination
 // Compaction by Division)
-template <class data_t,
+template <class dst_data_t,
+          class src_data_t,
           bool INPUT_CONSECUTIVE_FEATURES,
           bool PERMUTATION_IS_SRC_TO_DST,
           int OP_TYPE = 0,
           int COMPACTION_TYPE = 0>
-__global__ void cudaReorderMapKernel(data_t* dst,
-                                     const data_t* src,
+__global__ void cudaReorderMapKernel(dst_data_t* dst,
+                                     const src_data_t* src,
                                      const NodeIDSizeT* permutation,
                                      size_t st,
                                      size_t ed,
@@ -141,7 +142,7 @@ __global__ void cudaTraversalUpSingleElementKernel(NodeIDSizeT* rowOffsets,
             sum += __shfl_down_sync(0xFFFFFFFF, sum, offset);
         }
         if (myThreadID == 0) {
-            values[row] = sum;
+            values[row] += sum;
         }
     }
 }

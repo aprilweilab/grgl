@@ -255,7 +255,6 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
     // make sure IOType and NodeValueType are the same type
     // static_assert(std::is_same<IOType, NodeValueType>::value, "IOType and NodeValueType must be the same type for GPU
     // matmul."); make data_t an alias for IOType/NodeValueType
-    api_exc_check(!initMatrix, "initMatrix is not yet supported: TODO");
     api_exc_check(!missMatrix, "missMatrix is not yet supported: TODO");
 
     release_assert(inputCols > 0);
@@ -272,13 +271,11 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
 
     switch (nodeInit) {
     case NIE_XTX:
-        // TODO: make sure this is the intended behavior
         {
-            /*
             const int nodePerBlock = 128 / numFeatures;
             const int blockSize = nodePerBlock * numFeatures;
             int numBlocks = (this->numNodes() + nodePerBlock - 1) / nodePerBlock;
-            cudaReorderMapKernel<data_t, false, true, 0, 2>
+            cudaReorderMapKernel<data_t, NodeIDSizeT, false, true, 0, 2>
                 <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>> (
                     buffer,
                     this->getNumIndividualCoalsDoubled(),
@@ -290,15 +287,13 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
                     nodePerBlock,
                     this->numNodes()
                 );
-            */
-            throw std::runtime_error("NIE_XTX is not supported due to datatype inconsistency.");
         }
         break;
     case NIE_VECTOR: {
         const int nodePerBlock = 128 / numFeatures;
         const int blockSize = nodePerBlock * numFeatures;
         int numBlocks = (this->numNodes() + nodePerBlock - 1) / nodePerBlock;
-        cudaReorderMapKernel<data_t, false, true, 0, 2>
+        cudaReorderMapKernel<data_t, data_t, false, true, 0, 1>
             <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(buffer,
                                                                   initMatrix,
                                                                   this->getOldToNewMapping(),
@@ -313,7 +308,7 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
         const int nodePerBlock = 128 / numFeatures;
         const int blockSize = nodePerBlock * numFeatures;
         int numBlocks = (this->numNodes() + nodePerBlock - 1) / nodePerBlock;
-        cudaReorderMapKernel<data_t, false, true>
+        cudaReorderMapKernel<data_t, data_t, false, true>
             <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(buffer,
                                                                   initMatrix,
                                                                   this->getOldToNewMapping(),
@@ -326,6 +321,7 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
     case NIE_ZERO:
     default: break;
     }
+    CHECK_CUDA_LAST_ERROR();
 
     if (direction == DIRECTION_DOWN) {
 
@@ -367,7 +363,7 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
 
         if (emitAllNodes) {
             numBlocks = (this->numNodes() + nodePerBlock - 1) / nodePerBlock;
-            cudaReorderMapKernel<data_t, true, false>
+            cudaReorderMapKernel<data_t, data_t, true, false>
                 <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(outputMatrix,
                                                                       reinterpret_cast<data_t*>(buffer),
                                                                       this->getOldToNewMapping(),
@@ -386,7 +382,7 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
                 if (outputCols != this->numSamples() / this->getPloidy()) {
                     throw std::runtime_error("Incompatible output column size");
                 }
-                cudaReorderMapKernel<data_t, true, false, 2, 3>
+                cudaReorderMapKernel<data_t, data_t, true, false, 2, 3>
                     <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(outputMatrix,
                                                                           buffer,
                                                                           this->getOldToNewMapping(),
@@ -400,7 +396,7 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
                 if (outputCols != this->numSamples()) {
                     throw std::runtime_error("Incompatible output column size");
                 }
-                cudaReorderMapKernel<data_t, true, false>
+                cudaReorderMapKernel<data_t, data_t, true, false>
                     <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(outputMatrix,
                                                                           buffer,
                                                                           this->getOldToNewMapping(),
@@ -422,8 +418,8 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
             if (inputCols != this->numSamples() / this->getPloidy()) {
                 throw std::runtime_error("Incompatible input column size");
             }
-            cudaReorderMapKernel<data_t, false, true, 0, 1>
-                <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(reinterpret_cast<data_t*>(buffer),
+            cudaReorderMapKernel<data_t, data_t, false, true, 1, 1>
+                <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(buffer,
                                                                       inputMatrix,
                                                                       this->getOldToNewMapping(),
                                                                       0,
@@ -436,8 +432,8 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
             if (inputCols != this->numSamples()) {
                 throw std::runtime_error("Incompatible input column size");
             }
-            cudaReorderMapKernel<data_t, false, true>
-                <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(reinterpret_cast<data_t*>(buffer),
+            cudaReorderMapKernel<data_t, data_t, false, true, 1>
+                <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(buffer,
                                                                       inputMatrix,
                                                                       this->getOldToNewMapping(),
                                                                       0,
@@ -455,7 +451,7 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
 
         if (emitAllNodes) {
             numBlocks = (this->numNodes() + nodePerBlock - 1) / nodePerBlock;
-            cudaReorderMapKernel<data_t, true, false>
+            cudaReorderMapKernel<data_t, data_t, true, false>
                 <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(outputMatrix,
                                                                       reinterpret_cast<data_t*>(buffer),
                                                                       this->getOldToNewMapping(),

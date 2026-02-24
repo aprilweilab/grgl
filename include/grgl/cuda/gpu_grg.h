@@ -117,6 +117,13 @@ public:
 
     uint16_t getPloidy() const { return m_ploidy; }
 
+    enum NodeInitEnum {
+        NIE_ZERO = 0,   // Zero values.
+        NIE_VECTOR = 1, // A vector of values, one for each row of the input matrix.
+        NIE_MATRIX = 2, // A matrix of values, of dimensions ROWS x NODES
+        NIE_XTX = 3,    // The number of coalescences * 2.
+    };
+
     // Init vars and allocate GPU memory for all structures
     // This function is blocking
     // If no streamPtr is provided, a new stream will be created
@@ -266,6 +273,9 @@ public:
                               const size_t numCols,
                               const size_t outCols,
                               bool byIndividual,
+                              NodeInitEnum initEnum,
+                              const T* initValues,
+                              size_t initValuesSize,
                               TraversalDirection direction,
                               T* outputMatrix) {
         release_assert(numCols > 0);
@@ -285,9 +295,17 @@ public:
                                                    : (this->m_numSamples / (byIndividual ? this->getPloidy() : 1)));
         CudaBuffer<T> d_inputMatrix(inputEntries);
         CudaBuffer<T> d_outputMatrix(outSize);
-        cudaMemcpy(d_inputMatrix.get(), inputMatrix, inputEntries * sizeof(T), cudaMemcpyHostToDevice);
+        CudaBuffer<T> d_initValues(initValuesSize);
 
+        cudaMemcpy(d_inputMatrix.get(), inputMatrix, inputEntries * sizeof(T), cudaMemcpyHostToDevice);
         CHECK_CUDA_LAST_ERROR();
+        if (initEnum != NodeInitEnum::NIE_ZERO && initEnum != NodeInitEnum::NIE_XTX) {
+            if (initValues == nullptr) {
+                throw ApiMisuseFailure("initValues cannot be null when initEnum is not NIE_ZERO");
+            }
+            cudaMemcpy(d_initValues.get(), initValues, initValuesSize * sizeof(T), cudaMemcpyHostToDevice);
+            CHECK_CUDA_LAST_ERROR();
+        }
 
         CudaBuffer<T> d_buffer(numRows, this->m_numNodes);
         const size_t bufferSizeByte = numRows * this->m_numNodes * sizeof(T);
@@ -302,8 +320,8 @@ public:
                                       outSize,
                                       false,
                                       byIndividual,
-                                      nullptr,
-                                      NIE_ZERO,
+                                      d_initValues.get(),
+                                      initEnum,
                                       nullptr,
                                       d_buffer.get(),
                                       bufferSizeByte);
@@ -326,7 +344,10 @@ public:
     std::vector<T> matMulBlocking(const std::vector<T>& inputMatrix,
                                   const size_t numRows,
                                   TraversalDirection direction,
-                                  bool byIndividual) {
+                                  bool byIndividual,
+                                  NodeInitEnum initEnum = NIE_ZERO,
+                                  const T* initValues = nullptr
+                                ) {
         CHECK_CUDA_LAST_ERROR();
         if (numRows == 0 || (inputMatrix.size() % numRows != 0)) {
             throw ApiMisuseFailure("inputMatrix must be divisible by numRows");
@@ -336,8 +357,9 @@ public:
                              : this->m_numMutations;
         const size_t outSize = numRows * outCols;
         const size_t numCols = inputMatrix.size() / numRows;
+        const size_t initValuesSize = (initEnum == NIE_VECTOR) ? numRows : (initEnum == NIE_MATRIX) ? (numRows * this->m_numNodes) : 0;
         std::vector<T> result(outSize);
-        matMulBlockingHelper<T>(inputMatrix.data(), numRows, numCols, outCols, byIndividual, direction, result.data());
+        matMulBlockingHelper<T>(inputMatrix.data(), numRows, numCols, outCols, byIndividual, initEnum, initValues, initValuesSize, direction, result.data());
         return std::move(result);
     }
 
@@ -528,13 +550,6 @@ protected:
         }
         CHECK_CUDA_LAST_ERROR();
     }
-
-    enum NodeInitEnum {
-        NIE_ZERO = 0,   // Zero values.
-        NIE_VECTOR = 1, // A vector of values, one for each row of the input matrix.
-        NIE_MATRIX = 2, // A matrix of values, of dimensions ROWS x NODES
-        NIE_XTX = 3,    // The number of coalescences * 2.
-    };
 
     /*
      * Raw matrix multiplication implementation.
