@@ -220,23 +220,55 @@ inline py::array_t<IOType> gpuDispatchMult(grgl::GPUGRG& gpuGRG,
                                            size_t inCols,
                                            size_t outCols,
                                            bool byIndividual,
-                                           grgl::TraversalDirection direction) {
+                                           grgl::TraversalDirection direction,
+                                           py::handle init) {
     const size_t outSize = rows * outCols;
     py::array_t<IOType> result({rows, outCols});
     py::buffer_info resultBuf = result.request();
     memset(resultBuf.ptr, 0, outSize * sizeof(IOType));
+
+    py::buffer_info initBuffer;
+    grgl::GPUGRG::NodeInitEnum nodeInitMode = grgl::GPUGRG::NIE_ZERO;
+    if (py::isinstance<py::none>(init)) {
+        ;
+    } else if (py::isinstance<py::str>(init)) {
+        const std::string& strval = init.cast<std::string>();
+        api_exc_check(strval == "xtx", "Unexpected init value: " << strval);
+        nodeInitMode = grgl::GPUGRG::NIE_XTX;
+    } else {
+        py::array arr = py::array::ensure(init, py::array::c_style | py::array::forcecast);
+        api_exc_check(py::isinstance<py::array_t<IOType>>(init),
+                      "The init matrix must match the dtype of the input matrix. Got: " << arr.dtype());
+        initBuffer = arr.request();
+        if (initBuffer.ndim == 1) {
+            const size_t initRows = initBuffer.shape.at(0);
+            api_exc_check(initRows == rows,
+                          "If init has a single dimension, it must match the number of rows in the input matrix");
+            nodeInitMode = grgl::GPUGRG::NIE_VECTOR;
+        }
+        if (initBuffer.ndim == 2) {
+            const size_t initRows = initBuffer.shape.at(0);
+            const size_t initCols = initBuffer.shape.at(1);
+            api_exc_check(initRows == rows && initCols == gpuGRG.numNodes(),
+                          "If init is a matrix, it must match the dimensions ROW x NODES");
+            nodeInitMode = grgl::GPUGRG::NIE_MATRIX;
+        }
+    }
+
     gpuGRG.matMulBlockingHelper<IOType>((const IOType*)buffer.ptr,
                                         rows,
                                         inCols,
                                         outCols,
                                         byIndividual,
+                                        nodeInitMode,
+                                        (const IOType*)initBuffer.ptr,
                                         direction,
                                         (IOType*)resultBuf.ptr); // TODO: add outSize as double check
     return std::move(result);
 }
 
 py::array
-gpuMatMul(grgl::GPUGRG& grg, py::handle input, grgl::TraversalDirection direction, bool byIndividual = false) {
+gpuMatMul(grgl::GPUGRG& grg, py::handle input, grgl::TraversalDirection direction, bool byIndividual = false, py::handle init = nullptr) {
     py::array arr = py::array::ensure(input, py::array::c_style | py::array::forcecast);
     py::buffer_info buffer = arr.request();
     api_exc_check(buffer.ndim == 2, "matmul() only support two dimensional numpy arrays as input.");
@@ -247,13 +279,13 @@ gpuMatMul(grgl::GPUGRG& grg, py::handle input, grgl::TraversalDirection directio
     const size_t outCols = (direction == grgl::TraversalDirection::DIRECTION_DOWN) ? numSamples : grg.numMutations();
 
     if (py::isinstance<py::array_t<double>>(input)) {
-        return gpuDispatchMult<double>(grg, buffer, rows, cols, outCols, byIndividual, direction);
+        return gpuDispatchMult<double>(grg, buffer, rows, cols, outCols, byIndividual, direction, init);
     } else if (py::isinstance<py::array_t<float>>(input)) {
-        return gpuDispatchMult<float>(grg, buffer, rows, cols, outCols, byIndividual, direction);
+        return gpuDispatchMult<float>(grg, buffer, rows, cols, outCols, byIndividual, direction, init);
     } else if (py::isinstance<py::array_t<std::int32_t>>(input)) {
-        return gpuDispatchMult<int32_t>(grg, buffer, rows, cols, outCols, byIndividual, direction);
+        return gpuDispatchMult<int32_t>(grg, buffer, rows, cols, outCols, byIndividual, direction, init);
     } else if (py::isinstance<py::array_t<std::uint32_t>>(input)) {
-        return gpuDispatchMult<uint32_t>(grg, buffer, rows, cols, outCols, byIndividual, direction);
+        return gpuDispatchMult<uint32_t>(grg, buffer, rows, cols, outCols, byIndividual, direction, init);
     }
     api_exc_check(
         false,
@@ -378,6 +410,7 @@ PYBIND11_MODULE(_grgl, m) {
              py::arg("input"),
              py::arg("direction"),
              py::arg("by_individual") = false,
+             py::arg("init") = nullptr,
              R"^(
         Same as pygrgl.matmul(), except the matrix multiplication is performed by the GPU.
         See pygrgl.matmul() for details on input/output to the function.
@@ -391,6 +424,16 @@ PYBIND11_MODULE(_grgl, m) {
             of :math:`N` (:py:attr:`num_samples`) columns, it is :math:`N / ploidy` (:py:attr:`num_individuals`)
             columns.
         :type by_individual: bool
+        :param init: Initialization of the nodes of the graph during matrix multiplication. By default (when this
+            is set to None), nodes are initialization to 0. There are three possible types this can take on:
+            1. A string "xtx" which means to initialize the nodes with twice their coalesence counts. Using this
+            and performing an UP multiplication (with 1s as input) produces the X.T * X product needed for
+            GWAS.
+            2. A one dimensional numpy array (vector) of length K. The value at position K is assigned to all
+            nodes when performing the multiplication for row K from the input matrix.
+            3. A two dimensional numpy array (matrix) of size KxT, where T is the total number of nodes in the
+            graph (grg.num_nodes). This fully specifies every node value for the entire matrix operation.
+        :type init: Union[str, numpy.array]
         :return: The numpy 2-dimensional array of output values.
         :rtype: numpy.array
     )^");

@@ -376,6 +376,69 @@ class TestMatrixMultiplication(unittest.TestCase):
         )
         np.testing.assert_allclose(cpu_result, gpu_result)
 
+    @pytest.mark.skipif(
+        not HAVE_CUDA,
+        reason="WARNING: No CUDA detected (requires pytorch + installed CUDA drivers), skipping relevant tests",
+    )
+    def test_cuda_matmul_init(self):
+        K = 10
+        dtype = np.float64
+        in_vector = np.random.standard_normal((K, self.grg.num_mutations))
+        gpu_grg = pygrgl.grg_to_gpu(self.grg)
+
+        cpu_result = pygrgl.matmul(
+            self.grg,
+            in_vector,
+            pygrgl.TraversalDirection.DOWN,
+            by_individual=True,
+            init="xtx",
+        )
+        gpu_result = gpu_grg.matmul(
+            in_vector,
+            pygrgl.TraversalDirection.DOWN,
+            by_individual=True,
+            init="xtx",
+        )
+        np.testing.assert_allclose(cpu_result, gpu_result)
+
+        init = np.ones(K, dtype=dtype) * 2
+        init[0] = 3.0
+
+        cpu_result = pygrgl.matmul(
+            self.grg,
+            in_vector,
+            pygrgl.TraversalDirection.DOWN,
+            by_individual=True,
+            init=init,
+        )
+        gpu_result = gpu_grg.matmul(
+            in_vector,
+            pygrgl.TraversalDirection.DOWN,
+            by_individual=True,
+            init=init,
+        )
+        np.testing.assert_allclose(cpu_result, gpu_result)
+
+        init = np.zeros((K, self.grg.num_nodes), dtype=dtype)
+        init[0, 0] = 4.0
+        init[K-1, self.grg.num_nodes - 1] = 9.0
+        cpu_result = pygrgl.matmul(
+            self.grg,
+            in_vector,
+            pygrgl.TraversalDirection.DOWN,
+            by_individual=True,
+            init=init,
+        )
+        gpu_result = gpu_grg.matmul(
+            in_vector,
+            pygrgl.TraversalDirection.DOWN,
+            by_individual=True,
+            init=init,
+        )
+        np.testing.assert_allclose(cpu_result, gpu_result)
+
+
+
 
     @classmethod
     def tearDownClass(cls):
