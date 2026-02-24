@@ -270,25 +270,21 @@ void GPUGRG::matrixMultiplication(const data_t* inputMatrix,
     const auto numFeatures = inputRows;
 
     switch (nodeInit) {
-    case NIE_XTX:
-        {
-            const int nodePerBlock = 128 / numFeatures;
-            const int blockSize = nodePerBlock * numFeatures;
-            int numBlocks = (this->numNodes() + nodePerBlock - 1) / nodePerBlock;
-            cudaReorderMapKernel<data_t, NodeIDSizeT, false, true, 0, 2>
-                <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>> (
-                    buffer,
-                    this->getNumIndividualCoalsDoubled(),
-                    this->getOldToNewMapping(),
-                    0,
-                    this->numNodes(),
-                    numFeatures,
-                    this->numNodes(),
-                    nodePerBlock,
-                    this->numNodes()
-                );
-        }
-        break;
+    case NIE_XTX: {
+        const int nodePerBlock = 128 / numFeatures;
+        const int blockSize = nodePerBlock * numFeatures;
+        int numBlocks = (this->numNodes() + nodePerBlock - 1) / nodePerBlock;
+        cudaReorderMapKernel<data_t, NodeIDSizeT, false, true, 0, 2>
+            <<<numBlocks, blockSize, 0, *(this->workStreamPtr)>>>(buffer,
+                                                                  this->getNumIndividualCoalsDoubled(),
+                                                                  this->getOldToNewMapping(),
+                                                                  0,
+                                                                  this->numNodes(),
+                                                                  numFeatures,
+                                                                  this->numNodes(),
+                                                                  nodePerBlock,
+                                                                  this->numNodes());
+    } break;
     case NIE_VECTOR: {
         const int nodePerBlock = 128 / numFeatures;
         const int blockSize = nodePerBlock * numFeatures;

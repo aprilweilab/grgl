@@ -267,8 +267,11 @@ inline py::array_t<IOType> gpuDispatchMult(grgl::GPUGRG& gpuGRG,
     return std::move(result);
 }
 
-py::array
-gpuMatMul(grgl::GPUGRG& grg, py::handle input, grgl::TraversalDirection direction, bool byIndividual = false, py::handle init = nullptr) {
+py::array gpuMatMul(grgl::GPUGRG& grg,
+                    py::handle input,
+                    grgl::TraversalDirection direction,
+                    bool byIndividual = false,
+                    py::handle init = nullptr) {
     py::array arr = py::array::ensure(input, py::array::c_style | py::array::forcecast);
     py::buffer_info buffer = arr.request();
     api_exc_check(buffer.ndim == 2, "matmul() only support two dimensional numpy arrays as input.");

@@ -264,7 +264,8 @@ public:
      * @param[in] numCols Number of columns in the input matrix
      * @param[in] outCols Number of columns in the output matrix
      * @param[in] direction Traversal direction (UP or DOWN)
-     * @param[in] byIndividual Whether the input matrix is by individual (true) or by sample (false). This affects the expected dimensions of the input and output matrices.
+     * @param[in] byIndividual Whether the input matrix is by individual (true) or by sample (false). This affects the
+     * expected dimensions of the input and output matrices.
      * @param[in] initEnum Initialization mode for the nodes
      * @param[in] initValues Initial values for the nodes, if applicable
      * @param[out] outputMatrix The resulting matrix is populated to this buffer. Must be at least
@@ -296,7 +297,9 @@ public:
                                                    ? this->m_numMutations
                                                    : (this->m_numSamples / (byIndividual ? this->getPloidy() : 1)));
 
-        const size_t initValuesSize = (initEnum == NIE_VECTOR) ? numRows : (initEnum == NIE_MATRIX) ? (numRows * this->m_numNodes) : 0;
+        const size_t initValuesSize = (initEnum == NIE_VECTOR)   ? numRows
+                                      : (initEnum == NIE_MATRIX) ? (numRows * this->m_numNodes)
+                                                                 : 0;
 
         CudaBuffer<T> d_inputMatrix(inputEntries);
         CudaBuffer<T> d_outputMatrix(outSize);
@@ -343,7 +346,8 @@ public:
      * @param inputMatrix The input matrix in row-major order
      * @param numRows Number of rows in the input matrix
      * @param direction Traversal direction (UP or DOWN)
-     * @param byIndividual Whether the input matrix is by individual (true) or by sample (false). This affects the expected dimensions of the input and output matrices.
+     * @param byIndividual Whether the input matrix is by individual (true) or by sample (false). This affects the
+     * expected dimensions of the input and output matrices.
      * @param initEnum Initialization mode for the nodes
      * @param initValues Initial values for the nodes, if applicable
      * @return The resulting matrix as a vector
@@ -354,8 +358,7 @@ public:
                                   TraversalDirection direction,
                                   bool byIndividual,
                                   NodeInitEnum initEnum = NIE_ZERO,
-                                  const T* initValues = nullptr
-                                ) {
+                                  const T* initValues = nullptr) {
         CHECK_CUDA_LAST_ERROR();
         if (numRows == 0 || (inputMatrix.size() % numRows != 0)) {
             throw ApiMisuseFailure("inputMatrix must be divisible by numRows");
@@ -366,7 +369,15 @@ public:
         const size_t outSize = numRows * outCols;
         const size_t numCols = inputMatrix.size() / numRows;
         std::vector<T> result(outSize);
-        matMulBlockingHelper<T>(inputMatrix.data(), numRows, numCols, outCols, byIndividual, initEnum, initValues, direction, result.data());
+        matMulBlockingHelper<T>(inputMatrix.data(),
+                                numRows,
+                                numCols,
+                                outCols,
+                                byIndividual,
+                                initEnum,
+                                initValues,
+                                direction,
+                                result.data());
         return std::move(result);
     }
 
