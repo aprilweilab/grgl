@@ -918,9 +918,6 @@ PYBIND11_MODULE(_grgl, m) {
              const std::vector<grgl::NodeIDList>& samples,
              bool verbose,
              size_t mutationBatchSize) {
-              api_exc_check(mutations.size() == samples.size(),
-                            "map_mutations requires mutations and samples to be the same length.");
-              py::gil_scoped_release release;
               return grgl::mapMutations(grg, mutations, samples, verbose, mutationBatchSize);
           },
           py::arg("grg"),
