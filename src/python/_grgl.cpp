@@ -635,6 +635,10 @@ PYBIND11_MODULE(_grgl, m) {
                 :param num_coals: The number of individuals that coalesced, or pygrgl.COAL_COUNT_NOT_SET.
                 :type num_coals: int
             )^")
+        .def_property_readonly("has_individual_coals", &grgl::GRG::hasIndividualCoals, R"^(
+            Does this dataset have any individual coalescence information? If not, you won't be
+            able to quickly get the exact sample variance for each mutation (diploid genotypes only).
+        )^")
         .def_property_readonly("has_individual_ids", &grgl::GRG::hasIndividualIds, R"^(
             True if this GRG has string identifiers for each individual. See get_individual_id().
             )^")

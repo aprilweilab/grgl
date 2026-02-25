@@ -46,6 +46,8 @@ public:
         m_nodeData_popId.ref(nodeId) = popId;
     }
 
+    bool hasCoalCounts() const { return !m_nodeData_numCoals.empty(); }
+
     NodeIDSizeT getNumCoals(const NodeIDSizeT numSamples, NodeID nodeId) {
         if (nodeId < numSamples) {
             return 0;
