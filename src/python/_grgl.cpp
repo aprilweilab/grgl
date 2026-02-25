@@ -37,6 +37,20 @@ namespace py = pybind11;
 #include <iostream>
 #include <sstream>
 
+std::string mutStr(const grgl::Mutation& mut) {
+    std::stringstream result;
+    result << "<[pygrgl.Mutation] position=" << mut.getPosition() << ", ref_allele=" << mut.getRefAllele()
+           << ", allele=" << mut.getAllele() << ">";
+    return result.str();
+}
+
+std::string grgStr(const grgl::GRGPtr& grg) {
+    std::stringstream result;
+    result << "<[pygrgl.GRG] mutations=" << grg->numMutations() << ", individuals=" << grg->numIndividuals()
+           << ", ploidy=" << grg->getPloidy() << ", mutable=" << (grg->isMutable() ? "Yes" : "No") << ">";
+    return result.str();
+}
+
 template <typename T>
 inline py::array_t<T> dispatchDotProd(
     grgl::GRGPtr& grg, py::buffer_info& buffer, size_t inCols, size_t outCols, grgl::TraversalDirection direction) {
@@ -317,6 +331,8 @@ PYBIND11_MODULE(_grgl, m) {
         .def_property("time", &grgl::Mutation::getTime, &grgl::Mutation::setTime, R"^(
             (Read/write) Time value associated with the Mutation, or -1.0 if unused.
         )^")
+        .def("__str__", mutStr)
+        .def("__repr__", mutStr)
         .def(pybind11::self == pybind11::self)
         .def(pybind11::self < pybind11::self)
         .def("__hash__", &hashMutation);
@@ -672,7 +688,9 @@ PYBIND11_MODULE(_grgl, m) {
 
             :return: The number of nodes that had their coalescences updated.
             :rtype: int
-            )^");
+            )^")
+        .def("__str__", grgStr)
+        .def("__repr__", grgStr);
     grgClass.doc() = "A Genotype Representation Graph (GRG) representing a particular dataset. "
                      "This is the immutable portion of the API, so every graph has these operations. "
                      "See MutableGRG for an extension of this that includes the ability to add/remove nodes "
@@ -800,7 +818,9 @@ PYBIND11_MODULE(_grgl, m) {
             :type verbose: bool
             :return: The number of iterations that were performed.
             :rtype: int
-        )^");
+        )^")
+        .def("__str__", grgStr)
+        .def("__repr__", grgStr);
 
     m.def("load_mutable_grg", &grgl::loadMutableGRG, py::arg("filename"), py::arg("load_up_edges") = true, R"^(
         Load a GRG file from disk. Mutable GRGs can have nodes and edges added/removed
