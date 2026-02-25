@@ -111,6 +111,7 @@ class TestMatrixMultiplication(unittest.TestCase):
         # Test that (X^t * X) can be computed by setting init properly.
         node_XX_count = [0 for _ in range(self.grg.num_nodes)]
         assert self.grg.ploidy == 2
+        assert self.grg.has_individual_coals
         for node_id in range(self.grg.num_nodes):
             curr_coals = self.grg.get_num_individual_coals(node_id)
             assert curr_coals != pygrgl.COAL_COUNT_NOT_SET

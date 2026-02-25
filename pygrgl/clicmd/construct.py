@@ -24,7 +24,6 @@ from multiprocessing import Pool
 from typing import List, Tuple
 from .common import which, time_call, round_up_to
 
-
 HAP_SEG_LENGTH = 128
 
 
@@ -160,7 +159,9 @@ def add_options(subparser):
         help="Forcing reduction of graph after merge.",
     )
     subparser.add_argument(
-        "--force-map-muts", action="store_true", help="Force the use of the MapMutations algorithm (debug feature).",
+        "--force-map-muts",
+        action="store_true",
+        help="Force the use of the MapMutations algorithm (debug feature).",
     )
 
 
@@ -479,4 +480,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

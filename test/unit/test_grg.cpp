@@ -5,6 +5,7 @@
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
 #include "grgl/serialize.h"
+#include "grgl/transform.h"
 
 #include "common_grgs.h"
 #include "common_visitors.h"
@@ -255,4 +256,37 @@ TEST(GRGHelper, CoalsForParent) {
     ASSERT_EQ(coals3, 0);
     expected = {0, 1, 2, 3};
     ASSERT_EQ(uncoalesced, expected);
+}
+
+TEST(GRG, MatmulXTX) {
+    GRGPtr grg = depth3BinTree();
+    ASSERT_EQ(grg->numSamples(), 4);
+    ASSERT_EQ(grg->numNodes(), 7);
+    // Lets add some mutations just so we can test matrix multiplication
+    grg->addMutation(Mutation(1, "A", "G"), 6);
+    grg->addMutation(Mutation(2, "T", "G"), 5);
+    grg->addMutation(Mutation(3, "A", "C"), 4);
+    ASSERT_EQ(grg->numMutations(), 3);
+    ASSERT_EQ(grg->getPloidy(), 2);
+    ASSERT_FALSE(grg->hasIndividualCoals());
+
+    std::vector<int64_t> inputVect = {1, 1, 1, 1};
+    std::vector<int64_t> outputVect(3);
+
+    // When we don't have coalescence counts, this should fail!
+    auto doMatmul = [&]() {
+        grg->matrixMultiplication<int64_t, int64_t, false>(
+        inputVect.data(), 4, 1, TraversalDirection::DIRECTION_UP, outputVect.data(), 3,
+        false, false, nullptr, grgl::GRG::NIE_XTX, nullptr);
+    };
+    ASSERT_THROW(doMatmul(), grgl::ApiMisuseFailure);
+
+    // Now calculate the coalescences and run again.
+    calculateMissingCoals(grg);
+    outputVect[0] = 0;
+    outputVect[1] = 0;
+    outputVect[2] = 0;
+    doMatmul();
+    std::vector<int64_t> expected = {8, 4, 4};
+    ASSERT_EQ(expected, outputVect);
 }

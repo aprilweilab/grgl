@@ -681,6 +681,12 @@ public:
     }
 
     /**
+     * Does this dataset have any individual coalescence information? If not, you won't be
+     * able to quickly get the exact sample variance for each mutation (diploid genotypes only).
+     */
+    bool hasIndividualCoals() const { return m_nodeData.hasCoalCounts(); }
+
+    /**
      * Add the next individual's identifier. Must be called in order, for individuals
      * 0...(N-1).
      *
@@ -1122,8 +1128,11 @@ void GRG::matrixMultiplication(const IOType* inputMatrix,
     case NIE_XTX:
         for (NodeID i = 0; i < numNodes(); i++) {
             const size_t base = i * effectiveInputRows;
+            const NodeIDSizeT coalCount = this->getNumIndividualCoals(i);
+            api_exc_check(coalCount != COAL_COUNT_NOT_SET,
+                          "Coalescent counts not available for this GRG (init=XTX won't work)");
             matmulPerformIOAddition<NodeValueType, IOType, useBitVector>(
-                nodeValues.data(), base, 2 * this->getNumIndividualCoals(i), effectiveInputRows);
+                nodeValues.data(), base, coalCount * 2, effectiveInputRows);
         }
         break;
     case NIE_VECTOR:
