@@ -115,6 +115,31 @@ GRG matrix multiplication handles missing data by an input/output vector (of len
 each missingness node associated with each Mutation. For multi-allelic sites, multiple Mutations will share a missingness
 node, in which case the values provided for each such Mutation will be added together when applied to the missingness node.
 
+Discussion
+~~~~~~~~~~
+
+Initially, missingness in GRG was implemented as another allele ``.`` in a ``Mutation`` object. The way it is implemented
+now is to make it easier to associate mutations with their missingness. Consider this scenario:
+
+::
+
+    POS    REF     ALT
+    1000   A       G
+    1000   A       T
+    1000   A       .
+
+The missingness at this site affects the calculations for both of the variants ``A>G`` and ``A>T``. If we had an explicit
+``Mutation`` object for ``.``, then (a) we would have to preprocess all the mutations to create the map between them and
+their missingness mutation and (b) when you performed :py:meth:`pygrgl.matmul` you would find all the missing alleles and populate
+their values differently (in the input vector) from the "regular" mutations.
+Also, :py:attr:`pygrgl.GRG.num_mutations` wouldn't really reflect the number of variants, but variants and missingness.
+
+There are two ways that methods in `grapp <https://github.com/aprilweilab/grapp>`_ currently adjust calculations for missingness:
+
+* Let :math:`2N`` be the number of haplotypes. Then allele frequency is :math:`count(allele_i) / 2N`. However, when missingness is present, let :math:`C_i = 2N - count(missing_i)` and allele frequency is :math:`f_i = count(allele_i) / C_i` (since :math:`C_i` varies by site).
+* For non-standardized matrix calculations, we also mean-impute the value for missing alleles. Given a column of the genotype matrix :math:`X_i`, then all the values are either ``0``, ``1``, ``2``, or ``.``. The mean is :math:`2 \times f_i`, so we need to "replace" ``.`` with :math:`2 \times f_i`, but we have to do this implicitly. If you are performing a :py:meth:`pygrgl.matmul` that is :math:`A \times X^T` then we can populate the missingness inputs with :math:`f_i \times A` to get the results we need.
+
+
 Unphased Data
 -------------
 
