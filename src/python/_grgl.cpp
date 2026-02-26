@@ -214,6 +214,28 @@ py::array matMul(grgl::GRGPtr& grg,
 
 #ifdef GRGL_CUDA_ENABLED
 template <typename IOType>
+inline py::array_t<IOType> gpuDispatchDotProd(grgl::GPUGRG& gpuGRG,
+                                              py::buffer_info& buffer,
+                                              size_t inCols,
+                                              size_t outCols,
+                                              grgl::TraversalDirection direction) {
+    py::array_t<IOType> result(outCols);
+    py::buffer_info resultBuf = result.request();
+    memset(resultBuf.ptr, 0, outCols * sizeof(IOType));
+
+    gpuGRG.matMulBlockingHelper<IOType>((const IOType*)buffer.ptr,
+                                        1, // single row
+                                        inCols,
+                                        outCols,
+                                        false, // byIndividual
+                                        grgl::GPUGRG::NIE_ZERO,
+                                        nullptr, // no init
+                                        direction,
+                                        (IOType*)resultBuf.ptr);
+    return std::move(result);
+}
+
+template <typename IOType>
 inline py::array_t<IOType> gpuDispatchMult(grgl::GPUGRG& gpuGRG,
                                            py::buffer_info& buffer,
                                            size_t rows,
@@ -293,6 +315,29 @@ py::array gpuMatMul(grgl::GPUGRG& grg,
     api_exc_check(
         false,
         "GPU matmul only supports float32, float64, int32, and uint32. Unsupported numpy dtype: " << arr.dtype());
+}
+
+py::array gpuDotProduct(grgl::GPUGRG& grg, py::handle input, grgl::TraversalDirection direction) {
+    py::array arr = py::array::ensure(input, py::array::c_style | py::array::forcecast);
+    py::buffer_info buffer = arr.request();
+    api_exc_check(buffer.ndim == 1, "dot_product() only support one-dimensional numpy arrays as input.");
+    const size_t cols = buffer.shape.at(0);
+    api_exc_check(cols != 0, "dot_product() requires non-empty array input.");
+    const size_t outCols =
+        (direction == grgl::TraversalDirection::DIRECTION_DOWN) ? grg.numSamples() : grg.numMutations();
+    
+    if (py::isinstance<py::array_t<double>>(input)) {
+        return gpuDispatchDotProd<double>(grg, buffer, cols, outCols, direction);
+    } else if (py::isinstance<py::array_t<float>>(input)) {
+        return gpuDispatchDotProd<float>(grg, buffer, cols, outCols, direction);
+    } else if (py::isinstance<py::array_t<std::int32_t>>(input)) {
+        return gpuDispatchDotProd<int32_t>(grg, buffer, cols, outCols, direction);
+    } else if (py::isinstance<py::array_t<std::uint32_t>>(input)) {
+        return gpuDispatchDotProd<uint32_t>(grg, buffer, cols, outCols, direction);
+    }
+    api_exc_check(
+        false,
+        "GPU dot_product only supports float32, float64, int32, and uint32. Unsupported numpy dtype: " << arr.dtype());
 }
 #endif
 
@@ -408,6 +453,23 @@ PYBIND11_MODULE(_grgl, m) {
         .def_property_readonly("max_height", &grgl::GPUGRG::maxHeight, R"^(
                 The number of sample nodes in the GRG.
             )^")
+        .def_property_readonly("num_samples", &grgl::GPUGRG::numSamples, R"^(
+                The number of sample nodes in the GRG.
+            )^")
+        .def_property_readonly("num_individuals", &grgl::GPUGRG::numIndividuals, R"^(
+                The number of individuals in the GRG. The corresponding samples can be found by
+                multiplying the individual index :math:`I` by the ploidy:
+                :math:`(ploidy * I) + 0, (ploidy \times I) + 1, ..., (ploidy \times I) + (ploidy - 1)`
+            )^")
+        .def_property_readonly("ploidy", &grgl::GPUGRG::getPloidy, R"^(
+                The ploidy of each individual.
+            )^")
+        .def_property_readonly("num_mutations", &grgl::GPUGRG::numMutations, R"^(
+            Get the total number of mutations in the GRG.
+
+            :return: The mutation count.
+            :rtype: int
+        )^")
         .def("matmul",
              &gpuMatMul,
              py::arg("input"),
@@ -438,6 +500,21 @@ PYBIND11_MODULE(_grgl, m) {
             graph (grg.num_nodes). This fully specifies every node value for the entire matrix operation.
         :type init: Union[str, numpy.array]
         :return: The numpy 2-dimensional array of output values.
+        :rtype: numpy.array
+    )^")
+        .def("dot_product",
+             &gpuDotProduct,
+             py::arg("input"),
+             py::arg("direction"),
+             R"^(
+        Same as pygrgl.dot_product(), except the dot product is performed by the GPU.
+        See pygrgl.dot_product() for details on input/output to the function.
+
+        :param input: The numpy 1-dimensional array of input values.
+        :type input: numpy.array
+        :param direction: The direction to traverse, up (input is per sample) or down (input is per mutation).
+        :type direction: pygrgl.TraversalDirection
+        :return: The numpy 1-dimensional array of output values.
         :rtype: numpy.array
     )^");
 #endif
