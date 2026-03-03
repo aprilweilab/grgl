@@ -2,13 +2,14 @@
 
 #include "grgl/map_mutations.h"
 
+#include <algorithm>
+#include <cctype>
+#include <fstream>
+#include <stdexcept>
 #include <vector>
 
 namespace grgl {
 
-
-// Downward DFS modeled after GRG::visitDfs: stack holds (node, pass) pairs (1=forward, 2=back).
-// Graph is acyclic/diamond-free here, so no visited tracking is needed.
 static NodeIDList collectSamples(const MutableGRGPtr& grg, NodeID parent, size_t numSamples) {
     NodeIDList samples;
     if (parent == INVALID_NODE_ID) {
@@ -145,6 +146,108 @@ bool polarizeMutation(const MutableGRGPtr& grg,
                       PolarizationStats& stats) {
     const auto results = polarizeMutations(grg, {{mutId, ancestralAllele}}, stats);
     return !results.empty() && results.front();
+}
+
+static std::string loadFasta(const std::string& path) {
+    std::ifstream instream(path);
+    if (!instream) {
+        throw std::runtime_error("Failed to open FASTA: " + path);
+    }
+    std::string sequence;
+    std::string line;
+    bool seenHeader = false;
+    while (std::getline(instream, line)) {
+        if (line.empty()) {
+            continue;
+        }
+        if (line[0] == '>') {
+            if (seenHeader && !sequence.empty()) {
+                throw std::runtime_error("Multiple contigs not supported in FASTA: " + path);
+            }
+            seenHeader = true;
+            continue;
+        }
+        for (char character : line) {
+            if (std::isspace(static_cast<unsigned char>(character)) == 0) {
+                sequence.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(character))));
+            }
+        }
+    }
+    if (sequence.empty()) {
+        throw std::runtime_error("No sequence found in FASTA: " + path);
+    }
+    return sequence;
+}
+
+static bool equalsIgnoreCase(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (std::toupper(static_cast<unsigned char>(a[i])) !=
+            std::toupper(static_cast<unsigned char>(b[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+PolarizationStats polarizeGrgFromFasta(const MutableGRGPtr& grg,
+                                       const std::string& fastaPath,
+                                       bool dropIfNoMatch,
+                                       bool positionsAreOneBased) {
+    PolarizationStats stats;
+    const std::string fastaSeq = loadFasta(fastaPath);
+    const size_t fastaLen = fastaSeq.size();
+
+    std::vector<std::pair<MutationId, std::string>> batch;
+    batch.reserve(grg->numMutations());
+
+    for (MutationId mutId = 0; mutId < grg->numMutations(); ++mutId) {
+        const Mutation& mutation = grg->getMutationById(mutId);
+        const uint64_t pos = mutation.getPosition();
+        const std::string& ref = mutation.getRefAllele();
+        const std::string& alt = mutation.getAllele();
+
+        const size_t maxAlleleLen = std::max(ref.size(), alt.size());
+        size_t start = positionsAreOneBased ? static_cast<size_t>(pos - 1) : static_cast<size_t>(pos);
+        if (positionsAreOneBased && pos == 0) {
+            continue;
+        }
+        if (start + maxAlleleLen > fastaLen) {
+            continue;
+        }
+
+        const std::string ancestral = fastaSeq.substr(start, maxAlleleLen);
+        if (ancestral.empty()) {
+            continue;
+        }
+
+        const char base = ancestral[0];
+        if (base == 'N' || base == '.' || base == '-') {
+            continue;
+        }
+
+        if (!ref.empty() && equalsIgnoreCase(ref, ancestral.substr(0, ref.size()))) {
+            batch.emplace_back(mutId, ref);
+            continue;
+        }
+        if (!alt.empty() && equalsIgnoreCase(alt, ancestral.substr(0, alt.size()))) {
+            batch.emplace_back(mutId, alt);
+            continue;
+        }
+
+        if (dropIfNoMatch) {
+            batch.emplace_back(mutId, "N");
+        }
+    }
+
+    if (!batch.empty()) {
+        stats.reset();
+        polarizeMutations(grg, batch, stats);
+    }
+
+    return stats;
 }
 
 } // namespace grgl

@@ -45,6 +45,14 @@ std::vector<bool> polarizeMutations(const MutableGRGPtr& grg,
                                     const std::vector<std::pair<MutationId, std::string>>& batch,
                                     PolarizationStats& stats);
 
+/**
+ * Polarize a batch of mutations, using allele data from a fasta path. Returns the stats from the polarization.
+ */
+PolarizationStats polarizeGrgFromFasta(const MutableGRGPtr& grg,
+                                       const std::string& fastaPath,
+                                       bool dropIfNoMatch = true,
+                                       bool positionsAreOneBased = true);
+
 } // namespace grgl
 
 #endif // GRG_POLARIZATION_H
