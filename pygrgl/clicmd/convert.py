@@ -66,6 +66,9 @@ def convert_command(arguments):
                 ' want to construct a .grg from something else try "grg construct"'
             )
             exit(2)
+        if not arguments.ts_coals:
+            print("Warning: no individual (diploid) coalescence information will be calculated unless you specify --ts-coals. "
+                  "This is fine, but downstream applications will need to use approximations for Mutation variance.", file=sys.stderr)
         command_args = [GRGL, arguments.input_file, "-o", arguments.output_file]
         if arguments.binary_muts:
             command_args.append("--binary-muts")

@@ -76,6 +76,17 @@ position and allele values:
       print(f"GRG ID = {mut_id}, tskit ID = {tsid}")
 
 
+``MutationID`` to ``NodeID`` is a 1-to-1 relationship, and in *constructed* GRGs we only ever create
+a single ``Mutation`` for every unique ``(position, allele, ref_allele)`` triple. However, when converting
+from *tskit* you can have multiple ``Mutation``s for the same ``(position, allele, ref_allele)`` that represents
+either the actual ancestry (two separate mutations, mostly in simulated ARGs) or is just an
+artifact of the ARG inference process (e.g., *tsinfer*). In these cases, you need to adjust
+any relevant calculations (you may *want* to keep separate ``Mutations``).
+
+**TODO**: coming soon, new methods ``pygrgl.MutableGRG.uniquifyMutations`` (which will add new nodes so that the relationship
+is one-to-one) and ``pygrgl.GRG.mutations_are_unique`` (for checking uniqueness).
+
+
 A note about Mutation times
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

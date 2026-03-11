@@ -37,6 +37,19 @@ namespace py = pybind11;
 #include <iostream>
 #include <sstream>
 
+/**
+ * Hardy-Weinberg equilibrium exact p-value test from Wiggington, et. al., 2025
+ * "A Note on Exact Tests of Hardy-Weinberg Equilibrium". This is a slightly modified
+ * wrapper of the C code from https://csg.sph.umich.edu/abecasis/Exact/.
+ *
+ * @param[in] obs_hets Heterozygote count.
+ * @param[in] obs_homs1 Homozygote count for first allele.
+ * @param[in] obs_homs2 Homozygote count for other alleles.
+ * @return The p-value for the two-sided test.
+ */
+double SNPHWE(int64_t obs_hets, int64_t obs_hom1, int64_t obs_hom2);
+
+
 std::string mutStr(const grgl::Mutation& mut) {
     std::stringstream result;
     result << "<[pygrgl.Mutation] position=" << mut.getPosition() << ", ref_allele=" << mut.getRefAllele()
@@ -1101,6 +1114,21 @@ PYBIND11_MODULE(_grgl, m) {
         :type seeds: List[int]
         :return: A list of node IDs representing the frontier.
         :rtype: List[int]
+    )^");
+
+    m.def("hwe_exact_pv", &SNPHWE, py::arg("hets_A"), py::arg("homs_A"), py::arg("other"), R"^(
+        Hardy-Weinberg equilibrium exact p-value test from Wiggington, et. al., 2025
+        "A Note on Exact Tests of Hardy-Weinberg Equilibrium". This is a slightly modified wrapper
+        of the C code from https://csg.sph.umich.edu/abecasis/Exact/.
+
+        :param hets_A: Number of heterozygotes containing the allele of interest.
+        :type hets_A: int
+        :param homs_A: Number of homozygotes containing the allele of interest.
+        :type homs_A: int
+        :param other: Number of genotypes that do not include the allele of interest at all.
+        :type other: int
+        :return: The p-value for the two-sided test.
+        :rtype: float
     )^");
 
     m.attr("INVALID_NODE") = grgl::INVALID_NODE_ID;
