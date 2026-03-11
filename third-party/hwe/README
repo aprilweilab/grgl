@@ -1,0 +1,9 @@
+From https://csg.sph.umich.edu/abecasis/Exact/:
+"The subroutines below implement a fast exact Hardy-Weinberg Equilibrium test for SNPs as described in Wigginton, et al. (2005). This test is based on an efficient algorithm for enumerating the exact heterozygote probability distribution conditional on the number of minor alleles present in the sample. It adequately controls Type I error rates within large and small samples and is suitable for use in large-scale studies of SNP data. With appropriate citation, these routines are freely available for your use and can be incorporated into other programs."
+
+Citation:
+A Note on Exact Tests of Hardy-Weinberg Equilibrium
+Wigginton, Janis E. et al.
+The American Journal of Human Genetics, Volume 76, Issue 5, 887 - 893
+
+https://www.cell.com/AJHG/fulltext/S0002-9297(07)60735-6

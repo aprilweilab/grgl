@@ -174,6 +174,7 @@ set(GRGL_CORE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/transform.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/ts2grg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/windowing.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/third-party/hwe/snp_hwe.cpp
   )
 
 # Add CUDA sources if CUDA is enabled
