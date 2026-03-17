@@ -27,6 +27,7 @@
 #include "grgl/map_mutations.h"
 #include "grgl/mutation.h"
 #include "grgl/node_data.h"
+#include "grgl/polarization.h"
 #include "grgl/serialize.h"
 #include "grgl/transform.h"
 #include "grgl/ts2grg.h"
@@ -339,6 +340,15 @@ PYBIND11_MODULE(_grgl, m) {
         .def_readonly("max_singletons", &grgl::MutationMappingStats::maxSingletons)
         .def_readonly("reused_mut_nodes", &grgl::MutationMappingStats::reusedMutNodes)
         .def_readonly("reuse_size_hist", &grgl::MutationMappingStats::reuseSizeHist);
+
+    py::class_<grgl::PolarizationStats>(m, "PolarizationStats")
+        .def_readonly("total_seen", &grgl::PolarizationStats::totalSeen)
+        .def_readonly("emitted", &grgl::PolarizationStats::emitted)
+        .def_readonly("already_polarized", &grgl::PolarizationStats::alreadyPolarized)
+        .def_readonly("swapped", &grgl::PolarizationStats::swapped)
+        .def_readonly("dropped_unknown", &grgl::PolarizationStats::droppedUnknown)
+        .def_readonly("inconsistent", &grgl::PolarizationStats::inconsistent)
+        .def("reset", &grgl::PolarizationStats::reset);
 
     py::class_<grgl::GRG, std::shared_ptr<grgl::GRG>> grgClass(m, "GRG");
     grgClass
@@ -942,6 +952,28 @@ PYBIND11_MODULE(_grgl, m) {
         :type mutation_batch_size: int
         :return: Mapping statistics.
         :rtype: pygrgl.MutationMappingStats
+    )^");
+
+    m.def("polarize_from_fasta",
+          &grgl::polarizeGrgFromFasta,
+          py::arg("grg"),
+          py::arg("fasta_path"),
+          py::arg("drop_if_no_match") = true,
+          py::arg("positions_are_one_based") = true,
+          R"^(
+        Polarize all mutations in a GRG using an ancestral FASTA sequence.
+        This mutates the provided MutableGRG in-place.
+
+        :param grg: The MutableGRG to modify.
+        :type grg: pygrgl.MutableGRG
+        :param fasta_path: Path to a FASTA file containing the ancestral sequence.
+        :type fasta_path: str
+        :param drop_if_no_match: If True, drop mutations whose alleles do not match the FASTA at that position.
+        :type drop_if_no_match: bool
+        :param positions_are_one_based: If True, interpret mutation positions as 1-based when indexing into the FASTA.
+        :type positions_are_one_based: bool
+        :return: Polarization statistics summarizing how many mutations were kept or dropped.
+        :rtype: pygrgl.PolarizationStats
     )^");
 
     m.def("get_bfs_order",

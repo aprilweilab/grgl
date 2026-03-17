@@ -18,6 +18,7 @@ from .clicmd import convert
 from .clicmd import process
 from .clicmd import split
 from .clicmd import merge
+from .clicmd import polarize
 from .clicmd.common import which
 import argparse
 import subprocess
@@ -28,6 +29,7 @@ CMD_CONSTRUCT = "construct"
 CMD_PROCESS = "process"
 CMD_SPLIT = "split"
 CMD_MERGE = "merge"
+CMD_POLARIZE = "polarize"
 
 
 def main():
@@ -47,6 +49,10 @@ def main():
         CMD_PROCESS, help="Process a GRG to compute information from it."
     )
     process.add_options(process_parser)
+    polarize_parser = subparsers.add_parser(
+        CMD_POLARIZE, help="Polarize a GRG using an ancestral FASTA."
+    )
+    polarize.add_options(polarize_parser)
     split_parser = subparsers.add_parser(
         CMD_SPLIT, help="Split a GRG into smaller pieces."
     )
@@ -70,6 +76,8 @@ def main():
         construct.from_tabular(args)
     elif args.command == CMD_PROCESS:
         process.process_command(args)
+    elif args.command == CMD_POLARIZE:
+        polarize.polarize_command(args)
     elif args.command == CMD_SPLIT:
         split.do_split(args)
     elif args.command == CMD_MERGE:
