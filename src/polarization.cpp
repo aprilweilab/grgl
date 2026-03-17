@@ -123,6 +123,14 @@ std::vector<bool> polarizeMutations(const MutableGRGPtr& grg,
             stats.emitted++;
             results[idx] = true;
 
+            if (!missingSamples.empty()) {
+                remapMutations.emplace_back(mutation.getPosition(),
+                                            Mutation::ALLELE_MISSING,
+                                            mutation.getRefAllele(),
+                                            mutation.getTime());
+                remapSamples.emplace_back(std::move(missingSamples));
+            }
+
             remapMutations.emplace_back(mutation.getPosition(), ref, ancestralAllele, mutation.getTime());
             remapSamples.emplace_back(std::move(flippedCarriers));
             continue;
