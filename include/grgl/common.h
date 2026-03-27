@@ -207,5 +207,4 @@ template <typename T> inline T roundUpToMultiple(const T input, const T multiple
 
 } // namespace grgl
 
-
 #endif /* GRGL_COMMON_H */

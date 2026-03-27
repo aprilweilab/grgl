@@ -69,7 +69,6 @@ endif()
 # Global flags that affect more than one target.
 # Use generator expressions to apply flags only to appropriate languages
 add_compile_options(
-    -DCOMPACT_NODE_IDS 
     -DVCF_GZ_SUPPORT 
     $<$<COMPILE_LANGUAGE:CXX>:-Werror>
 )
@@ -156,10 +155,24 @@ set(GRGL_TEST_SOURCES
 include(third-party/CMakeLists.txt)
 
 set(GRGL_PUBLIC_HEADERS
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/common.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/csr_storage.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/file_vector.h
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/grg.h
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/grgnode.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/internal_mult.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/map_mutations.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/mut_iterator.h
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/mutation.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/node_data.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/serialize.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/transform.h
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/ts2grg.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/version.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/visitor.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/windowing.h
+    ${CMAKE_CURRENT_LIST_DIR}/third-party/libvbyte/vbyte.h
+    ${CMAKE_CURRENT_LIST_DIR}/third-party/libvbyte/varintdecode.h
   )
 
 set(GRGL_CORE_SOURCES
@@ -288,7 +301,7 @@ endif()
 
 
 install(
-  TARGETS ${PROJECT_NAME}
+  TARGETS ${PROJECT_NAME} tskit vbyte
   COMPONENT library
   INCLUDES
   DESTINATION include

@@ -49,7 +49,6 @@ namespace py = pybind11;
  */
 double SNPHWE(int64_t obs_hets, int64_t obs_hom1, int64_t obs_hom2);
 
-
 std::string mutStr(const grgl::Mutation& mut) {
     std::stringstream result;
     result << "<[pygrgl.Mutation] position=" << mut.getPosition() << ", ref_allele=" << mut.getRefAllele()

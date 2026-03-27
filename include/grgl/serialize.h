@@ -123,6 +123,33 @@ private:
     bool m_allowSimplify;
 };
 
+/**
+ * Load the GRG so that it can be modified, by adding/removing nodes and edges.
+ *
+ * @param[in] filename The file to load.
+ * @param[in] loadUpEdges Whether to load the "up" edges (in addition to the down edges). Default: true.
+ * @return A shared_ptr to the MutableGRG object.
+ */
+MutableGRGPtr loadMutableGRG(const std::string& filename, const bool loadUpEdges = true);
+
+/**
+ * Load the GRG read-only. Edges and nodes cannot be changed, but the Mutations and other auxiliary
+ * information still can be.
+ *
+ * @param[in] filename The file to load.
+ * @param[in] loadUpEdges Whether to load the "up" edges (in addition to the down edges). Default: false.
+ * @return A shared_ptr to the GRG object.
+ */
+GRGPtr loadImmutableGRG(const std::string& filename, bool loadUpEdges = false);
+
+std::pair<NodeIDSizeT, EdgeSizeT> saveGRG(const GRGPtr& theGRG, const std::string& filename, bool allowSimplify = true);
+
+bool saveGRGSubset(const GRGPtr& theGRG,
+                   const std::string& filename,
+                   const TraversalDirection direction,
+                   const NodeIDList& seedList,
+                   std::pair<BpPosition, BpPosition> bpRange);
+
 }; // namespace grgl
 
 #endif /* GRG_SERIALIZE_H */
