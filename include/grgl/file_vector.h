@@ -18,7 +18,6 @@
 #define GRGL_FILE_VECTOR_H
 
 #include "grgl/common.h"
-#include "vbyte.h"
 #include <fstream>
 #include <ios>
 #include <iostream>
