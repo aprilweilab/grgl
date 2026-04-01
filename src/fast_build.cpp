@@ -31,6 +31,7 @@
 #include "grgl/mut_iterator.h"
 #include "grgl/mutation.h"
 #include "grgl/windowing.h"
+#include "picovcf.hpp"
 #include "util.h"
 
 #include "hap_segment.h"
@@ -264,13 +265,17 @@ struct HapWindowContext {
  *
  * @return true if the MutationIterator has more mutations.
  */
-bool getHapSegments(MutationIterator& mutIterator,
-                    const size_t hapLength,
-                    const size_t numSamples,
-                    const double dropBelowThreshold,
-                    const size_t stopAfter,
-                    const bool stopAfterIsMutCount,
-                    HapWindowContext& hapContext) {
+bool getHapSegments(
+    MutationIterator& mutIterator,
+    const size_t hapLength,
+    const size_t numSamples,
+    const size_t ploidy,
+    const double dropBelowThreshold,
+    const size_t stopAfter,
+    const bool stopAfterIsMutCount,
+    HapWindowContext& hapContext,
+    const std::function<void(
+        const size_t, const std::string&, const std::string&, const picovcf::IGDSampleList&, bool)>& emitHomFunc = {}) {
     release_assert(stopAfter > 0);
     size_t windex = 0;
 
@@ -311,6 +316,26 @@ bool getHapSegments(MutationIterator& mutIterator,
         const size_t position = mutAndSamples.mutation.getPosition();
         if (mutAndSamples.mutation.isMissing()) {
             lastPositionWithMissing = position;
+        }
+
+        if (emitHomFunc) {
+            api_exc_check(ploidy > 1, "Cannot emit homozygotes for haploid data");
+            const size_t ploidyDelta = ploidy - 1;
+            picovcf::IGDSampleList homOnly;
+            for (size_t i = ploidyDelta; i < mutAndSamples.samples.size(); i++) {
+                const picovcf::SampleT current = mutAndSamples.samples[i];
+                const picovcf::SampleT firstHap = (ploidy == 2) ? (current & (~0x1U)) : (current - (current % ploidy));
+                if (firstHap == mutAndSamples.samples[i - ploidyDelta]) {
+                    homOnly.emplace_back(firstHap / ploidy);
+                }
+            }
+            if (!homOnly.empty()) {
+                emitHomFunc(position,
+                            mutAndSamples.mutation.getRefAllele(),
+                            mutAndSamples.mutation.getAllele(),
+                            homOnly,
+                            mutAndSamples.mutation.isMissing());
+            }
         }
 
         // We will only direct map mutations if there is no missing data at the site. Otherwise, tracking
@@ -860,6 +885,31 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
         hasBSFlag(buildFlags, GBF_TREES_FASTER1) ? 0.75 : (hasBSFlag(buildFlags, GBF_TREES_FASTER2) ? 0.5 : 1.0);
     const size_t targetHapSegSum = static_cast<size_t>(getOptimalHapSegSum(numSamples, hapSumMultiplier));
 
+    std::function<void(const size_t, const std::string&, const std::string&, const picovcf::IGDSampleList&, bool)>
+        emitHomFunc;
+    std::unique_ptr<picovcf::IGDWriter> homWriter;
+    std::unique_ptr<std::ofstream> homOutStream;
+    if (hasBSFlag(buildFlags, GBF_EMIT_HOM_IGD)) {
+        api_exc_check(ploidy > 1, "Cannot emit homozygotes for ploidy=1 data");
+        homWriter.reset(new picovcf::IGDWriter(/*ploidy=*/1, numIndividuals, /*isPhased=*/true));
+        std::stringstream igdOutName;
+        igdOutName << filePrefix << ".hom.igd";
+        homOutStream.reset(new std::ofstream(igdOutName.str(), std::ios::binary));
+
+        homWriter->writeHeader(
+            *homOutStream, "GRG Construction", "Only homozygote individuals, represented as ploidy=1");
+    }
+    auto emitHom = [&](const size_t position,
+                       const std::string& ref,
+                       const std::string& alt,
+                       const picovcf::IGDSampleList& samples,
+                       bool isMissing) {
+        homWriter->writeVariantSamples(*homOutStream, position, ref, alt, samples, isMissing);
+    };
+    if (hasBSFlag(buildFlags, GBF_EMIT_HOM_IGD)) {
+        emitHomFunc = emitHom;
+    }
+
     bool hasMoreMuts = true;
     std::list<std::string> treeFiles;
     size_t treeNum = 0;
@@ -872,10 +922,12 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
         hasMoreMuts = getHapSegments(*mutIterator,
                                      hapLength,
                                      numSamples,
+                                     ploidy,
                                      noTreeBelowThreshold,
                                      /*stopAfter=*/targetHapSegSum,
                                      /*stopAfterIsMutCount=*/false,
-                                     hapContext);
+                                     hapContext,
+                                     emitHomFunc);
         FAST_GRG_OUTPUT("Windows: " << hapContext.windowInfo.size() << "\n");
         FAST_GRG_OUTPUT("Unique hap segments: " << countUniqueHaps(hapContext) << " (target=" << targetHapSegSum
                                                 << ")");
@@ -913,8 +965,15 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
         if (treeCount > 0 && treeNum == (treeCount - 1)) {
             stopAfter = std::numeric_limits<size_t>::max();
         }
-        hasMoreMuts = getHapSegments(
-            *mutIterator, hapLength, numSamples, noTreeBelowThreshold, stopAfter, stopAfterIsMutCount, hapContext);
+        hasMoreMuts = getHapSegments(*mutIterator,
+                                     hapLength,
+                                     numSamples,
+                                     ploidy,
+                                     noTreeBelowThreshold,
+                                     stopAfter,
+                                     stopAfterIsMutCount,
+                                     hapContext,
+                                     emitHomFunc);
         FAST_GRG_OUTPUT("Windows: " << hapContext.windowInfo.size() << "\n");
         FAST_GRG_OUTPUT("Unique hap segments: " << countUniqueHaps(hapContext) << " (target=" << targetHapSegSum
                                                 << ")");
@@ -948,6 +1007,21 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
         std::cout << "FAIL: " << pair.first << " has " << pair.second << " failures\n";
     }
 #endif
+
+    if (hasBSFlag(buildFlags, GBF_EMIT_HOM_IGD)) {
+        homWriter->writeIndex(*homOutStream);
+        homWriter->writeVariantInfo(*homOutStream);
+        const auto& indivIds = mutIterator->getIndividualIds();
+        if (!indivIds.empty()) {
+            homWriter->writeIndividualIds(*homOutStream, indivIds);
+        }
+        homOutStream->seekp(0);
+        homWriter->writeHeader(
+            *homOutStream, "GRG Construction", "Only homozygote individuals, represented as ploidy=1");
+
+        homOutStream.reset();
+        homWriter.reset();
+    }
 
     const auto mergeStartTime = std::chrono::high_resolution_clock::now();
     MutableGRGPtr result;

@@ -35,6 +35,9 @@ struct bgen_partition;
 
 namespace grgl {
 
+// The HOM graph is a GRG with ploidy=1 and phased=true, because each sample is an individual
+// Ideally, we can construct it from a regular GRG
+
 using MutationIteratorFlags = uint64_t;
 enum {
     ///< Empty flags.

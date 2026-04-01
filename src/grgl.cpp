@@ -114,6 +114,7 @@ int main(int argc, char** argv) {
     args::Flag countVariants(
         parser, "count-variants", "Just count the number of variants in the input file.", {"count-variants"});
     args::Flag noTreeMap(parser, "no-tree-map", "Don't map mutations during tree building.", {"no-tree-map"});
+    args::Flag emitHomIGD(parser, "emit-hom-igd", "Emit an IGD file containing only homozygotes.", {"emit-hom-igd"});
     args::ValueFlag<std::string> treesArg(
         parser,
         "trees",
@@ -285,6 +286,9 @@ int main(int argc, char** argv) {
         }
         if (noTreeMap) {
             buildFlags |= grgl::GBF_NO_TREE_MAP;
+        }
+        if (emitHomIGD) {
+            buildFlags |= grgl::GBF_EMIT_HOM_IGD;
         }
         size_t treeCount = 0;
         if (treesArg) {

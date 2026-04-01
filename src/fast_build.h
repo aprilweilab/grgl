@@ -39,6 +39,7 @@ enum {
     GBF_NO_TREE_MAP = 0x4U,
     GBF_TREES_FASTER1 = 0x8U,  // Build more trees than optimal, for speed
     GBF_TREES_FASTER2 = 0x10U, // Build even more trees than optimal, for speed
+    GBF_EMIT_HOM_IGD = 0x20U,  // Emit an IGD file containing only the homozygous alleles
 };
 using GrgBuildFlags = uint64_t;
 

@@ -163,10 +163,15 @@ def add_options(subparser):
         action="store_true",
         help="Force the use of the MapMutations algorithm (debug feature).",
     )
-
+    subparser.add_argument(
+        "--emit-hom-igd",
+        action="store_true",
+        help="Emit an IGD file containing only homozygotes encountered during GRG build.",
+    )
 
 grgl_exe = which("grgl")
 grg_merge_exe = which("grg-merge")
+igdtools_exe = which("igdtools", required=False)
 
 
 # The advantage of a lot of parts is that it can balance the parallelism. The disadvantage,
@@ -241,6 +246,8 @@ def build_shape(
         command.extend(["--reduce", str(args.reduce)])
     if args.force_map_muts:
         command.append("--no-tree-map")
+    if args.emit_hom_igd:
+        command.append("--emit-hom-igd")
     shape_filename = out_filename(output_file, part)
     command.extend(
         [
@@ -302,6 +309,8 @@ def star_build_grg(args):
 
 
 def from_tabular(args):
+    if args.emit_hom_igd:
+        assert igdtools_exe is not None, "igdtools must be installed for merging hom IGDs!"
     if args.range is not None:
         if ":" not in args.range:
             raise RuntimeError('--range must be specified as "lower:upper"')
@@ -457,16 +466,33 @@ def from_tabular(args):
         ]
         if slow_merge:
             command.append("--use-samples")
-        command.extend(
-            map(lambda part: out_filename(final_filename, part), range(0, args.parts))
-        )
+        partial_grgs = list(map(lambda part: out_filename(final_filename, part), range(0, args.parts)))
+        command.extend(partial_grgs)
         log_v(command, args.verbose)
         final_merge_time = time_call(command)
         log_time("FINAL_MERGE_TIME", final_merge_time, args.verbose)
 
+        hom_igds = []
+        if args.emit_hom_igd:
+            hom_igds = list(filter(os.path.isfile, map(lambda fn: f"{fn}.hom.igd", partial_grgs)))
+            igd_final = f"{final_filename}.hom.igd"
+            if len(hom_igds) == 1:
+                os.rename(hom_igds[0], igd_final)
+            elif len(hom_igds) > 1:
+                assert igdtools_exe is not None
+                command = [igdtools_exe, hom_igds[0]]
+                for i in hom_igds[1:]:
+                    command.extend(["--merge", i])
+                command.extend(["-o", igd_final])
+                log_v(command, args.verbose)
+                igd_merge_time = time_call(command)
+                log_time("IGD_MERGE_TIME", igd_merge_time, args.verbose)
+
         if not args.no_file_cleanup:
-            for part in range(0, args.parts):
-                os.remove(out_filename(final_filename, part))
+            for part in partial_grgs:
+                os.remove(part)
+            for igd in hom_igds:
+                os.remove(igd)
 
 
 def main():
