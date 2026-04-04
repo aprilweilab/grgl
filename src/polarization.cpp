@@ -37,6 +37,21 @@ static NodeIDList collectSamples(const MutableGRGPtr& grg, NodeID parent, size_t
     return samples;
 }
 
+static inline void loadRemaps(const MutableGRGPtr& grg,
+                               std::vector<Mutation>& remapMutations,
+                               std::vector<NodeIDList>& remapSamples,
+                               size_t flushThreshold,
+                               bool force) {
+    if (remapMutations.empty()) {
+        return;
+    }
+    if (force || remapMutations.size() >= flushThreshold) {
+        mapMutations(grg, remapMutations, remapSamples, false, remapMutations.size());
+        remapMutations.clear();
+        remapSamples.clear();
+    }
+}
+
 std::vector<bool> polarizeMutations(const MutableGRGPtr& grg,
                                     const std::vector<std::pair<MutationId, std::string>>& batch,
                                     PolarizationStats& stats) {
@@ -61,8 +76,8 @@ std::vector<bool> polarizeMutations(const MutableGRGPtr& grg,
 
     std::vector<Mutation> remapMutations;
     std::vector<NodeIDList> remapSamples;
-    remapMutations.reserve(batch.size());
-    remapSamples.reserve(batch.size());
+
+    constexpr size_t remapFlushThreshold = 10000;
 
     for (size_t idx = 0; idx < batch.size(); ++idx) {
         stats.totalSeen++;
@@ -140,6 +155,8 @@ std::vector<bool> polarizeMutations(const MutableGRGPtr& grg,
 
             remapMutations.emplace_back(mutation.getPosition(), ref, ancestralAllele, mutation.getTime());
             remapSamples.emplace_back(std::move(flippedCarriers));
+
+            loadRemaps(grg, remapMutations, remapSamples, remapFlushThreshold, false);
             continue;
         }
 
@@ -148,9 +165,7 @@ std::vector<bool> polarizeMutations(const MutableGRGPtr& grg,
         grg->removeMutation(mutId, nodeId);
     }
 
-    if (!remapMutations.empty()) {
-        mapMutations(grg, remapMutations, remapSamples, false, remapMutations.size());
-    }
+    loadRemaps(grg, remapMutations, remapSamples, remapFlushThreshold, true);
 
     return results;
 }
@@ -184,9 +199,6 @@ static std::string loadFasta(const std::string& path) {
         }
         for (char character : line) {
             if (std::isspace(static_cast<unsigned char>(character)) == 0) {
-                if (character == '.' || character == '-') {
-                    continue;
-                }
                 sequence.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(character))));
             }
         }
