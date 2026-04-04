@@ -48,6 +48,17 @@ std::vector<bool> polarizeMutations(const MutableGRGPtr& grg,
     const size_t numSamples = grg->numSamples();
     const auto mutNodeList = grg->getMutationsToNodeOrdered<GRG::MutNodeMiss>();
 
+    // Build a direct lookup from mutation ID to (nodeId, missingNodeId) to avoid
+    // repeatedly scanning the ordered vector (which was O(n^2)).
+    std::vector<std::pair<NodeID, NodeID>> mutLookup(grg->numMutations(),
+                                                     {INVALID_NODE_ID, INVALID_NODE_ID});
+    for (const auto& entry : mutNodeList) {
+        const MutationId mid = std::get<0>(entry);
+        if (mid < mutLookup.size()) {
+            mutLookup[mid] = {std::get<1>(entry), std::get<2>(entry)};
+        }
+    }
+
     std::vector<Mutation> remapMutations;
     std::vector<NodeIDList> remapSamples;
     remapMutations.reserve(batch.size());
@@ -59,16 +70,12 @@ std::vector<bool> polarizeMutations(const MutableGRGPtr& grg,
         const MutationId mutId = batch[idx].first;
         const std::string& ancestralAllele = batch[idx].second;
 
-        NodeID nodeId = INVALID_NODE_ID;
-        NodeID missingNodeId = INVALID_NODE_ID;
-        for (const auto& entry : mutNodeList) {
-            if (std::get<0>(entry) == mutId) {
-                nodeId = std::get<1>(entry);
-                missingNodeId = std::get<2>(entry);
-                break;
-            }
+        if (mutId >= mutLookup.size()) {
+            continue;
         }
 
+        const NodeID nodeId = mutLookup[mutId].first;
+        const NodeID missingNodeId = mutLookup[mutId].second;
         if (nodeId == INVALID_NODE_ID) {
             continue;
         }
