@@ -184,6 +184,9 @@ static std::string loadFasta(const std::string& path) {
         }
         for (char character : line) {
             if (std::isspace(static_cast<unsigned char>(character)) == 0) {
+                if (character == '.' || character == '-') {
+                    continue;
+                }
                 sequence.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(character))));
             }
         }
