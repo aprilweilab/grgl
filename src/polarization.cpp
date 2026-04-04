@@ -230,51 +230,58 @@ PolarizationStats polarizeGrgFromFasta(const MutableGRGPtr& grg,
     const std::string fastaSeq = loadFasta(fastaPath);
     const size_t fastaLen = fastaSeq.size();
 
+    constexpr MutationId chunkSize = 10000;
     std::vector<std::pair<MutationId, std::string>> batch;
-    batch.reserve(grg->numMutations());
+    batch.reserve(chunkSize);
 
-    for (MutationId mutId = 0; mutId < grg->numMutations(); ++mutId) {
-        const Mutation& mutation = grg->getMutationById(mutId);
-        const uint64_t pos = mutation.getPosition();
-        const std::string& ref = mutation.getRefAllele();
-        const std::string& alt = mutation.getAllele();
+    stats.reset();
+    const MutationId totalMuts = grg->numMutations();
+    for (MutationId chunkStart = 0; chunkStart < totalMuts; chunkStart += chunkSize) {
+        batch.clear();
+        const MutationId chunkEnd = std::min<MutationId>(chunkStart + chunkSize, totalMuts);
 
-        const size_t maxAlleleLen = std::max(ref.size(), alt.size());
-        size_t start = positionsAreOneBased ? static_cast<size_t>(pos - 1) : static_cast<size_t>(pos);
-        if (positionsAreOneBased && pos == 0) {
-            continue;
-        }
-        if (start + maxAlleleLen > fastaLen) {
-            continue;
+        for (MutationId mutId = chunkStart; mutId < chunkEnd; ++mutId) {
+            const Mutation& mutation = grg->getMutationById(mutId);
+            const uint64_t pos = mutation.getPosition();
+            const std::string& ref = mutation.getRefAllele();
+            const std::string& alt = mutation.getAllele();
+
+            const size_t maxAlleleLen = std::max(ref.size(), alt.size());
+            size_t start = positionsAreOneBased ? static_cast<size_t>(pos - 1) : static_cast<size_t>(pos);
+            if (positionsAreOneBased && pos == 0) {
+                continue;
+            }
+            if (start + maxAlleleLen > fastaLen) {
+                continue;
+            }
+
+            const std::string ancestral = fastaSeq.substr(start, maxAlleleLen);
+            if (ancestral.empty()) {
+                continue;
+            }
+
+            const char base = ancestral[0];
+            if (base == 'N' || base == '.' || base == '-') {
+                continue;
+            }
+
+            if (!ref.empty() && equalsIgnoreCase(ref, ancestral.substr(0, ref.size()))) {
+                batch.emplace_back(mutId, ref);
+                continue;
+            }
+            if (!alt.empty() && equalsIgnoreCase(alt, ancestral.substr(0, alt.size()))) {
+                batch.emplace_back(mutId, alt);
+                continue;
+            }
+
+            if (dropIfNoMatch) {
+                batch.emplace_back(mutId, "N");
+            }
         }
 
-        const std::string ancestral = fastaSeq.substr(start, maxAlleleLen);
-        if (ancestral.empty()) {
-            continue;
+        if (!batch.empty()) {
+            polarizeMutations(grg, batch, stats);
         }
-
-        const char base = ancestral[0];
-        if (base == 'N' || base == '.' || base == '-') {
-            continue;
-        }
-
-        if (!ref.empty() && equalsIgnoreCase(ref, ancestral.substr(0, ref.size()))) {
-            batch.emplace_back(mutId, ref);
-            continue;
-        }
-        if (!alt.empty() && equalsIgnoreCase(alt, ancestral.substr(0, alt.size()))) {
-            batch.emplace_back(mutId, alt);
-            continue;
-        }
-
-        if (dropIfNoMatch) {
-            batch.emplace_back(mutId, "N");
-        }
-    }
-
-    if (!batch.empty()) {
-        stats.reset();
-        polarizeMutations(grg, batch, stats);
     }
 
     return stats;
