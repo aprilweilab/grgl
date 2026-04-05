@@ -63,8 +63,6 @@ std::vector<bool> polarizeMutations(const MutableGRGPtr& grg,
     const size_t numSamples = grg->numSamples();
     const auto mutNodeList = grg->getMutationsToNodeOrdered<GRG::MutNodeMiss>();
 
-    // Build a direct lookup from mutation ID to (nodeId, missingNodeId) to avoid
-    // repeatedly scanning the ordered vector (which was O(n^2)).
     std::vector<std::pair<NodeID, NodeID>> mutLookup(grg->numMutations(),
                                                      {INVALID_NODE_ID, INVALID_NODE_ID});
     for (const auto& entry : mutNodeList) {
@@ -247,11 +245,17 @@ PolarizationStats polarizeGrgFromFasta(const MutableGRGPtr& grg,
             const std::string& alt = mutation.getAllele();
 
             const size_t maxAlleleLen = std::max(ref.size(), alt.size());
-            size_t start = positionsAreOneBased ? static_cast<size_t>(pos - 1) : static_cast<size_t>(pos);
+            if (maxAlleleLen == 0) {
+                continue;
+            }
             if (positionsAreOneBased && pos == 0) {
                 continue;
             }
-            if (start + maxAlleleLen > fastaLen) {
+            const size_t start = positionsAreOneBased ? static_cast<size_t>(pos - 1) : static_cast<size_t>(pos);
+            if (start >= fastaLen) {
+                continue;
+            }
+            if (maxAlleleLen > fastaLen - start) {
                 continue;
             }
 

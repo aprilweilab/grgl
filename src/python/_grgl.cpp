@@ -959,7 +959,7 @@ PYBIND11_MODULE(_grgl, m) {
           py::arg("grg"),
           py::arg("fasta_path"),
           py::arg("drop_if_no_match") = true,
-          py::arg("positions_are_one_based") = true,
+          py::arg("positions_are_one_based") = false,
           R"^(
         Polarize all mutations in a GRG using an ancestral FASTA sequence.
         This mutates the provided MutableGRG in-place.

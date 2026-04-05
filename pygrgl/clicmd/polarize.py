@@ -18,9 +18,9 @@ def add_options(subparser):
         help="Keep mutations with no matching allele in the FASTA (instead of dropping them)",
     )
     subparser.add_argument(
-        "--zero-based",
+        "--one-based-indexing",
         action="store_true",
-        help="Treat mutation positions as 0-based when indexing into the FASTA",
+        help="Treat mutation positions as 1-based when indexing into the FASTA (default is 0-based)",
     )
 
 
@@ -43,7 +43,7 @@ def polarize_command(arguments):
         grg,
         arguments.fasta_file,
         drop_if_no_match=not arguments.keep_no_match,
-        positions_are_one_based=not arguments.zero_based,
+        positions_are_one_based=arguments.one_based_indexing,
     )
 
     grgl.save_grg(grg, output_path)

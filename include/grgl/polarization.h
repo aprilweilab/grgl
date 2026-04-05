@@ -51,7 +51,7 @@ std::vector<bool> polarizeMutations(const MutableGRGPtr& grg,
 PolarizationStats polarizeGrgFromFasta(const MutableGRGPtr& grg,
                                        const std::string& fastaPath,
                                        bool dropIfNoMatch = true,
-                                       bool positionsAreOneBased = true);
+                                       bool positionsAreOneBased = false);
 
 } // namespace grgl
 
