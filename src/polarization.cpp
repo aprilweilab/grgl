@@ -94,8 +94,6 @@ std::vector<bool> polarizeMutations(const MutableGRGPtr& grg,
         }
 
         const Mutation& mutation = grg->getMutationById(mutId);
-        NodeIDList samples = collectSamples(grg, nodeId, numSamples);
-        NodeIDList missingSamples = collectSamples(grg, missingNodeId, numSamples);
 
         // unknown ancestral allele => drop.
         if (ancestralAllele == "." || ancestralAllele == "-" || ancestralAllele == "N") {
@@ -115,24 +113,26 @@ std::vector<bool> polarizeMutations(const MutableGRGPtr& grg,
         }
 
         if (ancestralAllele == alt) {
+            NodeIDList samples = collectSamples(grg, nodeId, numSamples);
+            NodeIDList missingSamples = collectSamples(grg, missingNodeId, numSamples);
+
             std::vector<bool> sampleSet(numSamples, false);
             for (NodeID sampleId : samples) {
                 if (sampleId < numSamples) {
                     sampleSet[sampleId] = true;
                 }
             }
+            std::vector<bool> missingSet(numSamples, false);
+            for (NodeID missingId : missingSamples) {
+                if (missingId < numSamples) {
+                    missingSet[missingId] = true;
+                }
+            }
 
             NodeIDList flippedCarriers;
             flippedCarriers.reserve(numSamples - samples.size());
             for (size_t sid = 0; sid < numSamples; sid++) {
-                bool isMissing = false;
-                for (const NodeID missingId : missingSamples) {
-                    if (missingId == sid) {
-                        isMissing = true;
-                        break;
-                    }
-                }
-                if (!isMissing && !sampleSet[sid]) {
+                if (!missingSet[sid] && !sampleSet[sid]) {
                     flippedCarriers.push_back(static_cast<NodeID>(sid));
                 }
             }
@@ -292,4 +292,3 @@ PolarizationStats polarizeGrgFromFasta(const MutableGRGPtr& grg,
 }
 
 } // namespace grgl
-
