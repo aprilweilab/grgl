@@ -52,25 +52,31 @@ static inline void loadRemaps(const MutableGRGPtr& grg,
     }
 }
 
-std::vector<bool> polarizeMutations(const MutableGRGPtr& grg,
-                                    const std::vector<std::pair<MutationId, std::string>>& batch,
-                                    PolarizationStats& stats) {
-    std::vector<bool> results(batch.size(), false);
-    if (batch.empty()) {
-        return results;
-    }
+using MutLookup = std::vector<std::pair<NodeID, NodeID>>;
 
-    const size_t numSamples = grg->numSamples();
+static MutLookup buildMutLookup(const MutableGRGPtr& grg) {
     const auto mutNodeList = grg->getMutationsToNodeOrdered<GRG::MutNodeMiss>();
 
-    std::vector<std::pair<NodeID, NodeID>> mutLookup(grg->numMutations(),
-                                                     {INVALID_NODE_ID, INVALID_NODE_ID});
+    MutLookup mutLookup(grg->numMutations(), {INVALID_NODE_ID, INVALID_NODE_ID});
     for (const auto& entry : mutNodeList) {
         const MutationId mid = std::get<0>(entry);
         if (mid < mutLookup.size()) {
             mutLookup[mid] = {std::get<1>(entry), std::get<2>(entry)};
         }
     }
+    return mutLookup;
+}
+
+static std::vector<bool> polarizeMutationsHelper(const MutableGRGPtr& grg,
+                                                     const MutLookup& mutLookup,
+                                                     const std::vector<std::pair<MutationId, std::string>>& batch,
+                                                     PolarizationStats& stats) {
+    std::vector<bool> results(batch.size(), false);
+    if (batch.empty()) {
+        return results;
+    }
+
+    const size_t numSamples = grg->numSamples();
 
     std::vector<Mutation> remapMutations;
     std::vector<NodeIDList> remapSamples;
@@ -168,6 +174,13 @@ std::vector<bool> polarizeMutations(const MutableGRGPtr& grg,
     return results;
 }
 
+std::vector<bool> polarizeMutations(const MutableGRGPtr& grg,
+                                    const std::vector<std::pair<MutationId, std::string>>& batch,
+                                    PolarizationStats& stats) {
+    const MutLookup mutLookup = buildMutLookup(grg);
+    return polarizeMutationsHelper(grg, mutLookup, batch, stats);
+}
+
 bool polarizeMutation(const MutableGRGPtr& grg,
                       MutationId mutId,
                       const std::string& ancestralAllele,
@@ -227,6 +240,7 @@ PolarizationStats polarizeGrgFromFasta(const MutableGRGPtr& grg,
     PolarizationStats stats;
     const std::string fastaSeq = loadFasta(fastaPath);
     const size_t fastaLen = fastaSeq.size();
+    const MutLookup mutLookup = buildMutLookup(grg);
 
     constexpr MutationId chunkSize = 10000;
     std::vector<std::pair<MutationId, std::string>> batch;
@@ -284,7 +298,7 @@ PolarizationStats polarizeGrgFromFasta(const MutableGRGPtr& grg,
         }
 
         if (!batch.empty()) {
-            polarizeMutations(grg, batch, stats);
+            polarizeMutationsHelper(grg, mutLookup, batch, stats);
         }
     }
 
@@ -292,3 +306,4 @@ PolarizationStats polarizeGrgFromFasta(const MutableGRGPtr& grg,
 }
 
 } // namespace grgl
+
