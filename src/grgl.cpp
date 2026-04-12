@@ -86,8 +86,10 @@ int main(int argc, char** argv) {
                            "keep-no-match",
                            "Keep mutations with no matching allele in the FASTA (instead of dropping them)",
                            {"keep-no-match"});
-    args::Flag oneBasedIndexing(
-        parser, "one-based-indexing", "Treat mutation positions as 1-based when indexing into the FASTA", {});
+    args::Flag oneBasedIndexing(parser,
+                                "one-based-indexing",
+                                "Treat mutation positions as 1-based when indexing into the FASTA",
+                                {"one-based-indexing"});
     args::Flag noSimplify(parser, "no-simplify", "Compare the results to the given GRG", {'l', "no-simplify"});
     args::Flag MAFFlip(
         parser, "maf-flip", "Switch the reference allele with the major allele when they differ", {"maf-flip"});
