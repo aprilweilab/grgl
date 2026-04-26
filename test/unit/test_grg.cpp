@@ -4,6 +4,7 @@
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
+#include "grgl/polarization.h"
 #include "grgl/serialize.h"
 
 #include "common_grgs.h"
@@ -12,6 +13,7 @@
 #include "grg_helpers.h"
 
 #include <fstream>
+#include <sstream>
 
 namespace grgl {
 
@@ -35,6 +37,28 @@ TEST(GRG, Mutations) {
         ASSERT_EQ(g1.getMutationsForNode(1).size(), 1);
         ASSERT_EQ(g1.getNodesAndMutations().size(), 2);
     }
+}
+
+TEST(GRG, PolarizeCompactsRemovedMutations) {
+    MutableGRGPtr grg = depth3BinTree();
+    grg->addMutation(Mutation(5, "G", "A"), 4);
+
+    PolarizationStats stats;
+    const auto results = polarizeMutations(grg, {{0, "G"}}, stats);
+
+    ASSERT_EQ(results.size(), 1);
+    ASSERT_TRUE(results.front());
+    ASSERT_EQ(stats.swapped, 1);
+    ASSERT_EQ(grg->numMutations(), 1);
+    ASSERT_EQ(grg->getNodesAndMutations().size(), 1);
+
+    std::stringstream outStream;
+    writeGrg(grg, outStream, false);
+
+    const std::vector<double> mutValues = {1.0};
+    const auto sampleValues = grg->matMul(mutValues, 1, TraversalDirection::DIRECTION_DOWN);
+    const std::vector<double> expected = {0.0, 0.0, 1.0, 1.0};
+    ASSERT_EQ(sampleValues, expected);
 }
 
 TEST(GRG, DotProductGood) {
