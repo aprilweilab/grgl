@@ -178,7 +178,9 @@ std::vector<bool> polarizeMutations(const MutableGRGPtr& grg,
                                     const std::vector<std::pair<MutationId, std::string>>& batch,
                                     PolarizationStats& stats) {
     const MutLookup mutLookup = buildMutLookup(grg);
-    return polarizeMutationsHelper(grg, mutLookup, batch, stats);
+    auto result = polarizeMutationsHelper(grg, mutLookup, batch, stats);
+    grg->sortMutations();
+    return result;
 }
 
 bool polarizeMutation(const MutableGRGPtr& grg,
@@ -302,8 +304,9 @@ PolarizationStats polarizeGrgFromFasta(const MutableGRGPtr& grg,
         }
     }
 
+    grg->sortMutations();
+
     return stats;
 }
 
 } // namespace grgl
-
