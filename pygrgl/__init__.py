@@ -14,3 +14,4 @@
 # You should have received a copy of the GNU General Public License
 # with this program.  If not, see <https://www.gnu.org/licenses/>.
 from .grg import *  # noqa: F401
+from _grgl import __version__  # noqa: F401
