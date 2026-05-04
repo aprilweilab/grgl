@@ -6,6 +6,7 @@
 #include <cctype>
 #include <fstream>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace grgl {
@@ -38,14 +39,20 @@ static NodeIDList collectSamples(const MutableGRGPtr& grg, NodeID parent, size_t
 }
 
 static inline void loadRemaps(const MutableGRGPtr& grg,
+                               std::vector<std::pair<MutationId, NodeID>>& removals,
                                std::vector<Mutation>& remapMutations,
                                std::vector<NodeIDList>& remapSamples,
                                size_t flushThreshold,
                                bool force) {
-    if (remapMutations.empty()) {
+    if (!force && remapMutations.size() < flushThreshold) {
         return;
     }
-    if (force || remapMutations.size() >= flushThreshold) {
+    grg->getNodesAndMutations();
+    for (const auto& removal : removals) {
+        grg->removeMutation(removal.first, removal.second);
+    }
+    removals.clear();
+    if (!remapMutations.empty()) {
         mapMutations(grg, remapMutations, remapSamples, false, remapMutations.size());
         remapMutations.clear();
         remapSamples.clear();
@@ -78,8 +85,12 @@ static std::vector<bool> polarizeMutationsHelper(const MutableGRGPtr& grg,
 
     const size_t numSamples = grg->numSamples();
 
+    std::vector<std::pair<MutationId, NodeID>> removals;
     std::vector<Mutation> remapMutations;
     std::vector<NodeIDList> remapSamples;
+    removals.reserve(batch.size());
+    remapMutations.reserve(batch.size());
+    remapSamples.reserve(batch.size());
 
     constexpr size_t remapFlushThreshold = 10000;
 
@@ -99,12 +110,12 @@ static std::vector<bool> polarizeMutationsHelper(const MutableGRGPtr& grg,
             continue;
         }
 
-        const Mutation& mutation = grg->getMutationById(mutId);
+        const Mutation mutation = grg->getMutationById(mutId);
 
         // unknown ancestral allele => drop.
         if (ancestralAllele == "." || ancestralAllele == "-" || ancestralAllele == "N") {
             stats.droppedUnknown++;
-            grg->removeMutation(mutId, nodeId);
+            removals.emplace_back(mutId, nodeId);
             continue;
         }
 
@@ -143,7 +154,7 @@ static std::vector<bool> polarizeMutationsHelper(const MutableGRGPtr& grg,
                 }
             }
 
-            grg->removeMutation(mutId, nodeId);
+            removals.emplace_back(mutId, nodeId);
 
             stats.swapped++;
             stats.emitted++;
@@ -159,17 +170,16 @@ static std::vector<bool> polarizeMutationsHelper(const MutableGRGPtr& grg,
 
             remapMutations.emplace_back(mutation.getPosition(), ref, ancestralAllele, mutation.getTime());
             remapSamples.emplace_back(std::move(flippedCarriers));
-
-            loadRemaps(grg, remapMutations, remapSamples, remapFlushThreshold, false);
+            loadRemaps(grg, removals, remapMutations, remapSamples, remapFlushThreshold, false);
             continue;
         }
 
         // inconsistent ancestral allele, drop.
         stats.inconsistent++;
-        grg->removeMutation(mutId, nodeId);
+        removals.emplace_back(mutId, nodeId);
     }
 
-    loadRemaps(grg, remapMutations, remapSamples, remapFlushThreshold, true);
+    loadRemaps(grg, removals, remapMutations, remapSamples, remapFlushThreshold, true);
 
     return results;
 }
