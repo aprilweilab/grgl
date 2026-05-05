@@ -459,12 +459,17 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: The list of NodeIDs that are root nodes.
                 :rtype: List[int]
             )^")
-        .def("get_node_mutation_pairs", &grgl::GRG::getNodesAndMutations<grgl::GRG::NodeAndMut>, R"^(
+        .def("get_node_mutation_pairs",
+             &grgl::GRG::getNodesAndMutations<grgl::GRG::NodeAndMut>,
+             py::arg("allow_sort") = true,
+             R"^(
                 Get a list of pairs (NodeID, MutationID). Each Mutation typically
                 is associated to a single Node, but rarely it can have more than one
                 Node, in which case it will show up in more than one pair.
                 Results are ordered by NodeID, ascending.
 
+                :param allow_sort: Allow the mutations-to-node mapping to be resorted; if false and the
+                    mapping is not sorted then an exception will be thrown.
                 :return: A list of pairs of NodeID and MutationID.
                 :rtype: List[Tuple[int, int]]
             )^")
@@ -477,12 +482,17 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: A list of pairs of MutationID and NodeID.
                 :rtype: List[Tuple[int, int]]
             )^")
-        .def("get_node_mutation_miss", &grgl::GRG::getNodesAndMutations<grgl::GRG::NodeMutMiss>, R"^(
+        .def("get_node_mutation_miss",
+             &grgl::GRG::getNodesAndMutations<grgl::GRG::NodeMutMiss>,
+             py::arg("allow_sort") = true,
+             R"^(
                 Get a list of triples (NodeID, MutationID, "missingness" NodeID). Each
                 Mutation typically is associated to a single Node, but rarely it can
                 have more than one Node, in which case it will show up in more than one row.
                 Results are ordered by NodeID, ascending.
 
+                :param allow_sort: Allow the mutations-to-node mapping to be resorted; if false and the
+                    mapping is not sorted then an exception will be thrown.
                 :return: A list of tuples of (NodeID, MutationID, "missingness" NodeID).
                 :rtype: List[Tuple[int, int, int]]
             )^")
@@ -495,23 +505,32 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: A list of tuples of (MutationID, NodeID, "missingness" NodeID).
                 :rtype: List[Tuple[int, int, int]]
             )^")
-        .def("get_mutations_for_node", &grgl::GRG::getMutationsForNode<grgl::MutationId>, py::arg("node_id"), R"^(
+        .def("get_mutations_for_node",
+             &grgl::GRG::getMutationsForNode<grgl::MutationId>,
+             py::arg("node_id"),
+             py::arg("allow_sort") = true,
+             R"^(
                 Get all the (zero or more) Mutations associated with the given NodeID.
 
                 :param node_id: The NodeID to get mutations for.
                 :type node_id: int
+                :param allow_sort: Allow the mutations-to-node mapping to be resorted; if false and the
+                    mapping is not sorted then an exception will be thrown.
                 :return: A list of MutationIDs.
                 :rtype: List[int]
             )^")
         .def("get_muts_and_miss_for_node",
              &grgl::GRG::getMutationsForNode<std::pair<grgl::MutationId, grgl::NodeID>>,
              py::arg("node_id"),
+             py::arg("allow_sort"),
              R"^(
                 Get all the (zero or more) Mutations associated with the given NodeID, and for
                 each Mutation the associated missingness node.
 
                 :param node_id: The NodeID to get mutations for.
                 :type node_id: int
+                :param allow_sort: Allow the mutations-to-node mapping to be resorted; if false and the
+                    mapping is not sorted then an exception will be thrown.
                 :return: A list of pairs, (MutationID, NodeID) where the NodeID is for the missingness node.
                 :rtype: List[Tuple[int, int]]
             )^")
@@ -534,12 +553,14 @@ PYBIND11_MODULE(_grgl, m) {
                 :type: pygrgl.Mutation
             )^")
 
-        .def("node_has_mutations", &grgl::GRG::nodeHasMutations, py::arg("node_id"), R"^(
+        .def("node_has_mutations", &grgl::GRG::nodeHasMutations, py::arg("node_id"), py::arg("allow_sort") = true, R"^(
                 Return true if there is one or more Mutations associated with the given
                 NodeID.
 
                 :param node_id: The NodeID to check for mutations.
                 :type node_id: int
+                :param allow_sort: Allow the mutations-to-node mapping to be resorted; if false and the
+                    mapping is not sorted then an exception will be thrown.
                 :return: True if the node has at least one mutation.
                 :rtype: bool
             )^")
@@ -1127,6 +1148,7 @@ PYBIND11_MODULE(_grgl, m) {
     )^");
 
     m.attr("INVALID_NODE") = grgl::INVALID_NODE_ID;
+    m.attr("INVALID_MUTATION") = grgl::INVALID_MUTATION_ID;
     m.attr("COAL_COUNT_NOT_SET") = grgl::COAL_COUNT_NOT_SET;
     m.attr("NO_UP_EDGES") = grgl::NO_UP_EDGES;
     m.attr("POPULATION_UNSPECIFIED") = grgl::POPULATION_UNSPECIFIED;
