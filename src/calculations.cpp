@@ -57,7 +57,9 @@ public:
                 samplesBeneath += m_samplesBeneath[child];
             }
             m_samplesBeneath[nodeId] = samplesBeneath;
-            release_assert(samplesBeneath <= grg->numSamples());
+            api_exc_check(samplesBeneath <= grg->numSamples(),
+                          "Malformed GRG: there are " << samplesBeneath << " beneath node " << nodeId
+                                                      << "; maximum allowed is " << grg->numSamples());
         } else if (dfsPass == grgl::DfsPass::DFS_PASS_NONE) {
             // Topological order must go up.
             release_assert(direction == grgl::TraversalDirection::DIRECTION_UP);

@@ -44,7 +44,7 @@ using MutableGRGPtr = std::shared_ptr<MutableGRG>;
 MutableGRGPtr convertTreeSeqToGRG(const tsk_treeseq_t* treeSeq,
                                   bool binaryMutations = false,
                                   bool useNodeTimes = false,
-                                  bool maintainTopology = false,
+                                  bool maintainTopology = true,
                                   bool computeCoals = false);
 
 } // namespace grgl

@@ -33,6 +33,7 @@
 #include <unordered_set>
 
 #include <tskit.h>
+#include <vector>
 
 #define TSKIT_OK_OR_THROW(ok, msg)                                                                                     \
     do {                                                                                                               \
@@ -210,6 +211,52 @@ private:
     std::vector<bool> m_pendingSplit;
 };
 
+static NodeID duplicateTopoAbove(TsToGrgContext& context,
+                                 MutableGRGPtr& grg,
+                                 const tsk_tree_t* tree,
+                                 const tsk_id_t tsChildMutNode,
+                                 const tsk_id_t tsParentMutNode) {
+    release_assert(tsChildMutNode != TSK_NULL);
+    release_assert(tsParentMutNode != TSK_NULL);
+
+    if (tsChildMutNode == tsParentMutNode) {
+        // When the nodes are the same, the parent mutation has no effect and we can just drop it.
+        return INVALID_NODE_ID;
+    }
+
+    // We traverse up the tskit tree, because the GRG is a multi-tree that may reflect multiple
+    // trees up to this point. This lets us restrict our search to a single path upwards.
+    tsk_id_t onPathChild = tsChildMutNode;
+    NodeID prevDupNode = INVALID_NODE_ID;
+    for (tsk_id_t node = tree->parent[tsChildMutNode]; node != TSK_NULL; node = tree->parent[node]) {
+        // The original nodes keep all the GRG<-->TS node mappings because they represent the true
+        // topology (they will be re-used by subsequent trees being converted). The "duplicated nodes"
+        // do not get added to the mapping, because they should never be reused, they are just representing
+        // a particular back-mutation scenario at a specific site.
+        const NodeID dupGrgNode = grg->makeNode();
+
+        // Only copy the edges for the OTHER paths, since the back mutation models a "set subtraction"
+        for (tsk_id_t offPathChild = tree->left_child[node]; offPathChild != TSK_NULL;
+             offPathChild = tree->right_sib[offPathChild]) {
+            if (offPathChild == onPathChild) {
+                continue;
+            }
+            const std::pair<NodeID, NodeIDList>& dupChildAndCoals = context.getLatestMappedNode(offPathChild);
+            grg->connect(dupGrgNode, dupChildAndCoals.first);
+        }
+        if (prevDupNode != INVALID_NODE_ID) {
+            grg->connect(dupGrgNode, prevDupNode);
+        }
+        prevDupNode = dupGrgNode;
+        onPathChild = node;
+
+        if (node == tsParentMutNode) {
+            return dupGrgNode;
+        }
+    }
+    release_assert(false);
+}
+
 // TODO make this non-recursive.
 static std::pair<NodeID, NodeIDList> addMutationFromTree(TsToGrgContext& context,
                                                          MutableGRGPtr& grg,
@@ -252,6 +299,39 @@ static std::pair<NodeID, NodeIDList> addMutationFromTree(TsToGrgContext& context
     }
     context.addNodeMapping(tsNodeId, newNodeId, uncoalesced);
     return {newNodeId, std::move(uncoalesced)};
+}
+
+using MutAndTSNode = std::pair<Mutation, tsk_id_t>;
+
+std::vector<MutAndTSNode> getMutationsForSite(const tsk_tree_t* currentTree,
+                                              const tsk_site_t* site,
+                                              const bool binaryMutations,
+                                              const bool useNodeTimes) {
+    std::vector<MutAndTSNode> result;
+    const std::string ancestralState = std::string(site->ancestral_state, site->ancestral_state_length);
+    for (tsk_size_t j = 0; j < site->mutations_length; j++) {
+        const tsk_id_t tsMutNode = site->mutations[j].node;
+        std::string derivedState =
+            std::string(site->mutations[j].derived_state, site->mutations[j].derived_state_length);
+        if (binaryMutations) {
+            if (derivedState != ancestralState) {
+                derivedState = Mutation::ALLELE_1;
+            } else {
+                // In the case that the tree sequence has recurrent mutations back to the reference
+                // allele, we need to still capture that. This makes comparison with other GRGs,
+                // such as from VCF, a pain, but there isn't a great alternative.
+                derivedState = Mutation::ALLELE_0;
+            }
+        }
+        double mutTime = site->mutations[j].time;
+        if (useNodeTimes) {
+            TSKIT_OK_OR_THROW(tsk_tree_get_time(currentTree, tsMutNode, &mutTime), "Failed to get node time");
+        }
+        Mutation theMutation =
+            Mutation((uint64_t)site->position, std::move(derivedState), ancestralState, (uint32_t)mutTime);
+        result.emplace_back(std::move(theMutation), tsMutNode);
+    }
+    return std::move(result);
 }
 
 MutableGRGPtr convertTreeSeqToGRG(
@@ -345,32 +425,42 @@ MutableGRGPtr convertTreeSeqToGRG(
         TSKIT_OK_OR_THROW(siteItResult, "Failed to get sites from tree");
         for (tsk_size_t i = 0; i < num_sites; i++) {
             const tsk_site_t* site = &sites[i];
-            std::string ancestralState = std::string(site->ancestral_state, site->ancestral_state_length);
+
+            // Copy the tskit nodes and tree paths related to Mutations into the GRG. Don't add the Mutations
+            // yet (see next step).
+            NodeIDList mutNodes;
+            std::vector<MutAndTSNode> muts = getMutationsForSite(&currentTree, site, binaryMutations, useNodeTimes);
+            for (const auto& mutAndNode : muts) {
+                const auto nodeAndCoals = addMutationFromTree(
+                    constructionContext, grg, treeSeq, &currentTree, mutAndNode.second, computeCoals);
+                const NodeID mutationNodeId = nodeAndCoals.first;
+                mutNodes.emplace_back(mutationNodeId);
+            }
+            // Duplicate the topology as needed for "nested" (back) Mutations, since the presence of
+            // the Mutation beneath another Mutation acts as "set subtraction" for the sample set
+            // beneath. The tskit way of storing this makes calculations complex, and GRG requires
+            // something simpler.
             for (tsk_size_t j = 0; j < site->mutations_length; j++) {
-                const tsk_id_t tsMutNode = site->mutations[j].node;
-                std::string derivedState =
-                    std::string(site->mutations[j].derived_state, site->mutations[j].derived_state_length);
-                if (binaryMutations) {
-                    if (derivedState != ancestralState) {
-                        derivedState = Mutation::ALLELE_1;
-                    } else {
-                        // In the case that the tree sequence has recurrent mutations back to the reference
-                        // allele, we need to still capture that. This makes comparison with other GRGs,
-                        // such as from VCF, a pain, but there isn't a great alternative.
-                        derivedState = Mutation::ALLELE_0;
+                const Mutation& mutation = muts.at(j).first;
+                NodeID mutationNodeId = mutNodes.at(j);
+                const tsk_id_t tsParentMutNode = site->mutations[j].node;
+                // Find the child (if any) of current mutation
+                tsk_id_t tsChildMutNode = TSK_NULL;
+                for (size_t k = 0; k < site->mutations_length; k++) {
+                    if (site->mutations[k].parent == site->mutations[j].id) {
+                        tsChildMutNode = site->mutations[k].node;
+                        break;
                     }
                 }
-                double mutTime = site->mutations[j].time;
-                if (useNodeTimes) {
-                    TSKIT_OK_OR_THROW(tsk_tree_get_time(&currentTree, tsMutNode, &mutTime), "Failed to get node time");
+                if (tsChildMutNode != TSK_NULL) {
+                    mutationNodeId =
+                        duplicateTopoAbove(constructionContext, grg, &currentTree, tsChildMutNode, tsParentMutNode);
                 }
-                const Mutation theMutation =
-                    Mutation((uint64_t)site->position, std::move(derivedState), ancestralState, (uint32_t)mutTime);
-                // Clients can pass a predicate that only includes certain mutations.
-                const auto nodeAndCoals =
-                    addMutationFromTree(constructionContext, grg, treeSeq, &currentTree, tsMutNode, computeCoals);
-                const NodeID mutationNodeId = nodeAndCoals.first;
-                grg->addMutation(theMutation, mutationNodeId);
+                // We skip mutations where the REF == ALT, because we have already accounted for any
+                // "subtractive effect" they had in the original tree.
+                if (mutation.getAllele() != mutation.getRefAllele()) {
+                    grg->addMutation(mutation, mutationNodeId);
+                }
             }
         }
 
