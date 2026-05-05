@@ -45,42 +45,40 @@ void GRG::removeMutation(const MutationId mutId, const NodeID nodeId) {
     m_mutations.ref(mutId) = Mutation();
 
     // Remove the node mapping.
-    if (nodeId != INVALID_NODE_ID) {
-        bool deleted = false;
-        if (!m_mutIdsByNodeId.empty()) {
-            const NodeAndMut query = {nodeId, 0};
-            auto mutIdIt = std::lower_bound(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end(), query);
-            while (mutIdIt != m_mutIdsByNodeId.end() && mutIdIt->first == nodeId) {
-                if (mutIdIt->second == mutId) {
-                    m_mutIdsByNodeId.erase(mutIdIt);
-                    deleted = true;
-                    break;
-                }
-                mutIdIt++;
+    bool deleted = false;
+    if (!m_mutIdsByNodeId.empty()) {
+        const NodeAndMut query = {nodeId, 0};
+        auto mutIdIt = std::lower_bound(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end(), query, NodeAndMutLt());
+        while (mutIdIt != m_mutIdsByNodeId.end() && mutIdIt->first == nodeId) {
+            if (mutIdIt->second == mutId) {
+                mutIdIt->second = INVALID_MUTATION_ID;
+                deleted = true;
+                break;
             }
-        } else {
-            const NodeMutMiss query = {nodeId, 0, 0};
-            auto mutIdIt = std::lower_bound(m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end(), query);
-            while (mutIdIt != m_mutIdsByNodeIdAndMiss.end() && std::get<0>(*mutIdIt) == nodeId) {
-                if (std::get<1>(*mutIdIt) == mutId) {
-                    m_mutIdsByNodeIdAndMiss.erase(mutIdIt);
-                    deleted = true;
-                    break;
-                }
-                mutIdIt++;
-            }
+            mutIdIt++;
         }
-        api_exc_check(deleted, "Could not find NodeId " << nodeId << " in mutation mapping");
+    } else {
+        const NodeMutMiss query = {nodeId, 0, 0};
+        auto mutIdIt =
+            std::lower_bound(m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end(), query, NodeMutMissLt());
+        while (mutIdIt != m_mutIdsByNodeIdAndMiss.end() && std::get<0>(*mutIdIt) == nodeId) {
+            if (std::get<1>(*mutIdIt) == mutId) {
+                std::get<1>(*mutIdIt) = INVALID_MUTATION_ID;
+                deleted = true;
+                break;
+            }
+            mutIdIt++;
+        }
     }
+    api_exc_check(deleted, "Could not find NodeId " << nodeId << " in mutation mapping");
     m_mutsAreOrdered = false;
 }
 
 MutationId GRG::addMutation(const Mutation& mutation, const NodeID nodeId, const NodeID missNodeId) {
     const MutationId mutId = m_mutations.size();
     m_mutations.push_back(mutation);
-    if (nodeId != INVALID_NODE_ID) {
-        release_assert(nodeId < this->numNodes());
-    }
+    release_assert(nodeId == INVALID_NODE_ID || nodeId < this->numNodes());
+    bool isSorted = this->m_mutIdsByNodeIdSorted;
     if (m_mutIdsByNodeIdAndMiss.empty() && missNodeId != INVALID_NODE_ID) {
         for (const auto& pair : m_mutIdsByNodeId) {
             m_mutIdsByNodeIdAndMiss.emplace_back(pair.first, pair.second, INVALID_NODE_ID);
@@ -89,11 +87,17 @@ MutationId GRG::addMutation(const Mutation& mutation, const NodeID nodeId, const
         m_mutIdsByNodeId.shrink_to_fit();
     }
     if (!m_mutIdsByNodeIdAndMiss.empty() || missNodeId != INVALID_NODE_ID) {
+        // It may stay sorted if the user is only adding Mutations to newly added nodes.
+        isSorted &= (m_mutIdsByNodeIdAndMiss.empty() ||
+                     (nodeId >= std::get<0>(m_mutIdsByNodeIdAndMiss.back()) && nodeId != INVALID_NODE_ID));
         m_mutIdsByNodeIdAndMiss.emplace_back(nodeId, mutId, missNodeId);
     } else {
+        // It may stay sorted if the user is only adding Mutations to newly added nodes.
+        isSorted &=
+            (m_mutIdsByNodeId.empty() || (nodeId >= m_mutIdsByNodeId.back().first && nodeId != INVALID_NODE_ID));
         this->m_mutIdsByNodeId.emplace_back(nodeId, mutId);
     }
-    this->m_mutIdsByNodeIdSorted = false;
+    this->m_mutIdsByNodeIdSorted = isSorted;
     if (m_mutsAreOrdered) {
         m_mutsAreOrdered = false;
     }
@@ -111,10 +115,12 @@ void GRG::sortMutations() {
             const MutationId newMutId = newMutations.size();
             const MutationId oldMutId = std::get<0>(triple);
             newMutations.push_back(std::move(m_mutations.atRef(oldMutId)));
+            const NodeID& mutNode = std::get<1>(triple);
+            const NodeID& missNode = std::get<2>(triple);
             if (hasMissing) {
-                mutIdsByNodeIdAndMiss.emplace_back(std::get<1>(triple), newMutId, std::get<2>(triple));
+                mutIdsByNodeIdAndMiss.emplace_back(mutNode, newMutId, missNode);
             } else {
-                mutIdsByNodeId.emplace_back(std::get<1>(triple), newMutId);
+                mutIdsByNodeId.emplace_back(mutNode, newMutId);
             }
         }
         m_mutations = std::move(newMutations);
@@ -199,6 +205,44 @@ template <> GRG::MutAndNode GRG::nodeAndMutAndMissToRevType(const GRG::NodeMutMi
 
 template <> GRG::MutNodeMiss GRG::nodeAndMutAndMissToRevType(const GRG::NodeMutMiss& triple) {
     return {std::get<1>(triple), std::get<0>(triple), std::get<2>(triple)};
+}
+
+void GRG::sortMutIdsByNodeID() {
+    if (!m_mutIdsByNodeId.empty()) {
+        release_assert(m_mutIdsByNodeIdAndMiss.empty());
+
+        // FIXME: the m_mutIdsByNodeId and m_mutIdsByNodeIdAndMiss need a better abstraction around
+        // them to avoid this yucky code. First we should convert from std::pair to std::tuple
+        // Compact out the soft-deleted Mutations
+        size_t j = 0;
+        for (size_t i = 0; i < m_mutIdsByNodeId.size(); i++) {
+            if (j != i) {
+                m_mutIdsByNodeId[j] = m_mutIdsByNodeId[i];
+            }
+            if (m_mutIdsByNodeId[i].second != INVALID_MUTATION_ID) {
+                j++;
+            }
+        }
+        m_mutIdsByNodeId.resize(j);
+
+        std::sort(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end(), NodeAndMutLt());
+    } else {
+
+        // Compact out the soft-deleted Mutations
+        size_t j = 0;
+        for (size_t i = 0; i < m_mutIdsByNodeIdAndMiss.size(); i++) {
+            if (j != i) {
+                m_mutIdsByNodeIdAndMiss[j] = m_mutIdsByNodeIdAndMiss[i];
+            }
+            if (std::get<1>(m_mutIdsByNodeIdAndMiss[i]) != INVALID_MUTATION_ID) {
+                j++;
+            }
+        }
+        m_mutIdsByNodeIdAndMiss.resize(j);
+
+        std::sort(m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end(), NodeMutMissLt());
+    }
+    m_mutIdsByNodeIdSorted = true;
 }
 
 void GRG::visitBfs(GRGVisitor& visitor,

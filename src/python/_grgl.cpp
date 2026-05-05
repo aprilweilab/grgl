@@ -49,7 +49,6 @@ namespace py = pybind11;
  */
 double SNPHWE(int64_t obs_hets, int64_t obs_hom1, int64_t obs_hom2);
 
-
 std::string mutStr(const grgl::Mutation& mut) {
     std::stringstream result;
     result << "<[pygrgl.Mutation] position=" << mut.getPosition() << ", ref_allele=" << mut.getRefAllele()
@@ -480,7 +479,9 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: The list of NodeIDs that are root nodes.
                 :rtype: List[int]
             )^")
-        .def("get_node_mutation_pairs", &grgl::GRG::getNodesAndMutations<grgl::GRG::NodeAndMut>, R"^(
+        .def("get_node_mutation_pairs",
+             &grgl::GRG::getNodesAndMutations<grgl::GRG::NodeAndMut>,
+             R"^(
                 Get a list of pairs (NodeID, MutationID). Each Mutation typically
                 is associated to a single Node, but rarely it can have more than one
                 Node, in which case it will show up in more than one pair.
@@ -516,7 +517,10 @@ PYBIND11_MODULE(_grgl, m) {
                 :return: A list of tuples of (MutationID, NodeID, "missingness" NodeID).
                 :rtype: List[Tuple[int, int, int]]
             )^")
-        .def("get_mutations_for_node", &grgl::GRG::getMutationsForNode<grgl::MutationId>, py::arg("node_id"), R"^(
+        .def("get_mutations_for_node",
+             &grgl::GRG::getMutationsForNode<grgl::MutationId>,
+             py::arg("node_id"),
+             R"^(
                 Get all the (zero or more) Mutations associated with the given NodeID.
 
                 :param node_id: The NodeID to get mutations for.
@@ -1132,6 +1136,7 @@ PYBIND11_MODULE(_grgl, m) {
     )^");
 
     m.attr("INVALID_NODE") = grgl::INVALID_NODE_ID;
+    m.attr("INVALID_MUTATION") = grgl::INVALID_MUTATION_ID;
     m.attr("COAL_COUNT_NOT_SET") = grgl::COAL_COUNT_NOT_SET;
     m.attr("NO_UP_EDGES") = grgl::NO_UP_EDGES;
     m.attr("POPULATION_UNSPECIFIED") = grgl::POPULATION_UNSPECIFIED;

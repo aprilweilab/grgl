@@ -372,7 +372,10 @@ public:
         return NodeAndMutIterator<T>(&m_mutIdsByNodeIdAndMiss);
     }
 
-    const Mutation& getMutationById(MutationId mutId) { return m_mutations.cref(mutId); }
+    const Mutation& getMutationById(MutationId mutId) {
+        api_exc_check(mutId < m_mutations.size(), "Invalid MutationID: " << mutId);
+        return m_mutations.cref(mutId);
+    }
 
     void setMutationById(MutationId mutId, Mutation mutation) { m_mutations.atRef(mutId) = std::move(mutation); }
 
@@ -384,7 +387,6 @@ public:
      * @return A vector of either MutationId or GRG::MutAndNode (a std::pair), depending on the template
      *      parameter.
      */
-
     template <typename T = MutationId> std::vector<T> getUnmappedMutations() {
         return getMutationsForNode<T>(INVALID_NODE_ID);
     }
@@ -405,34 +407,58 @@ public:
         std::vector<T> result;
         if (!m_mutIdsByNodeId.empty()) {
             const NodeAndMut query = {nodeId, 0};
-            auto mutIdIt = std::lower_bound(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end(), query);
+            auto mutIdIt = std::lower_bound(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end(), query, NodeAndMutLt());
             while (mutIdIt != m_mutIdsByNodeId.end() && mutIdIt->first == nodeId) {
-                result.push_back(std::move(nodeAndMutToType<T>(*mutIdIt)));
+                if (mutIdIt->second != INVALID_MUTATION_ID) {
+                    result.push_back(std::move(nodeAndMutToType<T>(*mutIdIt)));
+                }
                 mutIdIt++;
             }
         } else {
             const NodeMutMiss query = {nodeId, 0, 0};
-            auto mutIdIt = std::lower_bound(m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end(), query);
+            auto mutIdIt = std::lower_bound(
+                m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end(), query, NodeMutMissLt());
             while (mutIdIt != m_mutIdsByNodeIdAndMiss.end() && std::get<0>(*mutIdIt) == nodeId) {
-                result.push_back(nodeAndMutAndMissToType<T>(*mutIdIt));
+                if (std::get<1>(*mutIdIt) != INVALID_MUTATION_ID) {
+                    result.push_back(nodeAndMutAndMissToType<T>(*mutIdIt));
+                }
                 mutIdIt++;
             }
         }
         return std::move(result);
     }
 
+    /**
+     * Does the node have at least one Mutation associated with it?
+     *
+     * @param[in] nodeId The node to lookup.
+     * @return true if the node has one or more Mutation.
+     */
     bool nodeHasMutations(const NodeID nodeId) {
         if (!m_mutIdsByNodeIdSorted) {
             sortMutIdsByNodeID();
         }
         if (!m_mutIdsByNodeId.empty()) {
             const std::pair<NodeID, MutationId> query = {nodeId, 0};
-            const auto mutIdIt = std::lower_bound(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end(), query);
-            return mutIdIt != m_mutIdsByNodeId.end() && (mutIdIt->first == nodeId);
+            auto mutIdIt = std::lower_bound(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end(), query, NodeAndMutLt());
+            while (mutIdIt != m_mutIdsByNodeId.end() && mutIdIt->first == nodeId) {
+                if (mutIdIt->second != INVALID_MUTATION_ID) {
+                    return true;
+                }
+                mutIdIt++;
+            }
+            return false;
         }
         const std::tuple<NodeID, MutationId, NodeID> query = {nodeId, 0, 0};
-        const auto mutIdIt = std::lower_bound(m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end(), query);
-        return mutIdIt != m_mutIdsByNodeIdAndMiss.end() && std::get<0>(*mutIdIt) == nodeId;
+        auto mutIdIt =
+            std::lower_bound(m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end(), query, NodeMutMissLt());
+        while (mutIdIt != m_mutIdsByNodeIdAndMiss.end() && std::get<0>(*mutIdIt) == nodeId) {
+            if (std::get<1>(*mutIdIt) != INVALID_MUTATION_ID) {
+                return true;
+            }
+            mutIdIt++;
+        }
+        return false;
     }
 
     /**
@@ -448,11 +474,15 @@ public:
         std::vector<T> result;
         if (!m_mutIdsByNodeId.empty()) {
             for (const auto& nodeAndMutId : m_mutIdsByNodeId) {
-                result.emplace_back(std::move(nodeAndMutToRevType<T>(nodeAndMutId)));
+                if (nodeAndMutId.second != INVALID_MUTATION_ID) {
+                    result.emplace_back(std::move(nodeAndMutToRevType<T>(nodeAndMutId)));
+                }
             }
         } else {
             for (const auto& triple : m_mutIdsByNodeIdAndMiss) {
-                result.emplace_back(nodeAndMutAndMissToRevType<T>(triple));
+                if (std::get<1>(triple) != INVALID_MUTATION_ID) {
+                    result.emplace_back(nodeAndMutAndMissToRevType<T>(triple));
+                }
             }
         }
         sortByMutation(result);
@@ -743,6 +773,30 @@ public:
     virtual bool samplesAreOrdered() const { return true; }
 
 protected:
+    struct NodeAndMutLt {
+        bool operator()(const GRG::NodeAndMut& lhs, const GRG::NodeAndMut& rhs) const {
+            if (lhs.first == INVALID_NODE_ID && rhs.first != INVALID_NODE_ID) {
+                return true;
+            }
+            if (lhs.first != INVALID_NODE_ID && rhs.first == INVALID_NODE_ID) {
+                return false;
+            }
+            return lhs < rhs;
+        }
+    };
+
+    struct NodeMutMissLt {
+        bool operator()(const GRG::NodeMutMiss& lhs, const GRG::NodeMutMiss& rhs) const {
+            if (std::get<0>(lhs) == INVALID_NODE_ID && std::get<0>(rhs) != INVALID_NODE_ID) {
+                return true;
+            }
+            if (std::get<0>(lhs) != INVALID_NODE_ID && std::get<0>(rhs) == INVALID_NODE_ID) {
+                return false;
+            }
+            return lhs < rhs;
+        }
+    };
+
     void visitTopoNodeOrderedDense(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
     void visitTopoNodeOrderedSparse(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList);
     void populateMutMissInfo();
@@ -750,15 +804,7 @@ protected:
     // m_mutIdsByNodeId gets appended to and then sorted periodically or as needed, using this
     // function. We rarely need to lookup Mutations by NodeID while modifying a GRG, so this ends
     // up being about 3x smaller than the previous multimap<> and many times faster.
-    void sortMutIdsByNodeID() {
-        if (!m_mutIdsByNodeId.empty()) {
-            release_assert(m_mutIdsByNodeIdAndMiss.empty());
-            std::sort(m_mutIdsByNodeId.begin(), m_mutIdsByNodeId.end());
-        } else {
-            std::sort(m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end());
-        }
-        m_mutIdsByNodeIdSorted = true;
-    }
+    void sortMutIdsByNodeID();
 
     // Templated helpers for transparently handling the cases where we do or don't have
     // missing data nodes.
