@@ -577,6 +577,7 @@ void MutableGRG::compact(NodeID nodeId) {
         }
     } else {
         m_nodes.at(nodeId)->m_downEdges.shrink_to_fit();
+        m_nodes.at(nodeId)->m_upEdges.shrink_to_fit();
     }
 }
 

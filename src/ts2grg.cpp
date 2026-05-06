@@ -27,6 +27,7 @@
 #include <cassert>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <unordered_map>
@@ -49,25 +50,33 @@ namespace grgl {
 
 class TsToGrgContext {
 public:
-    explicit TsToGrgContext(size_t numNodes)
-        : m_pendingSplit(numNodes) {}
+    explicit TsToGrgContext(const size_t numNodes, MutableGRGPtr grg)
+        : m_argToGrg(numNodes, INVALID_NODE_ID),
+          m_pendingSplit(numNodes),
+          m_grg(std::move(grg)) {}
 
     void addNodeMapping(tsk_id_t tsNodeId, NodeID grgNodeId, NodeIDList uncoalesced = {}) {
-        auto resultPair =
-            this->m_argToGrg.insert(std::pair<tsk_id_t, std::list<NodeID>>(tsNodeId, std::list<NodeID>()));
-        resultPair.first->second.push_back(grgNodeId);
-        const auto insertResult = m_nodeToUncoalesced.emplace(grgNodeId, uncoalesced);
-        assert(insertResult.second);
+        // Once a GRG node is no longer on the "frontier", we compact the edge lists.
+        if (m_argToGrg.at(tsNodeId) != INVALID_NODE_ID) {
+            const NodeID oldGrgNode = m_argToGrg[tsNodeId];
+            m_grg->compact(oldGrgNode);
+        }
+        m_argToGrg[tsNodeId] = grgNodeId;
+        if (!uncoalesced.empty()) {
+            const auto insertResult = m_nodeToUncoalesced.emplace(grgNodeId, std::move(uncoalesced));
+            assert(insertResult.second);
+        }
     }
 
-    std::pair<NodeID, NodeIDList> getLatestMappedNode(tsk_id_t tsNodeId) {
-        auto findIt = this->m_argToGrg.find(tsNodeId);
-        const NodeID grgNode = findIt->second.back();
-        auto coalIt = m_nodeToUncoalesced.find(grgNode);
+    NodeID getLatestMappedNode(tsk_id_t tsNodeId) { return m_argToGrg.at(tsNodeId); }
+
+    const NodeIDList& getIndividualCoals(const NodeID grgNode) {
+        const static NodeIDList empty = {};
+        const auto coalIt = m_nodeToUncoalesced.find(grgNode);
         if (coalIt != m_nodeToUncoalesced.end()) {
-            return {grgNode, coalIt->second};
+            return coalIt->second;
         }
-        return {grgNode, {}};
+        return empty;
     }
 
     inline bool isPendingSplit(const tsk_id_t tsNodeId) {
@@ -77,10 +86,7 @@ public:
         return false;
     }
 
-    inline bool hasExistingNode(const tsk_id_t tsNodeId) {
-        auto itExists = m_argToGrg.find(tsNodeId);
-        return itExists != m_argToGrg.end();
-    }
+    inline bool hasExistingNode(const tsk_id_t tsNodeId) { return (m_argToGrg.at(tsNodeId) != INVALID_NODE_ID); }
 
     inline void removePendingSplit(const tsk_id_t tsNodeId) {
         if (tsNodeId < m_pendingSplit.size()) {
@@ -92,9 +98,8 @@ public:
         m_pendingSplit.at(tsNodeId) = true;
         // When we mark a node for splitting, the coalescence information at that node (as far as
         // which samples have not yet coalesced) is invalidated.
-        auto itGrgNode = m_argToGrg.find(tsNodeId);
-        if (itGrgNode != m_argToGrg.end()) {
-            auto coalIt = m_nodeToUncoalesced.find(itGrgNode->second.back());
+        if (m_argToGrg.at(tsNodeId) != INVALID_NODE_ID) {
+            auto coalIt = m_nodeToUncoalesced.find(m_argToGrg.at(tsNodeId));
             if (coalIt != m_nodeToUncoalesced.end()) {
                 m_nodeToUncoalesced.erase(coalIt);
             }
@@ -162,8 +167,8 @@ public:
         return nodeA;
     }
 
-    void markPendingUntilMRCA(const tsk_tree_t* tree, const std::list<tsk_id_t>& mrcaLeaves) {
-        std::list<tsk_id_t> workList;
+    void markPendingUntilMRCA(const tsk_tree_t* tree, const std::vector<tsk_id_t>& mrcaLeaves) {
+        std::vector<tsk_id_t> workList;
         for (const tsk_id_t node : mrcaLeaves) {
             if (!tsIsDisconnected(tree, node)) {
                 workList.push_back(node);
@@ -179,7 +184,7 @@ public:
         }
     }
 
-    void markPendingUntilRoot(const tsk_tree_t* tree, const std::list<tsk_id_t>& leaves) {
+    void markPendingUntilRoot(const tsk_tree_t* tree, const std::vector<tsk_id_t>& leaves) {
         std::unordered_set<tsk_id_t> seen;
         for (const tsk_id_t node : leaves) {
             bool isSample = true;
@@ -202,8 +207,9 @@ public:
     }
 
 private:
+    MutableGRGPtr m_grg;
     // Map from tskit ID to GRG IDs, for nodes.
-    std::unordered_map<tsk_id_t, std::list<NodeID>> m_argToGrg;
+    NodeIDList m_argToGrg;
     // Map from GRG node to a list of uncoalesced individuals at that node.
     std::unordered_map<NodeID, NodeIDList> m_nodeToUncoalesced;
     // Position "i" being true means that tskit node with ID "i" will be duplicated on
@@ -241,8 +247,8 @@ static NodeID duplicateTopoAbove(TsToGrgContext& context,
             if (offPathChild == onPathChild) {
                 continue;
             }
-            const std::pair<NodeID, NodeIDList>& dupChildAndCoals = context.getLatestMappedNode(offPathChild);
-            grg->connect(dupGrgNode, dupChildAndCoals.first);
+            NodeID dupChild = context.getLatestMappedNode(offPathChild);
+            grg->connect(dupGrgNode, dupChild);
         }
         if (prevDupNode != INVALID_NODE_ID) {
             grg->connect(dupGrgNode, prevDupNode);
@@ -258,12 +264,12 @@ static NodeID duplicateTopoAbove(TsToGrgContext& context,
 }
 
 // TODO make this non-recursive.
-static std::pair<NodeID, NodeIDList> addMutationFromTree(TsToGrgContext& context,
-                                                         MutableGRGPtr& grg,
-                                                         const tsk_treeseq_t* treeSeq,
-                                                         const tsk_tree_t* tree,
-                                                         const tsk_id_t tsNodeId,
-                                                         const bool computeCoals = false) {
+static NodeID addMutationFromTree(TsToGrgContext& context,
+                                  MutableGRGPtr& grg,
+                                  const tsk_treeseq_t* treeSeq,
+                                  const tsk_tree_t* tree,
+                                  const tsk_id_t tsNodeId,
+                                  const bool computeCoals = false) {
     const bool isSample = tsk_treeseq_is_sample(treeSeq, tsNodeId);
     const bool canReuse = context.hasExistingNode(tsNodeId) && (isSample || !context.isPendingSplit(tsNodeId));
     if (canReuse) {
@@ -277,12 +283,11 @@ static std::pair<NodeID, NodeIDList> addMutationFromTree(TsToGrgContext& context
     NodeID newNodeId = grg->makeNode();
     for (tsk_id_t childNodeId = tree->left_child[tsNodeId]; childNodeId != TSK_NULL;
          childNodeId = tree->right_sib[childNodeId]) {
-        const auto childPair = addMutationFromTree(context, grg, treeSeq, tree, childNodeId, computeCoals);
-        const NodeID childId = childPair.first;
+        const NodeID childId = addMutationFromTree(context, grg, treeSeq, tree, childNodeId, computeCoals);
         grg->connect(newNodeId, childId);
         if (computeCoals) {
-            for (NodeID indivId : childPair.second) {
-                auto insertPair = uncoalescedSet.emplace(indivId);
+            for (NodeID indivId : context.getIndividualCoals(childId)) {
+                const auto insertPair = uncoalescedSet.emplace(indivId);
                 if (!insertPair.second) {
                     coalCount++; // Coalescence!
                     uncoalescedSet.erase(insertPair.first);
@@ -297,8 +302,8 @@ static std::pair<NodeID, NodeIDList> addMutationFromTree(TsToGrgContext& context
         }
         grg->setNumIndividualCoals(newNodeId, coalCount);
     }
-    context.addNodeMapping(tsNodeId, newNodeId, uncoalesced);
-    return {newNodeId, std::move(uncoalesced)};
+    context.addNodeMapping(tsNodeId, newNodeId, std::move(uncoalesced));
+    return newNodeId;
 }
 
 using MutAndTSNode = std::pair<Mutation, tsk_id_t>;
@@ -334,15 +339,23 @@ std::vector<MutAndTSNode> getMutationsForSite(const tsk_tree_t* currentTree,
     return std::move(result);
 }
 
-MutableGRGPtr convertTreeSeqToGRG(
-    const tsk_treeseq_t* treeSeq, bool binaryMutations, bool useNodeTimes, bool maintainTopology, bool computeCoals) {
+MutableGRGPtr convertTreeSeqToGRG(const tsk_treeseq_t* treeSeq,
+                                  bool binaryMutations,
+                                  bool useNodeTimes,
+                                  bool maintainTopology,
+                                  bool computeCoals,
+                                  std::pair<size_t, size_t> treeRange) {
     const size_t initialNodeCount = tsk_treeseq_get_num_nodes(treeSeq);
     const size_t numSamples = tsk_treeseq_get_num_samples(treeSeq);
     const size_t numIndividuals = tsk_treeseq_get_num_individuals(treeSeq);
     const size_t ploidy = (numIndividuals == 0) ? 2 : (numSamples / numIndividuals);
     MutableGRGPtr grg = std::make_shared<MutableGRG>(numSamples, static_cast<uint16_t>(ploidy), initialNodeCount);
     tsk_tree_t currentTree;
-    TsToGrgContext constructionContext(initialNodeCount);
+    TsToGrgContext constructionContext(initialNodeCount, grg);
+
+    if (treeRange.first == treeRange.second) {
+        treeRange.second = std::numeric_limits<size_t>::max();
+    }
 
     // Copy over the population data from the samples.
     const tsk_size_t numPopulations = tsk_treeseq_get_num_populations(treeSeq);
@@ -396,19 +409,28 @@ MutableGRGPtr convertTreeSeqToGRG(
         throw ApiMisuseFailure("tree-sequences with non-consecutive, non-leafy samples cannot be converted to GRG.");
     }
 
+    // FIXME we could probably save about 4x the RAM if we converted the edge spans into tree indices
+    // and used a dense vector from tree index to node information.
+    // I think the main RAM usage right now is the MutableGRG itself, because we end up creating a
+    // ton of Nodes that are then simplified later. The best way to solve this is probably to do the
+    // TS->GRG conversion is sections (by genome range) and then merge them after simplification.
+    // This would also allow for parallel conversion.
+
     // Compute which nodes are involved in edge additions/deletions for each interval.
-    std::unordered_map<double, std::list<tsk_id_t>> positionToModifiedNodes;
+    std::unordered_map<double, std::vector<tsk_id_t>> positionToModifiedNodes;
     for (size_t i = 0; i < treeSeq->tables->edges.num_rows; i++) {
         const double edgeAddedPosition = treeSeq->tables->edges.left[i];
         const double edgeDeletedPosition = treeSeq->tables->edges.right[i];
+        const tsk_id_t parent = treeSeq->tables->edges.parent[i];
+        const tsk_id_t child = treeSeq->tables->edges.child[i];
         auto addIt = positionToModifiedNodes.insert(
-            std::pair<double, std::list<tsk_id_t>>(edgeAddedPosition, std::list<tsk_id_t>()));
-        addIt.first->second.push_back(treeSeq->tables->edges.parent[i]);
-        addIt.first->second.push_back(treeSeq->tables->edges.child[i]);
+            std::pair<double, std::vector<tsk_id_t>>(edgeAddedPosition, std::vector<tsk_id_t>()));
+        addIt.first->second.push_back(parent);
+        addIt.first->second.push_back(child);
         auto deleteIt = positionToModifiedNodes.insert(
-            std::pair<double, std::list<tsk_id_t>>(edgeDeletedPosition, std::list<tsk_id_t>()));
-        deleteIt.first->second.push_back(treeSeq->tables->edges.parent[i]);
-        deleteIt.first->second.push_back(treeSeq->tables->edges.child[i]);
+            std::pair<double, std::vector<tsk_id_t>>(edgeDeletedPosition, std::vector<tsk_id_t>()));
+        deleteIt.first->second.push_back(parent);
+        deleteIt.first->second.push_back(child);
     }
 
     size_t treeCount = 0;
@@ -416,66 +438,67 @@ MutableGRGPtr convertTreeSeqToGRG(
     int treeItResult = 0;
     for (treeItResult = tsk_tree_first(&currentTree); TSK_TREE_OK == treeItResult;
          treeItResult = tsk_tree_next(&currentTree)) {
-        const double startOfTree = currentTree.interval.left;
-        const double endOfTree = currentTree.interval.right;
-        // Add all the new mutations to the GRG, and the relevant nodes/edges.
-        tsk_size_t num_sites = 0;
-        const tsk_site_t* sites = nullptr;
-        int siteItResult = tsk_tree_get_sites(&currentTree, &sites, &num_sites);
-        TSKIT_OK_OR_THROW(siteItResult, "Failed to get sites from tree");
-        for (tsk_size_t i = 0; i < num_sites; i++) {
-            const tsk_site_t* site = &sites[i];
+        if (treeCount >= treeRange.first && treeCount < treeRange.second) {
+            const double endOfTree = currentTree.interval.right;
+            // Add all the new mutations to the GRG, and the relevant nodes/edges.
+            tsk_size_t num_sites = 0;
+            const tsk_site_t* sites = nullptr;
+            int siteItResult = tsk_tree_get_sites(&currentTree, &sites, &num_sites);
+            TSKIT_OK_OR_THROW(siteItResult, "Failed to get sites from tree");
+            for (tsk_size_t i = 0; i < num_sites; i++) {
+                const tsk_site_t* site = &sites[i];
 
-            // Copy the tskit nodes and tree paths related to Mutations into the GRG. Don't add the Mutations
-            // yet (see next step).
-            NodeIDList mutNodes;
-            std::vector<MutAndTSNode> muts = getMutationsForSite(&currentTree, site, binaryMutations, useNodeTimes);
-            for (const auto& mutAndNode : muts) {
-                const auto nodeAndCoals = addMutationFromTree(
-                    constructionContext, grg, treeSeq, &currentTree, mutAndNode.second, computeCoals);
-                const NodeID mutationNodeId = nodeAndCoals.first;
-                mutNodes.emplace_back(mutationNodeId);
-            }
-            // Duplicate the topology as needed for "nested" (back) Mutations, since the presence of
-            // the Mutation beneath another Mutation acts as "set subtraction" for the sample set
-            // beneath. The tskit way of storing this makes calculations complex, and GRG requires
-            // something simpler.
-            for (tsk_size_t j = 0; j < site->mutations_length; j++) {
-                const Mutation& mutation = muts.at(j).first;
-                NodeID mutationNodeId = mutNodes.at(j);
-                const tsk_id_t tsParentMutNode = site->mutations[j].node;
-                // Find the child (if any) of current mutation
-                tsk_id_t tsChildMutNode = TSK_NULL;
-                for (size_t k = 0; k < site->mutations_length; k++) {
-                    if (site->mutations[k].parent == site->mutations[j].id) {
-                        tsChildMutNode = site->mutations[k].node;
-                        break;
+                // Copy the tskit nodes and tree paths related to Mutations into the GRG. Don't add the Mutations
+                // yet (see next step).
+                NodeIDList mutNodes;
+                std::vector<MutAndTSNode> muts = getMutationsForSite(&currentTree, site, binaryMutations, useNodeTimes);
+                for (const auto& mutAndNode : muts) {
+                    const NodeID mutationNodeId = addMutationFromTree(
+                        constructionContext, grg, treeSeq, &currentTree, mutAndNode.second, computeCoals);
+                    mutNodes.emplace_back(mutationNodeId);
+                }
+                // Duplicate the topology as needed for "nested" (back) Mutations, since the presence of
+                // the Mutation beneath another Mutation acts as "set subtraction" for the sample set
+                // beneath. The tskit way of storing this makes calculations complex, and GRG requires
+                // something simpler.
+                for (tsk_size_t j = 0; j < site->mutations_length; j++) {
+                    const Mutation& mutation = muts.at(j).first;
+                    NodeID mutationNodeId = mutNodes.at(j);
+                    const tsk_id_t tsParentMutNode = site->mutations[j].node;
+                    // Find the child (if any) of current mutation
+                    tsk_id_t tsChildMutNode = TSK_NULL;
+                    for (size_t k = 0; k < site->mutations_length; k++) {
+                        if (site->mutations[k].parent == site->mutations[j].id) {
+                            tsChildMutNode = site->mutations[k].node;
+                            break;
+                        }
+                    }
+                    if (tsChildMutNode != TSK_NULL) {
+                        mutationNodeId =
+                            duplicateTopoAbove(constructionContext, grg, &currentTree, tsChildMutNode, tsParentMutNode);
+                    }
+                    // We skip mutations where the REF == ALT, because we have already accounted for any
+                    // "subtractive effect" they had in the original tree.
+                    if (mutation.getAllele() != mutation.getRefAllele()) {
+                        grg->addMutation(mutation, mutationNodeId);
                     }
                 }
-                if (tsChildMutNode != TSK_NULL) {
-                    mutationNodeId =
-                        duplicateTopoAbove(constructionContext, grg, &currentTree, tsChildMutNode, tsParentMutNode);
-                }
-                // We skip mutations where the REF == ALT, because we have already accounted for any
-                // "subtractive effect" they had in the original tree.
-                if (mutation.getAllele() != mutation.getRefAllele()) {
-                    grg->addMutation(mutation, mutationNodeId);
-                }
             }
-        }
 
-        // Now get the set of nodes that will be affected by edge additions/deletions between
-        // the current tree and the next one. We then take the MRCA of these nodes and mark
-        // everything in between as needing-to-be-split.
-        const auto modifiedNodesIt = positionToModifiedNodes.find(endOfTree);
-        if (modifiedNodesIt != positionToModifiedNodes.end()) {
-            if (maintainTopology) {
-                constructionContext.markPendingUntilRoot(&currentTree, modifiedNodesIt->second);
+            // Now get the set of nodes that will be affected by edge additions/deletions between
+            // the current tree and the next one. We then take the MRCA of these nodes and mark
+            // everything in between as needing-to-be-split.
+            const auto modifiedNodesIt = positionToModifiedNodes.find(endOfTree);
+            if (modifiedNodesIt != positionToModifiedNodes.end()) {
+                if (maintainTopology) {
+                    constructionContext.markPendingUntilRoot(&currentTree, modifiedNodesIt->second);
+                } else {
+                    constructionContext.markPendingUntilMRCA(&currentTree, modifiedNodesIt->second);
+                }
+                positionToModifiedNodes.erase(modifiedNodesIt);
             } else {
-                constructionContext.markPendingUntilMRCA(&currentTree, modifiedNodesIt->second);
+                std::cerr << "Missing modification between trees at " << endOfTree << std::endl;
             }
-        } else {
-            std::cerr << "Missing modification between trees at " << endOfTree << std::endl;
         }
         treeCount++;
     }

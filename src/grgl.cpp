@@ -253,6 +253,7 @@ int main(int argc, char** argv) {
             std::cerr << e.what();
             return 2;
         }
+        TSKIT_OK_OR_EXIT(tsk_treeseq_free(&treeSeq), "Failed to free tree-seq");
     } else if (ends_with(*infile, ".grg")) {
         const bool mutableNeeded = (bool)mapMutations || (bool)reduce;
         if (mutableNeeded) {

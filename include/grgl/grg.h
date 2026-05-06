@@ -972,7 +972,7 @@ public:
             throw ApiMisuseFailure(ssErr.str().c_str());
         }
         for (size_t i = 0; i < count; i++) {
-            this->m_nodes.push_back(std::make_shared<GRGNode>());
+            this->m_nodes.push_back(std::unique_ptr<GRGNode>(new GRGNode()));
         }
         if (!forceOrdered) {
             this->m_nodesAreOrdered = false;
@@ -1043,9 +1043,9 @@ public:
      *
      * @param[in] nodeId The ID of the node in question.
      */
-    GRGNodePtr getNode(const NodeID nodeId) const {
+    GRGNode& getNode(const NodeID nodeId) const {
         const NodeID checkId = removeMarks(nodeId);
-        return this->m_nodes.at(checkId);
+        return *this->m_nodes.at(checkId);
     }
 
     std::vector<NodeIDSizeT> topologicalSort(TraversalDirection direction) override;
@@ -1065,7 +1065,7 @@ public:
 
 private:
     // The list of nodes. The node's position in this vector must match its ID.
-    std::vector<GRGNodePtr> m_nodes;
+    std::vector<std::unique_ptr<GRGNode>> m_nodes;
 
     friend MutableGRGPtr readMutableGrg(IFSPointer&, bool);
 
