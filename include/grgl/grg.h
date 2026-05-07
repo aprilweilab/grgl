@@ -576,6 +576,18 @@ public:
      */
     void sortMutations();
 
+    /**
+     * Check whether the Mutations in GRG are unique: there is a single Mutation (with MutationId)
+     * for each unique (position, ref allele, alt allele) combination.
+     * Since the mapping between MutationId and nodes is many-to-1 (not many-to-many), having unique
+     * mutations means that each Mutation is associated with a single node in the graph. When a GRG
+     * is constructed via `grg construct` this is always true of the resulting GRG. When a GRG
+     * is constructed arbitrarily from the API, it may not be true.
+     *
+     * This operation is O(M), where M is the number of mutations.
+     */
+    bool mutationsAreUnique() const;
+
     // Internal enum used for determining the node value initialization behavior of matrix multiplication.
     enum NodeInitEnum {
         NIE_ZERO = 0,   // Zero values.
@@ -1004,6 +1016,20 @@ public:
      * @param[in] tgtId The ID of the target node.
      */
     bool disconnect(NodeID srcId, NodeID tgtId);
+
+    /**
+     * Ensure that every Mutation in the GRG is unique: there is a single Mutation (with MutationId)
+     * for each unique (position, ref allele, alt allele) combination. It does so by finding duplicate
+     * Mutations, adding a new node that becomes a parent to them, and creating a new (single) mutation
+     * representing them all. At the end of this method, the mutations will be unordered, and either
+     * serializing the GRG to disk or calling sortMutations() will be necessary to get the new, correct
+     * MutationIds.
+     *
+     * This operation is O(M), where M is the number of mutations.
+     *
+     * @return The number of nodes that were added to the graph.
+     */
+    NodeIDSizeT ensureUniqueMutations();
 
     /**
      * Merge one or more GRGs into this one. Only succeeds if all GRGs have the same number of

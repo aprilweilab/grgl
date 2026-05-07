@@ -19,6 +19,7 @@
 #include "grgl/grg.h"
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
+#include "grgl/node_data.h"
 #include "tskit/core.h"
 #include "tskit/trees.h"
 #include "tskit_util.h"
@@ -77,6 +78,47 @@ public:
             return coalIt->second;
         }
         return empty;
+    }
+
+    void countCoals(NodeID parent, const NodeIDList& children, bool useExisting) {
+        release_assert(!children.empty());
+        // Fast paths: just copy, no coalescences can happen.
+        if (children.size() == 1 and !useExisting) {
+            m_nodeToUncoalesced.emplace(parent, this->getIndividualCoals(children.front()));
+            m_grg->setNumIndividualCoals(parent, 0);
+            return;
+        }
+
+        NodeIDSizeT coalCount = 0;
+        NodeIDSet uncoalescedSet;
+        if (useExisting) {
+            const NodeIDSizeT existing = m_grg->getNumIndividualCoals(parent);
+            if (existing != COAL_COUNT_NOT_SET) {
+                coalCount += existing;
+            }
+            const auto coalIt = m_nodeToUncoalesced.find(parent);
+            if (coalIt != m_nodeToUncoalesced.end()) {
+                for (NodeID indiv : coalIt->second) {
+                    uncoalescedSet.emplace(indiv);
+                }
+            }
+        }
+        for (NodeID childId : children) {
+            for (NodeID indivId : this->getIndividualCoals(childId)) {
+                const auto insertPair = uncoalescedSet.emplace(indivId);
+                if (!insertPair.second) {
+                    coalCount++; // Coalescence!
+                    uncoalescedSet.erase(insertPair.first);
+                }
+            }
+        }
+        if (!uncoalescedSet.empty()) {
+            const auto insertResult = m_nodeToUncoalesced.emplace(parent, NodeIDList());
+            for (NodeID indivId : uncoalescedSet) {
+                insertResult.first->second.emplace_back(indivId);
+            }
+        }
+        m_grg->setNumIndividualCoals(parent, coalCount);
     }
 
     inline bool isPendingSplit(const tsk_id_t tsNodeId) {
@@ -220,47 +262,144 @@ private:
 static NodeID duplicateTopoAbove(TsToGrgContext& context,
                                  MutableGRGPtr& grg,
                                  const tsk_tree_t* tree,
-                                 const tsk_id_t tsChildMutNode,
-                                 const tsk_id_t tsParentMutNode) {
-    release_assert(tsChildMutNode != TSK_NULL);
+                                 const std::unordered_set<tsk_id_t>& tsChildMutNodes,
+                                 const tsk_id_t tsParentMutNode,
+                                 const bool computeCoals) {
+    release_assert(!tsChildMutNodes.empty());
     release_assert(tsParentMutNode != TSK_NULL);
 
-    if (tsChildMutNode == tsParentMutNode) {
-        // When the nodes are the same, the parent mutation has no effect and we can just drop it.
-        return INVALID_NODE_ID;
-    }
-
-    // We traverse up the tskit tree, because the GRG is a multi-tree that may reflect multiple
-    // trees up to this point. This lets us restrict our search to a single path upwards.
-    tsk_id_t onPathChild = tsChildMutNode;
-    NodeID prevDupNode = INVALID_NODE_ID;
-    for (tsk_id_t node = tree->parent[tsChildMutNode]; node != TSK_NULL; node = tree->parent[node]) {
-        // The original nodes keep all the GRG<-->TS node mappings because they represent the true
-        // topology (they will be re-used by subsequent trees being converted). The "duplicated nodes"
-        // do not get added to the mapping, because they should never be reused, they are just representing
-        // a particular back-mutation scenario at a specific site.
-        const NodeID dupGrgNode = grg->makeNode();
-
-        // Only copy the edges for the OTHER paths, since the back mutation models a "set subtraction"
-        for (tsk_id_t offPathChild = tree->left_child[node]; offPathChild != TSK_NULL;
-             offPathChild = tree->right_sib[offPathChild]) {
-            if (offPathChild == onPathChild) {
-                continue;
-            }
-            NodeID dupChild = context.getLatestMappedNode(offPathChild);
-            grg->connect(dupGrgNode, dupChild);
+    // We duplicate every node between the children and the parent Mutation. There can be multiple
+    // children, and they can share paths to the parent, so we need to make sure we only dup each
+    // node once.
+    std::unordered_map<tsk_id_t, NodeID> dupedNodes;
+    auto getDupedGRGNode = [&](tsk_id_t tsNode, bool& create) {
+        auto dupIt = dupedNodes.find(tsNode);
+        if (dupIt != dupedNodes.end()) {
+            create = false;
+            return dupIt->second;
         }
-        if (prevDupNode != INVALID_NODE_ID) {
-            grg->connect(dupGrgNode, prevDupNode);
-        }
-        prevDupNode = dupGrgNode;
-        onPathChild = node;
-
-        if (node == tsParentMutNode) {
+        if (create) {
+            const NodeID dupGrgNode = grg->makeNode();
+            dupedNodes.emplace(tsNode, dupGrgNode);
             return dupGrgNode;
         }
+        return INVALID_NODE_ID;
+    };
+
+    /* We duplicate nodes between children and parent, and then connect to the siblings of the nodes
+       along this path.  Example:
+                                        a  (parent)
+                                      /   \
+                          (child 1)  b     c
+                                         /   \
+                                        d     e  (child 2)
+       Nodes on the path: c, a
+       Siblings to connect: d
+
+       The topology stays exactly the same as shown for the child mutations purposes (and nodes above
+       "a"). However, for the parent "a" we create an alternate topology off to the side. In this alternate
+       topology, the edges a->b and c->e do not exist, so the only coalescence counting we need to do is
+       from "d" upwards. More generally: only collect coalescences from siblings and propagate them upward.
+    */
+
+    // Pass 1: Duplicate all nodes between the children and the parent. We have to do this first, because
+    // when there are multiple children they can have arbitrary positions on the tree and we don't know how
+    // they relate to each other. We only create edges between duplicated nodes, not other nodes.
+    for (tsk_id_t tsChildMutNode : tsChildMutNodes) {
+        // When the nodes are the same, the parent mutation has no effect and we can just drop it.
+        if (tsChildMutNode == tsParentMutNode) {
+            continue;
+        }
+        bool prevJustCreated = false;
+        NodeID prevDupNode = INVALID_NODE_ID;
+        for (tsk_id_t node = tree->parent[tsChildMutNode]; node != TSK_NULL; node = tree->parent[node]) {
+            bool create = true;
+            const NodeID dupNode = getDupedGRGNode(node, create);
+            release_assert(dupNode != INVALID_NODE_ID);
+            // If the previously duplicated node on this path was just created, then add an edge to it.
+            if (prevDupNode != INVALID_NODE_ID && prevJustCreated) {
+                grg->connect(dupNode, prevDupNode);
+            }
+            prevDupNode = dupNode;
+            prevJustCreated = create;
+            if (node == tsParentMutNode) {
+                break;
+            }
+        }
     }
-    release_assert(false);
+
+    // Pass 2: Now we have all the necessary duplicated nodes, we can connect them up any non-duplicated
+    // nodes that we need (namely: siblings to the child mutations or duplicated nodes)
+    NodeIDSet done;
+    bool shouldCreate = false;
+    for (tsk_id_t tsChildMutNode : tsChildMutNodes) {
+        // When the nodes are the same, the parent mutation has no effect and we can just drop it.
+        if (tsChildMutNode == tsParentMutNode) {
+            continue;
+        }
+
+        // We traverse up the tskit tree, instead of the GRG (which is a multi-tree that may reflect multiple
+        // trees up to this point). This lets us restrict our search to a single path upwards.
+        for (tsk_id_t node = tree->parent[tsChildMutNode]; node != TSK_NULL; node = tree->parent[node]) {
+            // This will return the duplicated node if present, or INVALID_NODE_ID otherwise.
+            release_assert(shouldCreate == false);
+            const NodeID dupNode = getDupedGRGNode(node, shouldCreate);
+            release_assert(dupNode != INVALID_NODE_ID);
+
+            // Only add edges once.
+            if (done.find(dupNode) == done.end()) {
+                // We want to create edges between the duplicated node and any non-duplicated node that does
+                // not correspond to a child Mutation. The duplicated nodes represent all paths from the children
+                // mutations to the parent mutation.
+                for (tsk_id_t nonDupChild = tree->left_child[node]; nonDupChild != TSK_NULL;
+                     nonDupChild = tree->right_sib[nonDupChild]) {
+                    // Skip child mutation nodes.
+                    if (tsChildMutNodes.find(nonDupChild) != tsChildMutNodes.end()) {
+                        continue;
+                    }
+                    // Skip edges to already-duplicated nodes
+                    release_assert(shouldCreate == false);
+                    const NodeID checkForDup = getDupedGRGNode(nonDupChild, shouldCreate);
+                    if (checkForDup != INVALID_NODE_ID) {
+                        continue;
+                    }
+                    const NodeID nonDupChildGRG = context.getLatestMappedNode(nonDupChild);
+                    grg->connect(dupNode, nonDupChildGRG);
+                }
+                done.emplace(dupNode);
+            }
+            // If we're computing coalescences, we have to do it in an "update" fashion, since each node
+            // could be visited >1 time (we don't have a topological order...)
+            if (computeCoals) {
+                context.countCoals(dupNode, grg->getDownEdges(dupNode), true);
+            }
+            if (node == tsParentMutNode) {
+                break;
+            }
+        }
+    }
+    release_assert(shouldCreate == false);
+    return getDupedGRGNode(tsParentMutNode, shouldCreate);
+}
+
+// Given recurrent mutations, combine the nodes into a single parent node and a single Mutation
+static NodeID combineMutations(TsToGrgContext& context,
+                               MutableGRGPtr& grg,
+                               const NodeIDList& mutNodes,
+                               const Mutation& mutation,
+                               const bool computeCoals) {
+    release_assert(mutNodes.size() >= 2);
+    const NodeID newNode = grg->makeNode();
+    for (const auto& node : mutNodes) {
+        if (node != INVALID_NODE_ID) {
+            grg->connect(newNode, node);
+        }
+    }
+    grg->addMutation(mutation, newNode);
+    if (computeCoals) {
+        context.countCoals(newNode, mutNodes, false);
+    }
+    return newNode;
 }
 
 // TODO make this non-recursive.
@@ -461,26 +600,37 @@ MutableGRGPtr convertTreeSeqToGRG(const tsk_treeseq_t* treeSeq,
                 // the Mutation beneath another Mutation acts as "set subtraction" for the sample set
                 // beneath. The tskit way of storing this makes calculations complex, and GRG requires
                 // something simpler.
+                std::unordered_map<Mutation, NodeIDList> mutToNodes;
                 for (tsk_size_t j = 0; j < site->mutations_length; j++) {
-                    const Mutation& mutation = muts.at(j).first;
                     NodeID mutationNodeId = mutNodes.at(j);
                     const tsk_id_t tsParentMutNode = site->mutations[j].node;
                     // Find the child (if any) of current mutation
-                    tsk_id_t tsChildMutNode = TSK_NULL;
+                    std::unordered_set<tsk_id_t> tsChildMutNodes;
                     for (size_t k = 0; k < site->mutations_length; k++) {
                         if (site->mutations[k].parent == site->mutations[j].id) {
-                            tsChildMutNode = site->mutations[k].node;
-                            break;
+                            tsChildMutNodes.emplace(site->mutations[k].node);
                         }
                     }
-                    if (tsChildMutNode != TSK_NULL) {
-                        mutationNodeId =
-                            duplicateTopoAbove(constructionContext, grg, &currentTree, tsChildMutNode, tsParentMutNode);
+                    if (!tsChildMutNodes.empty()) {
+                        mutationNodeId = duplicateTopoAbove(
+                            constructionContext, grg, &currentTree, tsChildMutNodes, tsParentMutNode, computeCoals);
                     }
                     // We skip mutations where the REF == ALT, because we have already accounted for any
                     // "subtractive effect" they had in the original tree.
+                    Mutation& mutation = muts.at(j).first;
                     if (mutation.getAllele() != mutation.getRefAllele()) {
-                        grg->addMutation(mutation, mutationNodeId);
+                        auto mutNodeIt = mutToNodes.emplace(std::move(mutation), NodeIDList());
+                        mutNodeIt.first->second.emplace_back(mutationNodeId);
+                    }
+                }
+                // We do this at the end, because we want the opportunity to create a SINGLE Mutation for potentially
+                // multiple separate tskit mutations.
+                for (const auto& mutAndNodes : mutToNodes) {
+                    const Mutation& mutation = mutAndNodes.first;
+                    if (mutAndNodes.second.size() == 1) {
+                        grg->addMutation(mutation, mutAndNodes.second.front());
+                    } else {
+                        combineMutations(constructionContext, grg, mutAndNodes.second, mutation, computeCoals);
                     }
                 }
             }
@@ -504,6 +654,7 @@ MutableGRGPtr convertTreeSeqToGRG(const tsk_treeseq_t* treeSeq,
     }
     TSKIT_OK_OR_THROW(treeItResult, "Failed while iterating tree-sequence");
     tsk_tree_free(&currentTree);
+    grg->sortMutations();
     return grg;
 }
 

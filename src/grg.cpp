@@ -26,6 +26,7 @@
 #include <deque>
 #include <iostream>
 #include <unordered_map>
+#include <vector>
 
 namespace grgl {
 
@@ -129,6 +130,58 @@ void GRG::sortMutations() {
         sortMutIdsByNodeID();
         m_mutsAreOrdered = true;
     }
+}
+
+bool GRG::mutationsAreUnique() const {
+    api_exc_check(m_mutsAreOrdered, "Mutations must be ordered before calling this method; use sortMutations() first.");
+    for (size_t i = 1; i < m_mutations.size(); i++) {
+        if (m_mutations.cref(i) == m_mutations.cref(i - 1)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+NodeIDSizeT MutableGRG::ensureUniqueMutations() {
+    api_exc_check(m_mutsAreOrdered, "Mutations must be ordered before calling this method; use sortMutations() first.");
+    NodeIDSizeT newNodes = 0;
+    const auto mutsAndNodes = getMutationsToNodeOrdered();
+    MutationId mutId = 0;
+    release_assert(mutsAndNodes.size() == m_mutations.size());
+    while (mutId < mutsAndNodes.size()) {
+        // This is true ONLY BECAUSE we verified that m_mutsAreOrdered.
+        release_assert(mutsAndNodes[mutId].first == mutId);
+
+        MutationId dupUntil = mutId + 1;
+        NodeID newMutNode = INVALID_NODE_ID;
+        bool hasDups = (dupUntil < mutsAndNodes.size() && (m_mutations.cref(mutId) == m_mutations.cref(dupUntil)));
+        while (hasDups) {
+            const Mutation mut = m_mutations.cref(mutId);
+            if (newMutNode == INVALID_NODE_ID) {
+                newMutNode = makeNode();
+                newNodes++;
+                addMutation(mut, newMutNode);
+                // For the first duplicate, we have to handle the first instance.
+                const NodeID& mutNodeId = mutsAndNodes[mutId].second;
+                removeMutation(mutId, mutNodeId);
+                if (mutNodeId != INVALID_NODE_ID) {
+                    connect(newMutNode, mutNodeId);
+                }
+            }
+            const NodeID& dupMutNodeId = mutsAndNodes[dupUntil].second;
+            removeMutation(dupUntil, dupMutNodeId);
+            if (dupMutNodeId != INVALID_NODE_ID) {
+                connect(newMutNode, dupMutNodeId);
+            }
+            dupUntil++;
+            hasDups = (dupUntil < mutsAndNodes.size() && (mut == m_mutations.cref(dupUntil)));
+        }
+
+        // Move ahead at least one.
+        release_assert(mutId < dupUntil);
+        mutId = dupUntil;
+    }
+    return newNodes;
 }
 
 struct MutIdAndNodeLt {
