@@ -295,11 +295,18 @@ PolarizationStats polarizeGrgFromFasta(const MutableGRGPtr& grg,
                 continue;
             }
 
-            if (!ref.empty() && equalsIgnoreCase(ref, ancestral.substr(0, ref.size()))) {
+            const bool refMatches = !ref.empty() && equalsIgnoreCase(ref, ancestral.substr(0, ref.size()));
+            const bool altMatches = !alt.empty() && equalsIgnoreCase(alt, ancestral.substr(0, alt.size()));
+
+            if (refMatches && altMatches) {
+                batch.emplace_back(mutId, ref.size() >= alt.size() ? ref : alt);
+                continue;
+            }
+            if (refMatches) {
                 batch.emplace_back(mutId, ref);
                 continue;
             }
-            if (!alt.empty() && equalsIgnoreCase(alt, ancestral.substr(0, alt.size()))) {
+            if (altMatches) {
                 batch.emplace_back(mutId, alt);
                 continue;
             }
