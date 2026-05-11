@@ -19,9 +19,12 @@ for ``BGZIP`` are `tabix <https://www.htslib.org/doc/tabix.html>`__ or
 `bcftools <https://samtools.github.io/bcftools/bcftools.html>`__. We
 only support ``tabix``-style indexes.
 
-**What you’ll need:** \* Python dependencies “pygrgl” and “igdtools”:
-``pip install pygrgl igdtools`` \* Command line tool “wget” and “tabix”:
-``sudo apt install wget tabix`` (or your distribution’s equivalent)
+**What you’ll need:**
+
+-  Python dependencies “pygrgl” and “igdtools”:
+   ``pip install pygrgl igdtools``
+-  Command line tool “wget” and “tabix”: ``sudo apt install wget tabix``
+   (or your distribution’s equivalent)
 
 Get Dataset
 ~~~~~~~~~~~
@@ -39,30 +42,30 @@ is stored as ``.vcf.gz``.
 
 .. parsed-literal::
 
-    --2026-02-06 12:39:40--  https://github.com/aprilweilab/grg_pheno_sim/raw/refs/heads/main/demos/data/test-200-samples.vcf.gz
-    Resolving github.com (github.com)... 140.82.113.4
-    Connecting to github.com (github.com)|140.82.113.4|:443... connected.
+    --2026-05-11 09:49:04--  https://github.com/aprilweilab/grg_pheno_sim/raw/refs/heads/main/demos/data/test-200-samples.vcf.gz
+    Resolving github.com (github.com)... 140.82.112.3
+    Connecting to github.com (github.com)|140.82.112.3|:443... connected.
     HTTP request sent, awaiting response... 302 Found
     Location: https://raw.githubusercontent.com/aprilweilab/grg_pheno_sim/refs/heads/main/demos/data/test-200-samples.vcf.gz [following]
-    --2026-02-06 12:39:40--  https://raw.githubusercontent.com/aprilweilab/grg_pheno_sim/refs/heads/main/demos/data/test-200-samples.vcf.gz
-    Resolving raw.githubusercontent.com (raw.githubusercontent.com)... 185.199.108.133, 185.199.111.133, 185.199.109.133, ...
+    --2026-05-11 09:49:04--  https://raw.githubusercontent.com/aprilweilab/grg_pheno_sim/refs/heads/main/demos/data/test-200-samples.vcf.gz
+    Resolving raw.githubusercontent.com (raw.githubusercontent.com)... 185.199.108.133, 185.199.111.133, 185.199.110.133, ...
     Connecting to raw.githubusercontent.com (raw.githubusercontent.com)|185.199.108.133|:443... connected.
     HTTP request sent, awaiting response... 200 OK
     Length: 494022 (482K) [application/octet-stream]
     Saving to: ‘igd_convert.example.vcf.gz’
     
-         0K .......... .......... .......... .......... .......... 10% 1.95M 0s
-        50K .......... .......... .......... .......... .......... 20% 2.34M 0s
-       100K .......... .......... .......... .......... .......... 31% 42.2M 0s
-       150K .......... .......... .......... .......... .......... 41% 4.13M 0s
-       200K .......... .......... .......... .......... .......... 51% 5.84M 0s
-       250K .......... .......... .......... .......... .......... 62% 4.09M 0s
-       300K .......... .......... .......... .......... .......... 72% 3.48M 0s
-       350K .......... .......... .......... .......... .......... 82% 4.20M 0s
-       400K .......... .......... .......... .......... .......... 93% 8.09M 0s
-       450K .......... .......... .......... ..                   100% 7.34M=0.1s
+         0K .......... .......... .......... .......... .......... 10% 2.25M 0s
+        50K .......... .......... .......... .......... .......... 20% 6.40M 0s
+       100K .......... .......... .......... .......... .......... 31% 5.05M 0s
+       150K .......... .......... .......... .......... .......... 41% 7.50M 0s
+       200K .......... .......... .......... .......... .......... 51% 6.98M 0s
+       250K .......... .......... .......... .......... .......... 62% 6.04M 0s
+       300K .......... .......... .......... .......... .......... 72% 12.1M 0s
+       350K .......... .......... .......... .......... .......... 82% 11.2M 0s
+       400K .......... .......... .......... .......... .......... 93% 21.0M 0s
+       450K .......... .......... .......... ..                   100% 21.6M=0.07s
     
-    2026-02-06 12:39:41 (4.09 MB/s) - ‘igd_convert.example.vcf.gz’ saved [494022/494022]
+    2026-05-11 09:49:04 (6.47 MB/s) - ‘igd_convert.example.vcf.gz’ saved [494022/494022]
     
 
 
@@ -88,10 +91,10 @@ and then convert to IGD with ``igdtools``.
 
 .. parsed-literal::
 
-    Wrote 5447 total variants
-    Of which 3058 were written sparsely
     Wrote 5446 total variants
     Of which 3170 were written sparsely
+    Wrote 5447 total variants
+    Of which 3058 were written sparsely
 
 
 Convert to GRG
@@ -113,7 +116,7 @@ our dataset came) then we can construct a GRG easily:
     Processing input file in 85 parts.
     Auto-calculating number of trees per part.
     Converting segments of input data to graphs
-    100%|██████████| 85/85 [00:00<00:00, 127.28it/s]
+    100%|██████████| 85/85 [00:00<00:00, 203.33it/s]
     Merging...
 
 

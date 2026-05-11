@@ -135,8 +135,8 @@ and specifying a covariate as input to the simulation.
           <td>0</td>
           <td>0</td>
           <td>-62.758200</td>
-          <td>-0.602121</td>
-          <td>-63.360321</td>
+          <td>-59.329025</td>
+          <td>-122.087225</td>
           <td>0.0</td>
         </tr>
         <tr>
@@ -144,8 +144,8 @@ and specifying a covariate as input to the simulation.
           <td>0</td>
           <td>1</td>
           <td>8.271010</td>
-          <td>36.560018</td>
-          <td>1044.831028</td>
+          <td>-26.729415</td>
+          <td>981.541595</td>
           <td>1000.0</td>
         </tr>
         <tr>
@@ -153,8 +153,8 @@ and specifying a covariate as input to the simulation.
           <td>0</td>
           <td>2</td>
           <td>-93.726026</td>
-          <td>99.231737</td>
-          <td>1005.505711</td>
+          <td>58.802882</td>
+          <td>965.076856</td>
           <td>1000.0</td>
         </tr>
         <tr>
@@ -162,8 +162,8 @@ and specifying a covariate as input to the simulation.
           <td>0</td>
           <td>3</td>
           <td>-58.657459</td>
-          <td>-53.501572</td>
-          <td>887.840969</td>
+          <td>29.882231</td>
+          <td>971.224772</td>
           <td>1000.0</td>
         </tr>
         <tr>
@@ -171,8 +171,8 @@ and specifying a covariate as input to the simulation.
           <td>0</td>
           <td>4</td>
           <td>-47.272752</td>
-          <td>-34.094395</td>
-          <td>-81.367147</td>
+          <td>13.143984</td>
+          <td>-34.128768</td>
           <td>0.0</td>
         </tr>
         <tr>
@@ -189,8 +189,8 @@ and specifying a covariate as input to the simulation.
           <td>0</td>
           <td>195</td>
           <td>-22.379358</td>
-          <td>7.807964</td>
-          <td>-14.571394</td>
+          <td>52.827780</td>
+          <td>30.448422</td>
           <td>0.0</td>
         </tr>
         <tr>
@@ -198,8 +198,8 @@ and specifying a covariate as input to the simulation.
           <td>0</td>
           <td>196</td>
           <td>34.579149</td>
-          <td>-124.553807</td>
-          <td>910.025342</td>
+          <td>-45.371223</td>
+          <td>989.207926</td>
           <td>1000.0</td>
         </tr>
         <tr>
@@ -207,8 +207,8 @@ and specifying a covariate as input to the simulation.
           <td>0</td>
           <td>197</td>
           <td>-40.854451</td>
-          <td>-31.724121</td>
-          <td>927.421427</td>
+          <td>103.116600</td>
+          <td>1062.262149</td>
           <td>1000.0</td>
         </tr>
         <tr>
@@ -216,8 +216,8 @@ and specifying a covariate as input to the simulation.
           <td>0</td>
           <td>198</td>
           <td>-21.653168</td>
-          <td>-76.349435</td>
-          <td>901.997397</td>
+          <td>4.893175</td>
+          <td>983.240007</td>
           <td>1000.0</td>
         </tr>
         <tr>
@@ -225,8 +225,8 @@ and specifying a covariate as input to the simulation.
           <td>0</td>
           <td>199</td>
           <td>-69.561989</td>
-          <td>-37.996475</td>
-          <td>892.441536</td>
+          <td>7.776493</td>
+          <td>938.214504</td>
           <td>1000.0</td>
         </tr>
       </tbody>
@@ -256,6 +256,7 @@ which we compute from our GRG.
 
 .. parsed-literal::
 
+    Running eigen decomposition on 200 individuals
     Wrote PCs to gwas.covar.pcs.tsv
 
 
@@ -296,28 +297,28 @@ which we compute from our GRG.
       <tbody>
         <tr>
           <th>0</th>
-          <td>-5.286404</td>
-          <td>24.681425</td>
+          <td>0.029621</td>
+          <td>-0.145431</td>
         </tr>
         <tr>
           <th>1</th>
-          <td>14.533814</td>
-          <td>14.576620</td>
+          <td>-0.081435</td>
+          <td>-0.085890</td>
         </tr>
         <tr>
           <th>2</th>
-          <td>1.614064</td>
-          <td>-8.493021</td>
+          <td>-0.009044</td>
+          <td>0.050044</td>
         </tr>
         <tr>
           <th>3</th>
-          <td>12.886069</td>
-          <td>-1.155761</td>
+          <td>-0.072203</td>
+          <td>0.006810</td>
         </tr>
         <tr>
           <th>4</th>
-          <td>-2.087363</td>
-          <td>-8.376788</td>
+          <td>0.011696</td>
+          <td>0.049359</td>
         </tr>
         <tr>
           <th>...</th>
@@ -326,28 +327,28 @@ which we compute from our GRG.
         </tr>
         <tr>
           <th>195</th>
-          <td>-4.182446</td>
-          <td>-5.131653</td>
+          <td>0.023435</td>
+          <td>0.030237</td>
         </tr>
         <tr>
           <th>196</th>
-          <td>0.434597</td>
-          <td>-0.313486</td>
+          <td>-0.002435</td>
+          <td>0.001847</td>
         </tr>
         <tr>
           <th>197</th>
-          <td>27.490636</td>
-          <td>-8.227627</td>
+          <td>-0.154034</td>
+          <td>0.048480</td>
         </tr>
         <tr>
           <th>198</th>
-          <td>15.201642</td>
-          <td>-8.993395</td>
+          <td>-0.085177</td>
+          <td>0.052992</td>
         </tr>
         <tr>
           <th>199</th>
-          <td>-6.486379</td>
-          <td>-15.689650</td>
+          <td>0.036344</td>
+          <td>0.092449</td>
         </tr>
       </tbody>
     </table>
@@ -397,32 +398,32 @@ which we will use as the covariates input to our GWAS.
       <tbody>
         <tr>
           <th>0</th>
-          <td>-5.286404</td>
-          <td>24.681425</td>
+          <td>0.029621</td>
+          <td>-0.145431</td>
           <td>0.0</td>
         </tr>
         <tr>
           <th>1</th>
-          <td>14.533814</td>
-          <td>14.576620</td>
+          <td>-0.081435</td>
+          <td>-0.085890</td>
           <td>1.0</td>
         </tr>
         <tr>
           <th>2</th>
-          <td>1.614064</td>
-          <td>-8.493021</td>
+          <td>-0.009044</td>
+          <td>0.050044</td>
           <td>1.0</td>
         </tr>
         <tr>
           <th>3</th>
-          <td>12.886069</td>
-          <td>-1.155761</td>
+          <td>-0.072203</td>
+          <td>0.006810</td>
           <td>1.0</td>
         </tr>
         <tr>
           <th>4</th>
-          <td>-2.087363</td>
-          <td>-8.376788</td>
+          <td>0.011696</td>
+          <td>0.049359</td>
           <td>0.0</td>
         </tr>
         <tr>
@@ -433,32 +434,32 @@ which we will use as the covariates input to our GWAS.
         </tr>
         <tr>
           <th>195</th>
-          <td>-4.182446</td>
-          <td>-5.131653</td>
+          <td>0.023435</td>
+          <td>0.030237</td>
           <td>0.0</td>
         </tr>
         <tr>
           <th>196</th>
-          <td>0.434597</td>
-          <td>-0.313486</td>
+          <td>-0.002435</td>
+          <td>0.001847</td>
           <td>1.0</td>
         </tr>
         <tr>
           <th>197</th>
-          <td>27.490636</td>
-          <td>-8.227627</td>
+          <td>-0.154034</td>
+          <td>0.048480</td>
           <td>1.0</td>
         </tr>
         <tr>
           <th>198</th>
-          <td>15.201642</td>
-          <td>-8.993395</td>
+          <td>-0.085177</td>
+          <td>0.052992</td>
           <td>1.0</td>
         </tr>
         <tr>
           <th>199</th>
-          <td>-6.486379</td>
-          <td>-15.689650</td>
+          <td>0.036344</td>
+          <td>0.092449</td>
           <td>1.0</td>
         </tr>
       </tbody>
@@ -492,7 +493,21 @@ First we’ll run the shell commands that perform a GWAS.
 
 .. parsed-literal::
 
+    Using the column 2 (the last one) for phenotype.
+
+
+.. parsed-literal::
+
     Wrote results to covar.example.gwascov.tsv
+
+
+.. parsed-literal::
+
+    Using the column 2 (the last one) for phenotype.
+
+
+.. parsed-literal::
+
     Wrote results to covar.example.gwas.tsv
 
 
@@ -531,6 +546,7 @@ Now we can examine both results by loading the dataframes into pandas.
           <th></th>
           <th>POS</th>
           <th>ALT</th>
+          <th>REF</th>
           <th>COUNT</th>
           <th>BETA</th>
           <th>SE</th>
@@ -543,54 +559,60 @@ Now we can examine both results by loading the dataframes into pandas.
           <th>0</th>
           <td>55829</td>
           <td>G</td>
+          <td>A</td>
           <td>4</td>
-          <td>-51.048086</td>
-          <td>127.006567</td>
-          <td>-0.401933</td>
-          <td>0.688172</td>
+          <td>-37.607441</td>
+          <td>38.817199</td>
+          <td>-0.968834</td>
+          <td>0.333828</td>
         </tr>
         <tr>
           <th>1</th>
           <td>56812</td>
           <td>T</td>
+          <td>G</td>
           <td>3</td>
-          <td>-13.716917</td>
-          <td>152.570359</td>
-          <td>-0.089906</td>
-          <td>0.928454</td>
+          <td>90.404328</td>
+          <td>41.735642</td>
+          <td>2.166118</td>
+          <td>0.031516</td>
         </tr>
         <tr>
           <th>2</th>
           <td>57349</td>
           <td>G</td>
+          <td>T</td>
           <td>1</td>
-          <td>-28.959683</td>
-          <td>467.645128</td>
-          <td>-0.061927</td>
-          <td>0.950684</td>
+          <td>-63.659076</td>
+          <td>72.729817</td>
+          <td>-0.875282</td>
+          <td>0.382497</td>
         </tr>
         <tr>
           <th>3</th>
           <td>58785</td>
           <td>T</td>
+          <td>C</td>
           <td>10</td>
-          <td>-35.693720</td>
-          <td>38.173918</td>
-          <td>-0.935029</td>
-          <td>0.350924</td>
+          <td>10.482727</td>
+          <td>24.477519</td>
+          <td>0.428259</td>
+          <td>0.668935</td>
         </tr>
         <tr>
           <th>4</th>
           <td>59367</td>
           <td>A</td>
+          <td>G</td>
           <td>2</td>
-          <td>17.971173</td>
-          <td>238.352202</td>
-          <td>0.075398</td>
-          <td>0.939975</td>
+          <td>-24.403985</td>
+          <td>52.357712</td>
+          <td>-0.466101</td>
+          <td>0.641663</td>
         </tr>
         <tr>
           <th>...</th>
+          <td>...</td>
           <td>...</td>
           <td>...</td>
           <td>...</td>
@@ -603,55 +625,60 @@ Now we can examine both results by loading the dataframes into pandas.
           <th>10888</th>
           <td>9997601</td>
           <td>G</td>
+          <td>C</td>
           <td>3</td>
-          <td>9.707284</td>
-          <td>152.495658</td>
-          <td>0.063656</td>
-          <td>0.949309</td>
+          <td>51.605426</td>
+          <td>42.111952</td>
+          <td>1.225434</td>
+          <td>0.221890</td>
         </tr>
         <tr>
           <th>10889</th>
           <td>9998038</td>
           <td>A</td>
+          <td>C</td>
           <td>21</td>
-          <td>10.507445</td>
-          <td>21.127264</td>
-          <td>0.497341</td>
-          <td>0.619506</td>
+          <td>3.935289</td>
+          <td>15.240090</td>
+          <td>0.258220</td>
+          <td>0.796510</td>
         </tr>
         <tr>
           <th>10890</th>
           <td>9998412</td>
           <td>G</td>
+          <td>T</td>
           <td>42</td>
-          <td>5.477115</td>
-          <td>28.741514</td>
-          <td>0.190565</td>
-          <td>0.849064</td>
+          <td>-2.619399</td>
+          <td>11.996761</td>
+          <td>-0.218342</td>
+          <td>0.827391</td>
         </tr>
         <tr>
           <th>10891</th>
           <td>9999031</td>
           <td>C</td>
+          <td>G</td>
           <td>295</td>
-          <td>-0.208170</td>
-          <td>19.039536</td>
-          <td>-0.010934</td>
-          <td>0.991288</td>
+          <td>3.987359</td>
+          <td>8.705235</td>
+          <td>0.458041</td>
+          <td>0.647433</td>
         </tr>
         <tr>
           <th>10892</th>
           <td>9999126</td>
           <td>T</td>
+          <td>A</td>
           <td>2</td>
-          <td>-67.782590</td>
-          <td>234.381719</td>
-          <td>-0.289197</td>
-          <td>0.772736</td>
+          <td>-21.656135</td>
+          <td>51.830636</td>
+          <td>-0.417825</td>
+          <td>0.676535</td>
         </tr>
       </tbody>
     </table>
-    <p>10893 rows × 7 columns</p>
+    <p>10893 rows × 8 columns</p>
     </div>
 
 
@@ -694,7 +721,7 @@ covariate has a clearer distribution without the “extra” peaks around
 \`-500-.
 
 Using the Python API
-====================
+~~~~~~~~~~~~~~~~~~~~
 
 We can just repeat the same thing via Python, as an illustration.
 
@@ -741,6 +768,7 @@ We can just repeat the same thing via Python, as an illustration.
           <th></th>
           <th>POS</th>
           <th>ALT</th>
+          <th>REF</th>
           <th>COUNT</th>
           <th>BETA</th>
           <th>SE</th>
@@ -753,54 +781,60 @@ We can just repeat the same thing via Python, as an illustration.
           <th>0</th>
           <td>55829</td>
           <td>G</td>
+          <td>A</td>
           <td>4</td>
-          <td>-51.048086</td>
-          <td>127.006567</td>
-          <td>-0.401933</td>
-          <td>0.688172</td>
+          <td>-37.607441</td>
+          <td>38.817199</td>
+          <td>-0.968834</td>
+          <td>0.333828</td>
         </tr>
         <tr>
           <th>1</th>
           <td>56812</td>
           <td>T</td>
+          <td>G</td>
           <td>3</td>
-          <td>-13.716917</td>
-          <td>152.570359</td>
-          <td>-0.089906</td>
-          <td>0.928454</td>
+          <td>90.404328</td>
+          <td>41.735642</td>
+          <td>2.166118</td>
+          <td>0.031516</td>
         </tr>
         <tr>
           <th>2</th>
           <td>57349</td>
           <td>G</td>
+          <td>T</td>
           <td>1</td>
-          <td>-28.959683</td>
-          <td>467.645128</td>
-          <td>-0.061927</td>
-          <td>0.950684</td>
+          <td>-63.659076</td>
+          <td>72.729817</td>
+          <td>-0.875282</td>
+          <td>0.382497</td>
         </tr>
         <tr>
           <th>3</th>
           <td>58785</td>
           <td>T</td>
+          <td>C</td>
           <td>10</td>
-          <td>-35.693720</td>
-          <td>38.173918</td>
-          <td>-0.935029</td>
-          <td>0.350924</td>
+          <td>10.482727</td>
+          <td>24.477519</td>
+          <td>0.428259</td>
+          <td>0.668935</td>
         </tr>
         <tr>
           <th>4</th>
           <td>59367</td>
           <td>A</td>
+          <td>G</td>
           <td>2</td>
-          <td>17.971173</td>
-          <td>238.352202</td>
-          <td>0.075398</td>
-          <td>0.939975</td>
+          <td>-24.403985</td>
+          <td>52.357712</td>
+          <td>-0.466101</td>
+          <td>0.641663</td>
         </tr>
         <tr>
           <th>...</th>
+          <td>...</td>
           <td>...</td>
           <td>...</td>
           <td>...</td>
@@ -813,55 +847,60 @@ We can just repeat the same thing via Python, as an illustration.
           <th>10888</th>
           <td>9997601</td>
           <td>G</td>
+          <td>C</td>
           <td>3</td>
-          <td>9.707284</td>
-          <td>152.495658</td>
-          <td>0.063656</td>
-          <td>0.949309</td>
+          <td>51.605426</td>
+          <td>42.111952</td>
+          <td>1.225434</td>
+          <td>0.221890</td>
         </tr>
         <tr>
           <th>10889</th>
           <td>9998038</td>
           <td>A</td>
+          <td>C</td>
           <td>21</td>
-          <td>10.507445</td>
-          <td>21.127264</td>
-          <td>0.497341</td>
-          <td>0.619506</td>
+          <td>3.935289</td>
+          <td>15.240090</td>
+          <td>0.258220</td>
+          <td>0.796510</td>
         </tr>
         <tr>
           <th>10890</th>
           <td>9998412</td>
           <td>G</td>
+          <td>T</td>
           <td>42</td>
-          <td>5.477115</td>
-          <td>28.741514</td>
-          <td>0.190565</td>
-          <td>0.849064</td>
+          <td>-2.619399</td>
+          <td>11.996761</td>
+          <td>-0.218342</td>
+          <td>0.827391</td>
         </tr>
         <tr>
           <th>10891</th>
           <td>9999031</td>
           <td>C</td>
+          <td>G</td>
           <td>295</td>
-          <td>-0.208170</td>
-          <td>19.039536</td>
-          <td>-0.010934</td>
-          <td>0.991288</td>
+          <td>3.987359</td>
+          <td>8.705235</td>
+          <td>0.458041</td>
+          <td>0.647433</td>
         </tr>
         <tr>
           <th>10892</th>
           <td>9999126</td>
           <td>T</td>
+          <td>A</td>
           <td>2</td>
-          <td>-67.782590</td>
-          <td>234.381719</td>
-          <td>-0.289197</td>
-          <td>0.772736</td>
+          <td>-21.656135</td>
+          <td>51.830636</td>
+          <td>-0.417825</td>
+          <td>0.676535</td>
         </tr>
       </tbody>
     </table>
-    <p>10893 rows × 7 columns</p>
+    <p>10893 rows × 8 columns</p>
     </div>
 
 

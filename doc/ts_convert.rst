@@ -5,8 +5,9 @@ Converting tree-sequence (TS) to GRG
 ------------------------------------
 
 A tskit tree sequence (TS) is a particular format for Ancestral Recombination Graphs (ARGs).
-ARGs, and tskit TS specifically, can be converted to GRGs. This is a lossy
-conversion:
+ARGs, and tskit TS specifically, can be converted to GRGs. The sample-to-mutation (variant) mapping
+is retained by this conversion, as well as the times associated with mutations, but there is some
+information lost upon conversion to GRG:
 
 - Tree sequences (sometimes implicitly) encode the location of recombinations along the genome.
   Converting to GRG will lose some of this information.
@@ -33,21 +34,21 @@ The following properties of a tree sequence *are* maintained when converted to a
 - All Mutations from the TS are copied into the GRG. Mutations in the TS can have no samples
   reachable beneath them (due to recurrent mutations "blocking" them), and these are copied into
   the GRG as a :py:class:`pygrgl.Mutation` with no associated node in the graph.
-- Recurrent mutations are copied over as-is. This means that two mutations with the same position,
-  but different derived alleles, are in the same tree, affecting the same subset of samples. The
-  GRG will contain both of these Mutation nodes (even if one matches the reference) and the path
-  between the mutations should also be maintained. Many calculations (such as the example allele
-  frequency calculation shown in the documentation) do not adjust for this case, so a few sites
-  will have approximate values when recurrent mutations are present.
 
 The following properties of a tree sequence are *not* maintained when converted to a GRG:
 
+- The samples reached by a GRG *reflect the samples containing the variant*, and this can different
+  from the TS topology in the presence of recurrent and back mutations. In the TS the topology reflects
+  the coalescent tree, and in the GRG the topology reflects the actual sample sets for those mutations.
+  For example, there could be 100 samples beneath a mutation ``A`` in a TS local tree, with a back
+  mutation ``B`` beneath it that makes the "true" sample set only have 10 samples in it (``B`` acts
+  like a set subtraction from ``A``). In the GRG, ``A`` will only have 10 samples beneath it.
 - tskit has an ID number associated with each Mutation in the TS. GRG also has an ID number
   associated with each Mutation. These IDs *will not match* between the two formats. When comparing
   Mutations between the two formats, use the Mutation's position and allele values. For most 
   simulated data, using only the alternate allele and position are sufficient, but for some real
   datasets there are multiple different reference alleles at a site.
-- Some nodes are dropped when converting to GRG, unless the ``--no-simplify`` option is provided.
+- Some nodes are dropped when converting to GRG, unless the ``--no-simplify`` option is provided (*NOT RECOMMENDED*).
 
 Mapping between TS and GRG mutations
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -83,9 +84,6 @@ either the actual ancestry (two separate mutations, mostly in simulated ARGs) or
 artifact of the ARG inference process (e.g., *tsinfer*). In these cases, you need to adjust
 any relevant calculations (you may *want* to keep separate ``Mutations``).
 
-**TODO**: coming soon, new methods ``pygrgl.MutableGRG.uniquifyMutations`` (which will add new nodes so that the relationship
-is one-to-one) and ``pygrgl.GRG.mutations_are_unique`` (for checking uniqueness).
-
 
 A note about Mutation times
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -110,7 +108,9 @@ calculated when you construct a GRG via ``grg construct``. In order to get this 
 GRGs, you need to pass ``--ts-coals`` flags to the ``grg convert`` command.
 
 Conversion from tree-sequence to GRG is very fast, on the order of seconds or minutes for very large datasets.
-That said, setting flag ``--ts-coals`` can slow it down significantly, especially for datasets with a
-lot of individual samples.
+Setting flag ``--ts-coals`` can slow it down significantly, especially for datasets with a lot of samples.
+
+You can still do most operations on a GRG without having the coalescence counts; even diploid-based GWAS
+can be performed by using `grapp's <https://github.com/aprilweilab/grapp>`_ ``--binomial`` flag.
 
 See also :py:meth:`pygrgl.GRG.get_num_individual_coals` and :py:meth:`pygrgl.GRG.set_num_individual_coals`.

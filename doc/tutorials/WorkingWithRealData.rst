@@ -88,32 +88,6 @@ the FTP site.
 
 .. parsed-literal::
 
-    --2026-02-06 12:31:56--  https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_2504_high_coverage.sequence.index
-    Resolving ftp.1000genomes.ebi.ac.uk (ftp.1000genomes.ebi.ac.uk)... 193.62.193.167
-    Connecting to ftp.1000genomes.ebi.ac.uk (ftp.1000genomes.ebi.ac.uk)|193.62.193.167|:443... connected.
-    HTTP request sent, awaiting response... 200 OK
-    Length: 982480 (959K)
-    Saving to: ‘1000G_2504_high_coverage.sequence.index’
-    
-         0K ........ ......                                      100% 1.70M=0.5s
-    
-    2026-02-06 12:31:57 (1.70 MB/s) - ‘1000G_2504_high_coverage.sequence.index’ saved [982480/982480]
-    
-    --2026-02-06 12:31:57--  https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/1000G_698_related_high_coverage.sequence.index
-    Resolving ftp.1000genomes.ebi.ac.uk (ftp.1000genomes.ebi.ac.uk)... 193.62.193.167
-    Connecting to ftp.1000genomes.ebi.ac.uk (ftp.1000genomes.ebi.ac.uk)|193.62.193.167|:443... connected.
-    HTTP request sent, awaiting response... 200 OK
-    Length: 294388 (287K)
-    Saving to: ‘1000G_698_related_high_coverage.sequence.index’
-    
-         0K ....                                                 100%  801K=0.4s
-    
-    2026-02-06 12:31:58 (801 KB/s) - ‘1000G_698_related_high_coverage.sequence.index’ saved [294388/294388]
-    
-
-
-.. parsed-literal::
-
     ##FileDate=20190503
     ##ENA_FILE_PATH=path to ENA file on ENA ftp site
     ##MD5=md5sum of file
@@ -180,37 +154,6 @@ Building this GRG takes about 4 minutes (with 4 threads) on my laptop.
     if [[ ! -e kgp.chr22.grg ]]; then
         grg construct -j 4 --population-ids "kgp.popmap.tsv:SAMPLE:POPULATION" kgp.chr22.vcf.gz -o kgp.chr22.grg
     fi
-
-
-.. parsed-literal::
-
-    Will not count variants in VCF files (too slow)
-    Could not count number of variants in kgp.chr22.vcf.gz. Using the default of 100 (use --parts to override).
-    Processing input file in 100 parts.
-    Auto-calculating number of trees per part.
-    Converting segments of input data to graphs
-    100%|██████████| 100/100 [04:54<00:00,  2.94s/it]
-    Merging...
-
-
-.. parsed-literal::
-
-    === GRG Statistics ===
-    Nodes: 2460735
-    Edges: 21442726
-    Samples: 6404
-    Mutations: 1066557
-    Ploidy: 2
-    Phased: true
-    Populations: 26
-    Range of mutations: 10519265 - 50808015
-    Specified range: 0 - 50818469
-    ======================
-    Wrote simplified GRG with:
-      Nodes: 2460735
-      Edges: 21442726
-    Wrote GRG to kgp.chr22.grg
-
 
 Examine GRG and allele frequencies
 ----------------------------------
@@ -437,7 +380,7 @@ haplotype-to-diploid mapping is *maintained* by this filter.
 
 .. parsed-literal::
 
-    Construction took 158 ms
+    Construction took 119 ms
 
 
 .. parsed-literal::
@@ -482,7 +425,7 @@ comma-separated list of items to keep.
 
 .. parsed-literal::
 
-    Construction took 144 ms
+    Construction took 116 ms
 
 
 .. parsed-literal::
@@ -534,7 +477,12 @@ that have an allele count of at least 20.
 
 .. parsed-literal::
 
-    Construction took 10 ms
+    Kept 47945 variants. Dropped 1018612 variants
+
+
+.. parsed-literal::
+
+    Construction took 7 ms
 
 
 .. parsed-literal::
