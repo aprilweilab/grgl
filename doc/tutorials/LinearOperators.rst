@@ -41,37 +41,6 @@ demonstration purposes.
 
 .. parsed-literal::
 
-    --2026-02-06 12:39:52--  https://github.com/aprilweilab/grg_pheno_sim/raw/refs/heads/main/demos/data/test-200-samples.vcf.gz
-    Resolving github.com (github.com)... 140.82.112.4
-    Connecting to github.com (github.com)|140.82.112.4|:443... connected.
-    HTTP request sent, awaiting response... 302 Found
-    Location: https://raw.githubusercontent.com/aprilweilab/grg_pheno_sim/refs/heads/main/demos/data/test-200-samples.vcf.gz [following]
-    --2026-02-06 12:39:52--  https://raw.githubusercontent.com/aprilweilab/grg_pheno_sim/refs/heads/main/demos/data/test-200-samples.vcf.gz
-    Resolving raw.githubusercontent.com (raw.githubusercontent.com)... 185.199.110.133, 185.199.109.133, 185.199.108.133, ...
-    Connecting to raw.githubusercontent.com (raw.githubusercontent.com)|185.199.110.133|:443... connected.
-    HTTP request sent, awaiting response... 200 OK
-    Length: 494022 (482K) [application/octet-stream]
-    Saving to: ‘linop.example.vcf.gz’
-    
-         0K .......... .......... .......... .......... .......... 10% 2.07M 0s
-        50K .......... .......... .......... .......... .......... 20% 2.52M 0s
-       100K .......... .......... .......... .......... .......... 31% 4.32M 0s
-       150K .......... .......... .......... .......... .......... 41% 5.12M 0s
-       200K .......... .......... .......... .......... .......... 51% 2.94M 0s
-       250K .......... .......... .......... .......... .......... 62% 3.31M 0s
-       300K .......... .......... .......... .......... .......... 72%  119M 0s
-       350K .......... .......... .......... .......... .......... 82% 4.37M 0s
-       400K .......... .......... .......... .......... .......... 93% 3.36M 0s
-       450K .......... .......... .......... ..                   100% 6.98M=0.1s
-    
-    2026-02-06 12:39:53 (3.75 MB/s) - ‘linop.example.vcf.gz’ saved [494022/494022]
-    
-
-
-.. parsed-literal::
-
-    Wrote 10893 total variants
-    Of which 6228 were written sparsely
     Stats for linop.example.igd
     ... in range 0 - 18446744073709551615
       Variants in range: 10893
@@ -95,36 +64,7 @@ Now construct the GRG.
       grg construct -j 1 linop.example.igd -o linop.example.grg
     fi
 
-
-.. parsed-literal::
-
-    Processing input file in 85 parts.
-    Auto-calculating number of trees per part.
-    Converting segments of input data to graphs
-    100%|██████████| 85/85 [00:00<00:00, 134.66it/s]
-    Merging...
-
-
-.. parsed-literal::
-
-    === GRG Statistics ===
-    Nodes: 15481
-    Edges: 93351
-    Samples: 400
-    Mutations: 10893
-    Ploidy: 2
-    Phased: true
-    Populations: 0
-    Range of mutations: 55829 - 9999127
-    Specified range: 0 - 10894
-    ======================
-    Wrote simplified GRG with:
-      Nodes: 15481
-      Edges: 93351
-    Wrote GRG to linop.example.grg
-
-
-The first thing we’ll do is define a function that *very inneficiently*
+The first thing we’ll do is define a function that *very inefficiently*
 converts a GRG to a dense matrix. This is only valuable for illustration
 and testing purposes, as these matrices will get huge while a GRG will
 remain small enough to fit in RAM still. For reasons of clarity, we’re

@@ -46,10 +46,9 @@ def add_options(subparser):
         help='Do not remove any "information-less" nodes/edges from the graph.',
     )
     subparser.add_argument(
-        "--maintain-topo",
-        "-t",
+        "--no-maintain-topo",
         action="store_true",
-        help="Maintain all topology below mutations (at the cost of a larger graph).",
+        help="Do not maintain all topology below mutations. WARNING: this can cause inaccuracy when back mutations are present.",
     )
     subparser.add_argument(
         "--ts-coals",
@@ -67,8 +66,11 @@ def convert_command(arguments):
             )
             exit(2)
         if not arguments.ts_coals:
-            print("Warning: no individual (diploid) coalescence information will be calculated unless you specify --ts-coals. "
-                  "This is fine, but downstream applications will need to use approximations for Mutation variance.", file=sys.stderr)
+            print(
+                "Warning: no individual (diploid) coalescence information will be calculated unless you specify --ts-coals. "
+                "This is fine, but downstream applications will need to use approximations for Mutation variance.",
+                file=sys.stderr,
+            )
         command_args = [GRGL, arguments.input_file, "-o", arguments.output_file]
         if arguments.binary_muts:
             command_args.append("--binary-muts")
@@ -76,8 +78,8 @@ def convert_command(arguments):
             command_args.append("--ts-node-times")
         if arguments.no_simplify:
             command_args.append("--no-simplify")
-        if arguments.maintain_topo:
-            command_args.append("--maintain-topo")
+        if arguments.no_maintain_topo:
+            command_args.append("--no-maintain-topo")
         if arguments.ts_coals:
             command_args.append("--ts-coals")
     elif is_igd(arguments.output_file):

@@ -128,11 +128,11 @@ int main(int argc, char** argv) {
                            "ts-node-times",
                            "When converting tree-seq, use node times instead of mutation times",
                            {"ts-node-times"});
-    args::Flag maintainTopo(
-        parser,
-        "maintain-topo",
-        "When converting tree-seq, maintain all topology below mutations (at the cost of a larger graph)",
-        {"maintain-topo"});
+    args::Flag noMaintainTopo(parser,
+                              "no-maintain-topo",
+                              "When converting tree-seq, do not maintain all topology below mutations."
+                              " WARNING: this can cause inaccuracy when back mutations are present.",
+                              {"no-maintain-topo"});
     args::Flag tsComputeCoals(
         parser, "ts-coals", "When converting tree-seq, compute node individual coalescences.", {"ts-coals"});
     args::ValueFlag<std::string> populationIds(
@@ -243,11 +243,17 @@ int main(int argc, char** argv) {
         TSKIT_OK_OR_EXIT(tsk_treeseq_load(&treeSeq, infile->c_str(), 0), "Failed to load tree-seq");
 
         try {
-            theGRG = grgl::convertTreeSeqToGRG(&treeSeq, binaryMutations, tsNodeTimes, maintainTopo, tsComputeCoals);
+            if (noMaintainTopo) {
+                std::cerr
+                    << "WARNING: Using --no-maintain-topo can cause innaccurate sample sets for back (nested) mutations"
+                    << std::endl;
+            }
+            theGRG = grgl::convertTreeSeqToGRG(&treeSeq, binaryMutations, tsNodeTimes, !noMaintainTopo, tsComputeCoals);
         } catch (grgl::TskitApiFailure& e) {
             std::cerr << e.what();
             return 2;
         }
+        TSKIT_OK_OR_EXIT(tsk_treeseq_free(&treeSeq), "Failed to free tree-seq");
     } else if (ends_with(*infile, ".grg")) {
         const bool mutableNeeded = (bool)mapMutations || (bool)reduce;
         if (mutableNeeded) {

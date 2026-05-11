@@ -7,9 +7,10 @@ this example, we’re going to first simulate some data with populations
 structure, and then compute the principal components and show that they
 reflect that structure.
 
-**What you’ll need:** \* Python dependencies “stdpopsim”, “msprime”,
-“grapp”, “pandas”, “seaborn”:
-``pip install stdpopsim msprime grapp pandas seaborn``
+**What you’ll need:**
+
+-  Python dependencies “stdpopsim”, “msprime”, “grapp”, “pandas”,
+   “seaborn”: ``pip install stdpopsim msprime grapp pandas seaborn``
 
 Simulate Data
 -------------
@@ -228,7 +229,7 @@ structure (GRG) and creating a much less concise sparse matrix format
 
 .. parsed-literal::
 
-    Using temporary directory /tmp/tmp1zgc_nhy.
+    Using temporary directory /tmp/tmpppfhdpum.
     Splitting GRG into 8 parts..
     Converting GRG parts to IGD files...
     Merging 8 parts into single IGD stdpop.ooa4.chr22.igd...
@@ -257,26 +258,26 @@ seconds on my laptop.
     Processing input file in 100 parts.
     Auto-calculating number of trees per part.
     Converting segments of input data to graphs
-    100%|██████████| 100/100 [00:10<00:00,  9.36it/s]
+    100%|██████████| 100/100 [00:09<00:00, 10.81it/s]
     Merging...
 
 
 .. parsed-literal::
 
     === GRG Statistics ===
-    Nodes: 296524
-    Edges: 2178293
+    Nodes: 294602
+    Edges: 2175106
     Samples: 800
-    Mutations: 359119
+    Mutations: 358149
     Ploidy: 2
     Phased: true
     Populations: 4
-    Range of mutations: 15287934 - 50818401
-    Specified range: 0 - 359628
+    Range of mutations: 15287935 - 50818284
+    Specified range: 0 - 358150
     ======================
     Wrote simplified GRG with:
-      Nodes: 296524
-      Edges: 2178293
+      Nodes: 294602
+      Edges: 2175106
     Wrote GRG to stdpop.ooa4.chr22.grg
 
 
@@ -299,7 +300,7 @@ same data, just converted into graphs in two different ways).
 
     Populations: ['YRI', 'CEU', 'CHB', 'JPT']
     Individuals: 400
-    Mutations (Variants): 359119
+    Mutations (Variants): 358149
 
 
 .. code:: ipython3
@@ -307,8 +308,13 @@ same data, just converted into graphs in two different ways).
     from grapp.linalg import PCs
     
     # First 2 PCs on the constructed GRG. This is very fast! A few seconds on my laptop.
-    pca_df = PCs(grg, 2, unitvar=False)
+    pca_df = PCs(grg, 2)
     pca_df
+
+
+.. parsed-literal::
+
+    Running eigen decomposition on 400 individuals
 
 
 
@@ -345,28 +351,28 @@ same data, just converted into graphs in two different ways).
       <tbody>
         <tr>
           <th>0</th>
-          <td>194.193031</td>
-          <td>-20.152374</td>
+          <td>-0.087585</td>
+          <td>-0.020399</td>
         </tr>
         <tr>
           <th>1</th>
-          <td>204.976810</td>
-          <td>-14.595821</td>
+          <td>-0.083049</td>
+          <td>-0.004990</td>
         </tr>
         <tr>
           <th>2</th>
-          <td>203.829988</td>
-          <td>-19.090026</td>
+          <td>-0.088521</td>
+          <td>-0.004959</td>
         </tr>
         <tr>
           <th>3</th>
-          <td>195.460814</td>
-          <td>-28.349895</td>
+          <td>-0.081239</td>
+          <td>-0.003820</td>
         </tr>
         <tr>
           <th>4</th>
-          <td>199.813934</td>
-          <td>-14.681065</td>
+          <td>-0.085417</td>
+          <td>-0.001090</td>
         </tr>
         <tr>
           <th>...</th>
@@ -375,28 +381,28 @@ same data, just converted into graphs in two different ways).
         </tr>
         <tr>
           <th>395</th>
-          <td>-77.386700</td>
-          <td>-65.259156</td>
+          <td>0.033168</td>
+          <td>-0.030465</td>
         </tr>
         <tr>
           <th>396</th>
-          <td>-83.253270</td>
-          <td>-64.976000</td>
+          <td>0.034471</td>
+          <td>-0.038054</td>
         </tr>
         <tr>
           <th>397</th>
-          <td>-81.988488</td>
-          <td>-63.991201</td>
+          <td>0.034981</td>
+          <td>-0.040481</td>
         </tr>
         <tr>
           <th>398</th>
-          <td>-84.046194</td>
-          <td>-57.446683</td>
+          <td>0.032767</td>
+          <td>-0.036880</td>
         </tr>
         <tr>
           <th>399</th>
-          <td>-78.691830</td>
-          <td>-66.300048</td>
+          <td>0.034018</td>
+          <td>-0.044320</td>
         </tr>
       </tbody>
     </table>
@@ -411,8 +417,13 @@ same data, just converted into graphs in two different ways).
     # This highlights something interesting: the constructed GRG is created for speed and compression, and is the one that 
     # is used on real data. The "true" GRG still contains a lot of the coalescence structure from the ARG, which may be
     # less performant for linear algebra.
-    true_pca_df = PCs(true_grg, 2, unitvar=False)
+    true_pca_df = PCs(true_grg, 2)
     true_pca_df
+
+
+.. parsed-literal::
+
+    Running eigen decomposition on 400 individuals
 
 
 
@@ -449,28 +460,28 @@ same data, just converted into graphs in two different ways).
       <tbody>
         <tr>
           <th>0</th>
-          <td>194.275947</td>
-          <td>-20.147350</td>
+          <td>0.087585</td>
+          <td>-0.020399</td>
         </tr>
         <tr>
           <th>1</th>
-          <td>205.092217</td>
-          <td>-14.601785</td>
+          <td>0.083049</td>
+          <td>-0.004990</td>
         </tr>
         <tr>
           <th>2</th>
-          <td>203.893973</td>
-          <td>-19.053393</td>
+          <td>0.088521</td>
+          <td>-0.004959</td>
         </tr>
         <tr>
           <th>3</th>
-          <td>195.542736</td>
-          <td>-28.301942</td>
+          <td>0.081239</td>
+          <td>-0.003820</td>
         </tr>
         <tr>
           <th>4</th>
-          <td>199.833256</td>
-          <td>-14.653547</td>
+          <td>0.085417</td>
+          <td>-0.001090</td>
         </tr>
         <tr>
           <th>...</th>
@@ -479,28 +490,28 @@ same data, just converted into graphs in two different ways).
         </tr>
         <tr>
           <th>395</th>
-          <td>-77.387497</td>
-          <td>-65.264807</td>
+          <td>-0.033168</td>
+          <td>-0.030465</td>
         </tr>
         <tr>
           <th>396</th>
-          <td>-83.308376</td>
-          <td>-65.039118</td>
+          <td>-0.034471</td>
+          <td>-0.038054</td>
         </tr>
         <tr>
           <th>397</th>
-          <td>-82.017372</td>
-          <td>-64.053615</td>
+          <td>-0.034981</td>
+          <td>-0.040481</td>
         </tr>
         <tr>
           <th>398</th>
-          <td>-84.047321</td>
-          <td>-57.475539</td>
+          <td>-0.032767</td>
+          <td>-0.036880</td>
         </tr>
         <tr>
           <th>399</th>
-          <td>-78.697767</td>
-          <td>-66.327669</td>
+          <td>-0.034018</td>
+          <td>-0.044320</td>
         </tr>
       </tbody>
     </table>
@@ -573,3 +584,4 @@ Related Topics
 
    -  `grapp.linalg <https://grapp.readthedocs.io/en/latest/grapp.html#linear-algebra>`__:
       Python APIs for Linear Algebra on GRG
+

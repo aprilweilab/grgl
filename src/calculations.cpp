@@ -57,7 +57,9 @@ public:
                 samplesBeneath += m_samplesBeneath[child];
             }
             m_samplesBeneath[nodeId] = samplesBeneath;
-            release_assert(samplesBeneath <= grg->numSamples());
+            api_exc_check(samplesBeneath <= grg->numSamples(),
+                          "Malformed GRG: there are " << samplesBeneath << " beneath node " << nodeId
+                                                      << "; maximum allowed is " << grg->numSamples());
         } else if (dfsPass == grgl::DfsPass::DFS_PASS_NONE) {
             // Topological order must go up.
             release_assert(direction == grgl::TraversalDirection::DIRECTION_UP);
@@ -174,7 +176,10 @@ public:
             } else {
                 // Start with the number of individuals that coalesce at exactly this node.
                 homozygBeneath = grg->getNumIndividualCoals(nodeId);
-                release_assert(homozygBeneath != COAL_COUNT_NOT_SET && homozygBeneath <= grg->numIndividuals());
+                api_exc_check(homozygBeneath != COAL_COUNT_NOT_SET,
+                              "GRG is missing (at least some) coalescence counts; cannot emit zygosity info");
+                api_exc_check(homozygBeneath <= grg->numIndividuals(),
+                              "Malformed GRG: saw homozygous count of " << homozygBeneath);
 
                 for (const auto& child : grg->getDownEdges(nodeId)) {
                     samplesBeneath += m_samplesBeneath[child];

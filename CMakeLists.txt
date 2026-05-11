@@ -10,6 +10,7 @@ option(ENABLE_CHECKERS "Enable external tools like clang-tidy" OFF)
 option(ENABLE_TESTS "Enable automated test execution" ON)
 option(ENABLE_BGEN "Enable BGEN support" OFF)
 option(ENABLE_CPU_PROF "Enable gperftools CPU profiler" OFF)
+option(ENABLE_MEM_PROF "Enable gperftools memory profiler" OFF)
 option(ENABLE_CUDA "Enable CUDA support" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -215,6 +216,13 @@ if (${ENABLE_CPU_PROF})
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-g>) # Turn on symbols (but not debug mode)
   set(GRGP_LIBS ${CMAKE_CURRENT_LIST_DIR}/gperftools-2.15/.libs/libprofiler.a unwind)
   set(GRGL_EXTRA_LIBS ${CMAKE_CURRENT_LIST_DIR}/gperftools-2.15/.libs/libprofiler.a unwind)
+endif()
+
+if (${ENABLE_MEM_PROF})
+  include_directories(${CMAKE_CURRENT_LIST_DIR}/gperftools-2.15/src/)
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-g>) # Turn on symbols (but not debug mode)
+  set(GRGP_LIBS ${CMAKE_CURRENT_LIST_DIR}/gperftools-2.15/.libs/libprofiler.a ${CMAKE_CURRENT_LIST_DIR}/gperftools-2.15/.libs/libtcmalloc.so unwind)
+  set(GRGL_EXTRA_LIBS ${CMAKE_CURRENT_LIST_DIR}/gperftools-2.15/.libs/libprofiler.a ${CMAKE_CURRENT_LIST_DIR}/gperftools-2.15/.libs/libtcmalloc.so unwind)
 endif()
 
 # Library libgrgl.a for C++ projects that want to use GRGL.

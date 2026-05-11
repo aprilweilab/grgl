@@ -13,9 +13,11 @@ In this tutorial we’ll show the (very simple) process of converting
 least ``25x`` smaller) and faster (many orders of magnitude) for
 performing computations.
 
-**What you’ll need:** \* Python dependencies “pygrgl”:
-``pip install pygrgl`` \* Command line tools “wget” and “tabix”:
-``sudo apt install wget tabix`` (or your distribution’s equivalent)
+**What you’ll need:**
+
+-  Python dependencies “pygrgl”: ``pip install pygrgl``
+-  Command line tools “wget” and “tabix”:
+   ``sudo apt install wget tabix`` (or your distribution’s equivalent)
 
 Get Dataset
 ~~~~~~~~~~~
@@ -33,30 +35,30 @@ is stored as ``.vcf.gz``.
 
 .. parsed-literal::
 
-    --2026-02-06 12:31:22--  https://github.com/aprilweilab/grg_pheno_sim/raw/refs/heads/main/demos/data/test-200-samples.vcf.gz
-    Resolving github.com (github.com)... 140.82.114.4
-    Connecting to github.com (github.com)|140.82.114.4|:443... connected.
+    --2026-05-11 09:46:08--  https://github.com/aprilweilab/grg_pheno_sim/raw/refs/heads/main/demos/data/test-200-samples.vcf.gz
+    Resolving github.com (github.com)... 140.82.113.3
+    Connecting to github.com (github.com)|140.82.113.3|:443... connected.
     HTTP request sent, awaiting response... 302 Found
     Location: https://raw.githubusercontent.com/aprilweilab/grg_pheno_sim/refs/heads/main/demos/data/test-200-samples.vcf.gz [following]
-    --2026-02-06 12:31:23--  https://raw.githubusercontent.com/aprilweilab/grg_pheno_sim/refs/heads/main/demos/data/test-200-samples.vcf.gz
-    Resolving raw.githubusercontent.com (raw.githubusercontent.com)... 185.199.111.133, 185.199.110.133, 185.199.108.133, ...
+    --2026-05-11 09:46:08--  https://raw.githubusercontent.com/aprilweilab/grg_pheno_sim/refs/heads/main/demos/data/test-200-samples.vcf.gz
+    Resolving raw.githubusercontent.com (raw.githubusercontent.com)... 185.199.111.133, 185.199.109.133, 185.199.110.133, ...
     Connecting to raw.githubusercontent.com (raw.githubusercontent.com)|185.199.111.133|:443... connected.
     HTTP request sent, awaiting response... 200 OK
     Length: 494022 (482K) [application/octet-stream]
     Saving to: ‘vcf_convert.example.vcf.gz’
     
-         0K .......... .......... .......... .......... .......... 10% 1.87M 0s
-        50K .......... .......... .......... .......... .......... 20% 4.30M 0s
-       100K .......... .......... .......... .......... .......... 31% 3.73M 0s
-       150K .......... .......... .......... .......... .......... 41% 3.93M 0s
-       200K .......... .......... .......... .......... .......... 51% 4.32M 0s
-       250K .......... .......... .......... .......... .......... 62% 4.08M 0s
-       300K .......... .......... .......... .......... .......... 72% 4.49M 0s
-       350K .......... .......... .......... .......... .......... 82% 4.11M 0s
-       400K .......... .......... .......... .......... .......... 93% 4.59M 0s
-       450K .......... .......... .......... ..                   100% 4.37M=0.1s
+         0K .......... .......... .......... .......... .......... 10% 2.43M 0s
+        50K .......... .......... .......... .......... .......... 20% 7.11M 0s
+       100K .......... .......... .......... .......... .......... 31% 3.88M 0s
+       150K .......... .......... .......... .......... .......... 41% 7.37M 0s
+       200K .......... .......... .......... .......... .......... 51% 26.7M 0s
+       250K .......... .......... .......... .......... .......... 62% 10.3M 0s
+       300K .......... .......... .......... .......... .......... 72% 5.27M 0s
+       350K .......... .......... .......... .......... .......... 82% 14.6M 0s
+       400K .......... .......... .......... .......... .......... 93% 10.1M 0s
+       450K .......... .......... .......... ..                   100% 7.97M=0.07s
     
-    2026-02-06 12:31:23 (3.71 MB/s) - ‘vcf_convert.example.vcf.gz’ saved [494022/494022]
+    2026-05-11 09:46:09 (6.35 MB/s) - ‘vcf_convert.example.vcf.gz’ saved [494022/494022]
     
 
 
@@ -90,11 +92,11 @@ file.
     Traceback (most recent call last):
       File "/usr/lib/python3.10/multiprocessing/pool.py", line 125, in worker
         result = (True, func(*args, **kwds))
-      File "/home/ddehaas/GrgProject/public/grgl/pygrgl/clicmd/construct.py", line 300, in star_build_grg
+      File "/home/ddehaas/GrgProject/public/grgl/pygrgl/clicmd/construct.py", line 301, in star_build_grg
         return build_grg(*args)
-      File "/home/ddehaas/GrgProject/public/grgl/pygrgl/clicmd/construct.py", line 266, in build_grg
+      File "/home/ddehaas/GrgProject/public/grgl/pygrgl/clicmd/construct.py", line 267, in build_grg
         shape_grg = build_shape(range_triple, args, auto_args, input_file, output_file)
-      File "/home/ddehaas/GrgProject/public/grgl/pygrgl/clicmd/construct.py", line 253, in build_shape
+      File "/home/ddehaas/GrgProject/public/grgl/pygrgl/clicmd/construct.py", line 254, in build_shape
         tb_time = time_call(command, stdout=sys.stdout)
       File "/home/ddehaas/GrgProject/public/grgl/pygrgl/clicmd/common.py", line 48, in time_call
         subprocess.check_call(command, **kwargs)
@@ -106,11 +108,11 @@ file.
     The above exception was the direct cause of the following exception:
     
     Traceback (most recent call last):
-      File "/home/ddehaas/Py3Env/bin/grg", line 8, in <module>
+      File "/home/ddehaas/Py3Env/bin/grg", line 6, in <module>
         sys.exit(main())
       File "/home/ddehaas/GrgProject/public/grgl/pygrgl/cli.py", line 70, in main
         construct.from_tabular(args)
-      File "/home/ddehaas/GrgProject/public/grgl/pygrgl/clicmd/construct.py", line 421, in from_tabular
+      File "/home/ddehaas/GrgProject/public/grgl/pygrgl/clicmd/construct.py", line 422, in from_tabular
         list(
       File "/home/ddehaas/Py3Env/lib/python3.10/site-packages/tqdm/std.py", line 1181, in __iter__
         for obj in iterable:
@@ -147,106 +149,106 @@ GRG construction.
     Auto-calculating number of trees per part.
     Converting segments of input data to graphs
       0%|          | 0/100 [00:00<?, ?it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-      1%|          | 1/100 [00:00<00:11,  8.59it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-      3%|▎         | 3/100 [00:00<00:10,  9.21it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-      4%|▍         | 4/100 [00:00<00:11,  8.41it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-      5%|▌         | 5/100 [00:00<00:11,  8.09it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-      6%|▌         | 6/100 [00:00<00:12,  7.48it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+      2%|▏         | 2/100 [00:00<00:07, 13.33it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-      8%|▊         | 8/100 [00:00<00:11,  8.01it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+      4%|▍         | 4/100 [00:00<00:09,  9.66it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     10%|█         | 10/100 [00:01<00:10,  8.26it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+      6%|▌         | 6/100 [00:00<00:11,  7.85it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+      7%|▋         | 7/100 [00:00<00:11,  8.13it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+      8%|▊         | 8/100 [00:00<00:12,  7.64it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+      9%|▉         | 9/100 [00:01<00:11,  8.09it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     10%|█         | 10/100 [00:01<00:12,  7.23it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     12%|█▏        | 12/100 [00:01<00:08, 10.44it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     12%|█▏        | 12/100 [00:01<00:08,  9.82it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     14%|█▍        | 14/100 [00:01<00:06, 12.38it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     14%|█▍        | 14/100 [00:01<00:07, 11.77it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     16%|█▌        | 16/100 [00:01<00:06, 13.96it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     16%|█▌        | 16/100 [00:01<00:06, 13.41it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     18%|█▊        | 18/100 [00:01<00:05, 14.55it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     18%|█▊        | 18/100 [00:01<00:05, 14.54it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     20%|██        | 20/100 [00:01<00:05, 15.77it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     20%|██        | 20/100 [00:01<00:05, 15.41it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     22%|██▏       | 22/100 [00:01<00:04, 16.75it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     22%|██▏       | 22/100 [00:01<00:04, 15.93it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     24%|██▍       | 24/100 [00:01<00:04, 16.86it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     24%|██▍       | 24/100 [00:02<00:04, 15.59it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     26%|██▌       | 26/100 [00:02<00:04, 17.09it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     26%|██▌       | 26/100 [00:02<00:04, 16.06it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     28%|██▊       | 28/100 [00:02<00:04, 16.53it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     28%|██▊       | 28/100 [00:02<00:04, 16.36it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     30%|███       | 30/100 [00:02<00:04, 17.21it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     30%|███       | 30/100 [00:02<00:04, 16.54it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     32%|███▏      | 32/100 [00:02<00:03, 17.71it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     32%|███▏      | 32/100 [00:02<00:04, 16.83it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     34%|███▍      | 34/100 [00:02<00:03, 18.03it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     34%|███▍      | 34/100 [00:02<00:04, 16.15it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     36%|███▌      | 36/100 [00:02<00:03, 17.70it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     36%|███▌      | 36/100 [00:02<00:03, 16.42it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     38%|███▊      | 38/100 [00:02<00:03, 17.99it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     38%|███▊      | 38/100 [00:02<00:03, 16.24it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     40%|████      | 40/100 [00:02<00:03, 18.33it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     40%|████      | 40/100 [00:03<00:03, 16.32it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     42%|████▏     | 42/100 [00:02<00:03, 18.60it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     42%|████▏     | 42/100 [00:03<00:03, 16.39it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     44%|████▍     | 44/100 [00:03<00:03, 18.28it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     44%|████▍     | 44/100 [00:03<00:03, 16.48it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     46%|████▌     | 46/100 [00:03<00:02, 18.39it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     46%|████▌     | 46/100 [00:03<00:03, 16.44it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     48%|████▊     | 48/100 [00:03<00:02, 18.11it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     48%|████▊     | 48/100 [00:03<00:03, 16.14it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     50%|█████     | 50/100 [00:03<00:02, 18.22it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     50%|█████     | 50/100 [00:03<00:03, 16.19it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     52%|█████▏    | 52/100 [00:03<00:02, 18.52it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     52%|█████▏    | 52/100 [00:03<00:03, 15.94it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     54%|█████▍    | 54/100 [00:03<00:02, 18.66it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     54%|█████▍    | 54/100 [00:03<00:02, 16.04it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     56%|█████▌    | 56/100 [00:03<00:02, 18.71it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     56%|█████▌    | 56/100 [00:04<00:02, 16.14it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     58%|█████▊    | 58/100 [00:03<00:02, 18.85it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     58%|█████▊    | 58/100 [00:04<00:02, 16.16it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     60%|██████    | 60/100 [00:03<00:02, 19.00it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     60%|██████    | 60/100 [00:04<00:02, 15.78it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     62%|██████▏   | 62/100 [00:04<00:01, 19.06it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     62%|██████▏   | 62/100 [00:04<00:02, 16.20it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     64%|██████▍   | 64/100 [00:04<00:01, 18.94it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     64%|██████▍   | 64/100 [00:04<00:02, 16.56it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     66%|██████▌   | 66/100 [00:04<00:01, 18.87it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     66%|██████▌   | 66/100 [00:04<00:02, 16.91it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     68%|██████▊   | 68/100 [00:04<00:01, 18.93it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     68%|██████▊   | 68/100 [00:04<00:01, 17.43it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     70%|███████   | 70/100 [00:04<00:01, 19.03it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     70%|███████   | 70/100 [00:04<00:01, 17.04it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     72%|███████▏  | 72/100 [00:04<00:01, 19.07it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     72%|███████▏  | 72/100 [00:04<00:01, 16.72it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     74%|███████▍  | 74/100 [00:04<00:01, 19.14it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     74%|███████▍  | 74/100 [00:05<00:01, 16.84it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     76%|███████▌  | 76/100 [00:04<00:01, 18.74it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     76%|███████▌  | 76/100 [00:05<00:01, 16.46it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     78%|███████▊  | 78/100 [00:04<00:01, 17.23it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     78%|███████▊  | 78/100 [00:05<00:01, 16.35it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     80%|████████  | 80/100 [00:05<00:01, 16.92it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     80%|████████  | 80/100 [00:05<00:01, 17.08it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     82%|████████▏ | 82/100 [00:05<00:01, 16.11it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     82%|████████▏ | 82/100 [00:05<00:01, 17.30it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     84%|████████▍ | 84/100 [00:05<00:01, 15.69it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     84%|████████▍ | 84/100 [00:05<00:00, 17.32it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     86%|████████▌ | 86/100 [00:05<00:00, 15.05it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     86%|████████▌ | 86/100 [00:05<00:00, 17.48it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     88%|████████▊ | 88/100 [00:05<00:00, 14.98it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     88%|████████▊ | 88/100 [00:05<00:00, 17.09it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     90%|█████████ | 90/100 [00:05<00:00, 15.08it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     90%|█████████ | 90/100 [00:06<00:00, 17.15it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     92%|█████████▏| 92/100 [00:05<00:00, 15.19it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     92%|█████████▏| 92/100 [00:06<00:00, 16.25it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     94%|█████████▍| 94/100 [00:05<00:00, 15.04it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     94%|█████████▍| 94/100 [00:06<00:00, 15.67it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     96%|█████████▌| 96/100 [00:06<00:00, 15.07it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     96%|█████████▌| 96/100 [00:06<00:00, 16.01it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-     98%|█████████▊| 98/100 [00:06<00:00, 14.80it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
+     98%|█████████▊| 98/100 [00:06<00:00, 16.36it/s]WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
     WARNING: Conversion from VCF without a tabix index is very slow, and not recommended.
-    100%|██████████| 100/100 [00:06<00:00, 15.57it/s]
+    100%|██████████| 100/100 [00:06<00:00, 15.01it/s]
     Merging...
 
 
@@ -298,7 +300,7 @@ don’t get any warnings.
     Processing input file in 100 parts.
     Auto-calculating number of trees per part.
     Converting segments of input data to graphs
-    100%|██████████| 100/100 [00:03<00:00, 30.38it/s]
+    100%|██████████| 100/100 [00:03<00:00, 28.33it/s]
     Merging...
 
 

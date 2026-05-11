@@ -500,8 +500,8 @@ PYBIND11_MODULE(_grgl, m) {
                 :rtype: List[Tuple[int, int]]
             )^")
         .def("get_node_mutation_miss", &grgl::GRG::getNodesAndMutations<grgl::GRG::NodeMutMiss>, R"^(
-                Get a list of triples (NodeID, MutationID, "missingness" NodeID). Each 
-                Mutation typically is associated to a single Node, but rarely it can 
+                Get a list of triples (NodeID, MutationID, "missingness" NodeID). Each
+                Mutation typically is associated to a single Node, but rarely it can
                 have more than one Node, in which case it will show up in more than one row.
                 Results are ordered by NodeID, ascending.
 
@@ -618,6 +618,21 @@ PYBIND11_MODULE(_grgl, m) {
                 that the MutationId ascending order matches this order. Can be a memory-intensive
                 operation. Alternatively, you can just write the GRG to disk (save_grg()) and then
                 reload it (load_immutable_grg()) and it will use less memory (but be slower).
+            )^")
+        .def("mutations_are_unique",
+             &grgl::GRG::mutationsAreUnique,
+             R"^(
+                Check whether the Mutations in GRG are unique: there is a single Mutation (with MutationId)
+                for each unique (position, ref allele, alt allele) combination.
+                Since the mapping between MutationId and nodes is many-to-1 (not many-to-many), having unique
+                mutations means that each Mutation is associated with a single node in the graph. When a GRG
+                is constructed via `grg construct` this is always true of the resulting GRG. When a GRG
+                is constructed arbitrarily from the API, it may not be true.
+
+                This operation is O(M), where M is the number of mutations.
+
+                :return: True if the mutations are unique.
+                :rtype: bool
             )^")
         .def_property_readonly("num_mutations", &grgl::GRG::numMutations, R"^(
                 Get the total number of mutations in the GRG.
@@ -767,6 +782,19 @@ PYBIND11_MODULE(_grgl, m) {
             :param target: The NodeID for the target node (edge ends here).
             :type target: int
         )^")
+        .def("ensure_unique_mutations", &grgl::MutableGRG::ensureUniqueMutations, R"^(
+             Ensure that every Mutation in the GRG is unique: there is a single Mutation (with MutationId)
+             for each unique (position, ref allele, alt allele) combination. It does so by finding duplicate
+             Mutations, adding a new node that becomes a parent to them, and creating a new (single) mutation
+             representing them all. At the end of this method, the mutations will be unordered, and either
+             serializing the GRG to disk or calling sortMutations() will be necessary to get the new, correct
+             MutationIds.
+
+            This operation is O(M), where M is the number of mutations.
+
+            :return: The number of nodes that were added to the graph (the number of unique mutations that
+                previously had duplicates).
+        )^")
         .def("merge",
              &grgl::MutableGRG::merge,
              py::arg("other_grg_files"),
@@ -910,7 +938,7 @@ PYBIND11_MODULE(_grgl, m) {
           py::arg("filename"),
           py::arg("binary_mutations") = false,
           py::arg("use_node_times") = false,
-          py::arg("maintain_topology") = false,
+          py::arg("maintain_topology") = true,
           py::arg("compute_coals") = false,
           R"^(
         Convert a .trees (TSKit tree-sequence) file to a GRG.
@@ -922,9 +950,10 @@ PYBIND11_MODULE(_grgl, m) {
         :param use_node_times: Mutations will be assigned the time from the node below them, instead of
             the tskit Mutation object.
         :type use_node_times: bool
-        :param maintain_topology: Generates a slightly larger GRG, but ensures that we capture all tree
-            topology changes induced by recombination, not just the changes that result in a different
-            set of samples beneath a node.
+        :param maintain_topology: Default: True. Required for ensuring the correct sample-to-Mutation mapping
+            in the presence of nested (back) Mutations on the local tree. When True, we capture all tree topology
+            changes induced by recombination, not just the changes that result in a different set of samples
+            beneath each Mutation in the tree.
         :type maintain_topology: bool
         :param compute_coals: Compute the per-node coalescence counts. I.e., how many individuals coalesced
             exactly at the node (separate children have both haploid copies of the individual). This is an

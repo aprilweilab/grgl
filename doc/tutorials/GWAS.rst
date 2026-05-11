@@ -49,37 +49,6 @@ Get Dataset
 
 .. parsed-literal::
 
-    --2026-02-06 12:38:49--  https://github.com/aprilweilab/grg_pheno_sim/raw/refs/heads/main/demos/data/test-200-samples.vcf.gz
-    Resolving github.com (github.com)... 140.82.113.4
-    Connecting to github.com (github.com)|140.82.113.4|:443... connected.
-    HTTP request sent, awaiting response... 302 Found
-    Location: https://raw.githubusercontent.com/aprilweilab/grg_pheno_sim/refs/heads/main/demos/data/test-200-samples.vcf.gz [following]
-    --2026-02-06 12:38:49--  https://raw.githubusercontent.com/aprilweilab/grg_pheno_sim/refs/heads/main/demos/data/test-200-samples.vcf.gz
-    Resolving raw.githubusercontent.com (raw.githubusercontent.com)... 185.199.108.133, 185.199.111.133, 185.199.110.133, ...
-    Connecting to raw.githubusercontent.com (raw.githubusercontent.com)|185.199.108.133|:443... connected.
-    HTTP request sent, awaiting response... 200 OK
-    Length: 494022 (482K) [application/octet-stream]
-    Saving to: ‘gwas.example.vcf.gz’
-    
-         0K .......... .......... .......... .......... .......... 10% 1.99M 0s
-        50K .......... .......... .......... .......... .......... 20% 3.93M 0s
-       100K .......... .......... .......... .......... .......... 31% 4.50M 0s
-       150K .......... .......... .......... .......... .......... 41% 4.25M 0s
-       200K .......... .......... .......... .......... .......... 51% 4.32M 0s
-       250K .......... .......... .......... .......... .......... 62% 4.14M 0s
-       300K .......... .......... .......... .......... .......... 72% 4.18M 0s
-       350K .......... .......... .......... .......... .......... 82% 4.39M 0s
-       400K .......... .......... .......... .......... .......... 93% 3.06M 0s
-       450K .......... .......... .......... ..                   100% 5.78M=0.1s
-    
-    2026-02-06 12:38:49 (3.72 MB/s) - ‘gwas.example.vcf.gz’ saved [494022/494022]
-    
-
-
-.. parsed-literal::
-
-    Wrote 10893 total variants
-    Of which 6228 were written sparsely
     Stats for gwas.example.igd
     ... in range 0 - 18446744073709551615
       Variants in range: 10893
@@ -103,35 +72,6 @@ Convert to GRG
       # -j controls how many threads to use.
       grg construct -j 1 gwas.example.igd -o gwas.example.grg
     fi
-
-
-.. parsed-literal::
-
-    Processing input file in 85 parts.
-    Auto-calculating number of trees per part.
-    Converting segments of input data to graphs
-    100%|██████████| 85/85 [00:00<00:00, 159.81it/s]
-    Merging...
-
-
-.. parsed-literal::
-
-    === GRG Statistics ===
-    Nodes: 15481
-    Edges: 93351
-    Samples: 400
-    Mutations: 10893
-    Ploidy: 2
-    Phased: true
-    Populations: 0
-    Range of mutations: 55829 - 9999127
-    Specified range: 0 - 10894
-    ======================
-    Wrote simplified GRG with:
-      Nodes: 15481
-      Edges: 93351
-    Wrote GRG to gwas.example.grg
-
 
 Simulate Phenotype
 ------------------
@@ -219,6 +159,11 @@ First we’ll run the shell commands that perform a GWAS.
 
 .. parsed-literal::
 
+    Using the column 2 (the last one) for phenotype.
+
+
+.. parsed-literal::
+
     Wrote results to gwas.example.gwas.tsv
 
 
@@ -256,6 +201,7 @@ Now we can examine the results by loading the dataframe into pandas.
           <th></th>
           <th>POS</th>
           <th>ALT</th>
+          <th>REF</th>
           <th>COUNT</th>
           <th>BETA</th>
           <th>B0</th>
@@ -270,64 +216,70 @@ Now we can examine the results by loading the dataframe into pandas.
           <th>0</th>
           <td>55829</td>
           <td>G</td>
+          <td>A</td>
           <td>4</td>
-          <td>0.549634</td>
-          <td>-0.010993</td>
-          <td>0.504841</td>
-          <td>5.950858e-03</td>
-          <td>1.088726</td>
-          <td>0.277598</td>
+          <td>-0.512129</td>
+          <td>0.010243</td>
+          <td>0.505040</td>
+          <td>0.005166</td>
+          <td>-1.014035</td>
+          <td>0.311804</td>
         </tr>
         <tr>
           <th>1</th>
           <td>56812</td>
           <td>T</td>
+          <td>G</td>
           <td>3</td>
-          <td>0.907215</td>
-          <td>-0.013608</td>
-          <td>0.579622</td>
-          <td>1.222152e-02</td>
-          <td>1.565184</td>
-          <td>0.119137</td>
+          <td>0.794622</td>
+          <td>-0.011919</td>
+          <td>0.580456</td>
+          <td>0.009376</td>
+          <td>1.368961</td>
+          <td>0.172562</td>
         </tr>
         <tr>
           <th>2</th>
           <td>57349</td>
           <td>G</td>
+          <td>T</td>
           <td>1</td>
-          <td>-0.678575</td>
-          <td>0.003393</td>
-          <td>1.003880</td>
-          <td>2.302321e-03</td>
-          <td>-0.675952</td>
-          <td>0.499860</td>
+          <td>-1.466317</td>
+          <td>0.007332</td>
+          <td>0.999621</td>
+          <td>0.010750</td>
+          <td>-1.466873</td>
+          <td>0.143997</td>
         </tr>
         <tr>
           <th>3</th>
           <td>58785</td>
           <td>T</td>
+          <td>C</td>
           <td>10</td>
-          <td>0.057616</td>
-          <td>-0.002881</td>
-          <td>0.325235</td>
-          <td>1.584750e-04</td>
-          <td>0.177153</td>
-          <td>0.859570</td>
+          <td>-0.358335</td>
+          <td>0.017917</td>
+          <td>0.324263</td>
+          <td>0.006130</td>
+          <td>-1.105077</td>
+          <td>0.270467</td>
         </tr>
         <tr>
           <th>4</th>
           <td>59367</td>
           <td>A</td>
+          <td>G</td>
           <td>2</td>
-          <td>-0.908389</td>
-          <td>0.009084</td>
-          <td>0.709531</td>
-          <td>8.210244e-03</td>
-          <td>-1.280268</td>
-          <td>0.201949</td>
+          <td>-0.118437</td>
+          <td>0.001184</td>
+          <td>0.712412</td>
+          <td>0.000140</td>
+          <td>-0.166248</td>
+          <td>0.868131</td>
         </tr>
         <tr>
           <th>...</th>
+          <td>...</td>
           <td>...</td>
           <td>...</td>
           <td>...</td>
@@ -342,65 +294,70 @@ Now we can examine the results by loading the dataframe into pandas.
           <th>10888</th>
           <td>9997601</td>
           <td>G</td>
+          <td>C</td>
           <td>3</td>
-          <td>-0.167107</td>
-          <td>0.002507</td>
-          <td>0.583076</td>
-          <td>4.146596e-04</td>
-          <td>-0.286595</td>
-          <td>0.774722</td>
+          <td>0.113106</td>
+          <td>-0.001697</td>
+          <td>0.583141</td>
+          <td>0.000190</td>
+          <td>0.193959</td>
+          <td>0.846407</td>
         </tr>
         <tr>
           <th>10889</th>
           <td>9998038</td>
           <td>A</td>
+          <td>C</td>
           <td>21</td>
-          <td>0.002723</td>
-          <td>-0.000286</td>
-          <td>0.209978</td>
-          <td>8.491021e-07</td>
-          <td>0.012966</td>
-          <td>0.989668</td>
+          <td>-0.072860</td>
+          <td>0.007650</td>
+          <td>0.209914</td>
+          <td>0.000608</td>
+          <td>-0.347095</td>
+          <td>0.728889</td>
         </tr>
         <tr>
           <th>10890</th>
           <td>9998412</td>
           <td>G</td>
+          <td>T</td>
           <td>42</td>
-          <td>0.082101</td>
-          <td>-0.017241</td>
-          <td>0.164311</td>
-          <td>1.259359e-03</td>
-          <td>0.499667</td>
-          <td>0.617864</td>
+          <td>0.068393</td>
+          <td>-0.014362</td>
+          <td>0.164342</td>
+          <td>0.000874</td>
+          <td>0.416160</td>
+          <td>0.677743</td>
         </tr>
         <tr>
           <th>10891</th>
           <td>9999031</td>
           <td>C</td>
+          <td>G</td>
           <td>295</td>
-          <td>-0.095009</td>
-          <td>0.140138</td>
-          <td>0.116444</td>
-          <td>3.350993e-03</td>
-          <td>-0.815921</td>
-          <td>0.415526</td>
+          <td>-0.015402</td>
+          <td>0.022718</td>
+          <td>0.116634</td>
+          <td>0.000088</td>
+          <td>-0.132055</td>
+          <td>0.895075</td>
         </tr>
         <tr>
           <th>10892</th>
           <td>9999126</td>
           <td>T</td>
+          <td>A</td>
           <td>2</td>
-          <td>0.921135</td>
-          <td>-0.009211</td>
-          <td>0.709448</td>
-          <td>8.442252e-03</td>
-          <td>1.298383</td>
-          <td>0.195666</td>
+          <td>1.195692</td>
+          <td>-0.011957</td>
+          <td>0.707376</td>
+          <td>0.014225</td>
+          <td>1.690320</td>
+          <td>0.092540</td>
         </tr>
       </tbody>
     </table>
-    <p>10893 rows × 9 columns</p>
+    <p>10893 rows × 10 columns</p>
     </div>
 
 
@@ -482,6 +439,7 @@ variants with different allele frequencies on the same scale.
           <th></th>
           <th>POS</th>
           <th>ALT</th>
+          <th>REF</th>
           <th>COUNT</th>
           <th>BETA</th>
           <th>B0</th>
@@ -496,64 +454,70 @@ variants with different allele frequencies on the same scale.
           <th>0</th>
           <td>55829</td>
           <td>G</td>
+          <td>A</td>
           <td>4</td>
-          <td>0.076559</td>
-          <td>-0.001531</td>
-          <td>0.070680</td>
-          <td>5.893105e-03</td>
-          <td>1.083182</td>
-          <td>0.280045</td>
+          <td>-0.071335</td>
+          <td>0.001427</td>
+          <td>0.070707</td>
+          <td>0.005116</td>
+          <td>-1.008875</td>
+          <td>0.314266</td>
         </tr>
         <tr>
           <th>1</th>
           <td>56812</td>
           <td>T</td>
+          <td>G</td>
           <td>3</td>
-          <td>0.109857</td>
-          <td>-0.001648</td>
-          <td>0.070458</td>
-          <td>1.213189e-02</td>
-          <td>1.559188</td>
-          <td>0.120549</td>
+          <td>0.096223</td>
+          <td>-0.001443</td>
+          <td>0.070558</td>
+          <td>0.009307</td>
+          <td>1.363732</td>
+          <td>0.174200</td>
         </tr>
         <tr>
           <th>2</th>
           <td>57349</td>
           <td>G</td>
+          <td>T</td>
           <td>1</td>
-          <td>-0.047802</td>
-          <td>0.000239</td>
-          <td>0.070808</td>
-          <td>2.296608e-03</td>
-          <td>-0.675103</td>
-          <td>0.500398</td>
+          <td>-0.103295</td>
+          <td>0.000516</td>
+          <td>0.070508</td>
+          <td>0.010724</td>
+          <td>-1.465014</td>
+          <td>0.144503</td>
         </tr>
         <tr>
           <th>3</th>
           <td>58785</td>
           <td>T</td>
+          <td>C</td>
           <td>10</td>
-          <td>0.012395</td>
-          <td>-0.000620</td>
-          <td>0.070884</td>
-          <td>1.547976e-04</td>
-          <td>0.174866</td>
-          <td>0.861363</td>
+          <td>-0.077090</td>
+          <td>0.003854</td>
+          <td>0.070676</td>
+          <td>0.005988</td>
+          <td>-1.090740</td>
+          <td>0.276713</td>
         </tr>
         <tr>
           <th>4</th>
           <td>59367</td>
           <td>A</td>
+          <td>G</td>
           <td>2</td>
-          <td>-0.090156</td>
-          <td>0.000902</td>
-          <td>0.070599</td>
-          <td>8.169803e-03</td>
-          <td>-1.277021</td>
-          <td>0.203090</td>
+          <td>-0.011755</td>
+          <td>0.000118</td>
+          <td>0.070884</td>
+          <td>0.000139</td>
+          <td>-0.165830</td>
+          <td>0.868460</td>
         </tr>
         <tr>
           <th>...</th>
+          <td>...</td>
           <td>...</td>
           <td>...</td>
           <td>...</td>
@@ -568,65 +532,70 @@ variants with different allele frequencies on the same scale.
           <th>10888</th>
           <td>9997601</td>
           <td>G</td>
+          <td>C</td>
           <td>3</td>
-          <td>-0.020235</td>
-          <td>0.000304</td>
-          <td>0.070874</td>
-          <td>4.116188e-04</td>
-          <td>-0.285510</td>
-          <td>0.775552</td>
+          <td>0.013696</td>
+          <td>-0.000205</td>
+          <td>0.070882</td>
+          <td>0.000189</td>
+          <td>0.193225</td>
+          <td>0.846981</td>
         </tr>
         <tr>
           <th>10889</th>
           <td>9998038</td>
           <td>A</td>
+          <td>C</td>
           <td>21</td>
-          <td>0.000984</td>
-          <td>-0.000103</td>
-          <td>0.070889</td>
-          <td>9.834740e-07</td>
-          <td>0.013878</td>
-          <td>0.988941</td>
+          <td>-0.026328</td>
+          <td>0.002764</td>
+          <td>0.070864</td>
+          <td>0.000704</td>
+          <td>-0.371527</td>
+          <td>0.710643</td>
         </tr>
         <tr>
           <th>10890</th>
           <td>9998412</td>
           <td>G</td>
+          <td>T</td>
           <td>42</td>
-          <td>0.035205</td>
-          <td>-0.007393</td>
-          <td>0.070843</td>
-          <td>1.300555e-03</td>
-          <td>0.496945</td>
-          <td>0.619779</td>
+          <td>0.029327</td>
+          <td>-0.006159</td>
+          <td>0.070857</td>
+          <td>0.000903</td>
+          <td>0.413891</td>
+          <td>0.679402</td>
         </tr>
         <tr>
           <th>10891</th>
           <td>9999031</td>
           <td>C</td>
+          <td>G</td>
           <td>295</td>
-          <td>-0.056399</td>
-          <td>0.083189</td>
-          <td>0.070528</td>
-          <td>1.015194e-02</td>
-          <td>-0.799665</td>
-          <td>0.424863</td>
+          <td>-0.009143</td>
+          <td>0.013486</td>
+          <td>0.070880</td>
+          <td>0.000267</td>
+          <td>-0.128993</td>
+          <td>0.897494</td>
         </tr>
         <tr>
           <th>10892</th>
           <td>9999126</td>
           <td>T</td>
+          <td>A</td>
           <td>2</td>
-          <td>0.091421</td>
-          <td>-0.000914</td>
-          <td>0.070591</td>
-          <td>8.400669e-03</td>
-          <td>1.295089</td>
-          <td>0.196797</td>
+          <td>0.118671</td>
+          <td>-0.001187</td>
+          <td>0.070386</td>
+          <td>0.014155</td>
+          <td>1.686008</td>
+          <td>0.093369</td>
         </tr>
       </tbody>
     </table>
-    <p>10893 rows × 9 columns</p>
+    <p>10893 rows × 10 columns</p>
     </div>
 
 
