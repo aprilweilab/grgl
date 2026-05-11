@@ -29,6 +29,7 @@ RUN cd /grgl_src && mkdir cpp_build && cd cpp_build && mkdir /grgl_inst && \
 FROM ubuntu:22.04
 COPY --from=0 /grgl_inst/bin/ /usr/local/bin/
 COPY --from=0 /grgl_inst/lib/ /usr/local/lib/
+COPY --from=0 /grgl_inst/include/ /usr/local/include/
 COPY --from=0 /grgl_src/dist/pygrgl*.whl /tmp/
 COPY --from=0 /grgl_src/scripts/convertlz4.sh /usr/local/bin/gconvertlz4
 

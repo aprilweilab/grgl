@@ -152,4 +152,4 @@ See the provided [jupyter notebooks](https://github.com/aprilweilab/grgl/tree/ma
 | Total edges | 18,446,744,073,709,551,615 |
 | Edges to/from a single node | 4,294,967,295 |
 
-_Note_: Node limits can theoretically be expanded to about a trillion, by turning off the `COMPACT_NODE_IDS` preprocessor flag, but this mode is not well tested.
+_Note_: Node limits can theoretically be expanded to about a trillion, by turning on the `LARGE_NODE_IDS` preprocessor flag, but this mode is not well tested.
