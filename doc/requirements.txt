@@ -1,4 +1,4 @@
 breathe
-sphinx-rtd-theme
-pygrgl
 ipython
+pydata-sphinx-theme
+pygrgl

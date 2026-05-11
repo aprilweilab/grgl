@@ -19,7 +19,7 @@ finally:
 
 extensions = ["breathe", "sphinx.ext.autodoc", "sphinx.ext.autosummary", "IPython.sphinxext.ipython_console_highlighting"]
 
-html_theme = "sphinx_rtd_theme"
+html_theme = "pydata_sphinx_theme"
 
 # Breathe configuration
 breathe_projects = {
