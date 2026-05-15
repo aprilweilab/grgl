@@ -1,1 +1,3 @@
 tqdm
+numpy
+pyfaidx
