@@ -29,6 +29,7 @@ class PolarizationStats:
 class Flip:
     mut_id: int
     node_id: int
+    missing_node_id: int
     position: int
     ref: str
     alt: str
@@ -58,7 +59,7 @@ def add_options(subparser):
         "--map-batch-size",
         type=int,
         default=4096,
-        help="Number of changed mutations to collect before removing and remapping",
+        help="Number of flipped mutations to process per carrier-read and remap batch",
     )
 
 
@@ -70,42 +71,48 @@ def load_numpy():
     return np
 
 
-def get_downward_indicators(grg, mutation_ids, use_missingness):
+def get_downward_indicators(grg, mutation_ids):
     np = load_numpy()
-    values = np.zeros((len(mutation_ids), grg.num_mutations), dtype=np.float64)
-    miss = None
-    if use_missingness:
-        miss = values
+    values = np.zeros((len(mutation_ids), grg.num_mutations), dtype=np.int32)
     for row, mut_id in enumerate(mutation_ids):
         values[row, mut_id] = 1.0
-    if use_missingness:
-        values = np.zeros_like(values)
-    return grgl.matmul(grg, values, grgl.TraversalDirection.DOWN, miss=miss)
+    return grgl.matmul(grg, values, grgl.TraversalDirection.DOWN)
 
 
-def load_remaps(grg, removals, flips, map_batch_size, stats, force=False):
-    if not force and len(removals) + len(flips) < map_batch_size:
-        return
-    if not removals and not flips:
-        return
+def get_missingness_indicators(grg, missing_node_ids):
+    np = load_numpy()
+    if not any(missing_node_id != grgl.INVALID_NODE for missing_node_id in missing_node_ids):
+        return np.zeros((len(missing_node_ids), grg.num_samples), dtype=np.int32)
+
+    values = np.zeros((len(missing_node_ids), grg.num_mutations), dtype=np.int32)
+    init = np.zeros((len(missing_node_ids), grg.num_nodes), dtype=np.int32)
+    for row, missing_node_id in enumerate(missing_node_ids):
+        if missing_node_id != grgl.INVALID_NODE:
+            init[row, missing_node_id] = 1
+    return grgl.matmul(grg, values, grgl.TraversalDirection.DOWN, init=init)
+
+
+def build_flip_remaps(grg, flips, map_batch_size, stats):
+    if not flips:
+        return [], []
 
     np = load_numpy()
     remap_mutations = []
     remap_samples = []
 
-    if flips:
+    for start in range(0, len(flips), map_batch_size):
+        flip_batch = flips[start : start + map_batch_size]
         all_samples = np.arange(grg.num_samples, dtype=np.uint32)
-        mutation_ids = [flip.mut_id for flip in flips]
-        carrier_matrix = get_downward_indicators(grg, mutation_ids, use_missingness=False)
-        missing_matrix = get_downward_indicators(grg, mutation_ids, use_missingness=True)
+        mutation_ids = [flip.mut_id for flip in flip_batch]
+        missing_node_ids = [flip.missing_node_id for flip in flip_batch]
+        carrier_matrix = get_downward_indicators(grg, mutation_ids)
+        missing_matrix = get_missingness_indicators(grg, missing_node_ids)
 
-        for row, flip in enumerate(flips):
+        for row, flip in enumerate(flip_batch):
             carriers = np.flatnonzero(carrier_matrix[row] > 0).astype(np.uint32)
             missing = np.flatnonzero(missing_matrix[row] > 0).astype(np.uint32)
             unavailable = np.union1d(carriers, missing)
             flipped_carriers = np.setdiff1d(all_samples, unavailable, assume_unique=True)
-
-            removals.append((flip.mut_id, flip.node_id))
 
             if len(missing) > 0:
                 remap_mutations.append(grgl.Mutation(flip.position, MISSING_ALLELE, flip.ref, flip.time))
@@ -115,11 +122,16 @@ def load_remaps(grg, removals, flips, map_batch_size, stats, force=False):
             remap_mutations.append(grgl.Mutation(flip.position, flip.ref, flip.alt, flip.time))
             remap_samples.append(flipped_carriers.tolist())
 
+    return remap_mutations, remap_samples
+
+
+def apply_remaps(grg, removals, remap_mutations, remap_samples, map_batch_size):
+    if not removals and not remap_mutations:
+        return
+
     list(grg.get_node_mutation_miss())
     for mut_id, node_id in removals:
         grg.remove_mutation(mut_id, node_id)
-    removals.clear()
-    flips.clear()
 
     if remap_mutations:
         grgl.map_mutations(
@@ -152,7 +164,7 @@ def polarize_mutations_helper(grg, mut_lookup, batch, stats, allow_indel_flips, 
         if mut_id not in mut_lookup:
             continue
 
-        node_id, _missing_node_id = mut_lookup[mut_id]
+        node_id, missing_node_id = mut_lookup[mut_id]
         if node_id == grgl.INVALID_NODE:
             continue
 
@@ -164,7 +176,6 @@ def polarize_mutations_helper(grg, mut_lookup, batch, stats, allow_indel_flips, 
             stats.dropped_unknown += 1
             stats.unpolarized.append(position)
             removals.append((mut_id, node_id))
-            load_remaps(grg, removals, flips, map_batch_size, stats)
             continue
 
         ref = mutation.ref_allele
@@ -181,7 +192,6 @@ def polarize_mutations_helper(grg, mut_lookup, batch, stats, allow_indel_flips, 
                 stats.indel_flip_skipped += 1
                 stats.unpolarized.append(position)
                 removals.append((mut_id, node_id))
-                load_remaps(grg, removals, flips, map_batch_size, stats)
                 continue
 
             stats.swapped += 1
@@ -191,21 +201,22 @@ def polarize_mutations_helper(grg, mut_lookup, batch, stats, allow_indel_flips, 
                 Flip(
                     mut_id=mut_id,
                     node_id=node_id,
+                    missing_node_id=missing_node_id,
                     position=position,
                     ref=ref,
                     alt=alt,
                     time=mutation.time,
                 )
             )
-            load_remaps(grg, removals, flips, map_batch_size, stats)
             continue
 
         stats.inconsistent += 1
         stats.unpolarized.append(position)
         removals.append((mut_id, node_id))
-        load_remaps(grg, removals, flips, map_batch_size, stats)
 
-    load_remaps(grg, removals, flips, map_batch_size, stats, force=True)
+    remap_mutations, remap_samples = build_flip_remaps(grg, flips, map_batch_size, stats)
+    removals.extend((flip.mut_id, flip.node_id) for flip in flips)
+    apply_remaps(grg, removals, remap_mutations, remap_samples, map_batch_size)
     return results
 
 
@@ -253,6 +264,9 @@ def polarize_grg_from_fasta(
     allow_indel_flips=False,
     map_batch_size=4096,
 ):
+    if map_batch_size <= 0:
+        raise ValueError("--map-batch-size must be greater than zero")
+
     stats = PolarizationStats()
     fasta, contig = load_fasta(fasta_file)
     mut_lookup = build_mut_lookup(grg)
@@ -292,10 +306,6 @@ def polarize_grg_from_fasta(
             batch.append((mut_id, alt))
         elif drop_if_no_match:
             batch.append((mut_id, "N"))
-
-        if len(batch) >= map_batch_size:
-            polarize_mutations_helper(grg, mut_lookup, batch, stats, allow_indel_flips, map_batch_size)
-            batch.clear()
 
     if batch:
         polarize_mutations_helper(grg, mut_lookup, batch, stats, allow_indel_flips, map_batch_size)
