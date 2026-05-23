@@ -73,6 +73,7 @@ void GRG::removeMutation(const MutationId mutId, const NodeID nodeId) {
         }
     }
     api_exc_check(deleted, "Could not find NodeId " << nodeId << " in mutation mapping");
+    m_mutIdsByNodeIdSorted = false;
     m_mutsAreOrdered = false;
 }
 
