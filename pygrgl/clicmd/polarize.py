@@ -75,7 +75,7 @@ def get_downward_indicators(grg, mutation_ids):
     np = load_numpy()
     values = np.zeros((len(mutation_ids), grg.num_mutations), dtype=np.int32)
     for row, mut_id in enumerate(mutation_ids):
-        values[row, mut_id] = 1.0
+        values[row, mut_id] = 1
     return grgl.matmul(grg, values, grgl.TraversalDirection.DOWN)
 
 
@@ -215,8 +215,13 @@ def polarize_mutations_helper(grg, mut_lookup, batch, stats, allow_indel_flips, 
         removals.append((mut_id, node_id))
 
     remap_mutations, remap_samples = build_flip_remaps(grg, flips, map_batch_size, stats)
-    removals.extend((flip.mut_id, flip.node_id) for flip in flips)
-    apply_remaps(grg, removals, remap_mutations, remap_samples, map_batch_size)
+    apply_remaps(
+        grg,
+        removals + [(flip.mut_id, flip.node_id) for flip in flips],
+        remap_mutations,
+        remap_samples,
+        map_batch_size,
+    )
     return results
 
 
@@ -273,6 +278,12 @@ def polarize_grg_from_fasta(
     batch = []
     total_mutations = grg.num_mutations
 
+    def append_to_batch(mut_id, ancestral_allele):
+        batch.append((mut_id, ancestral_allele))
+        if len(batch) >= map_batch_size:
+            polarize_mutations_helper(grg, mut_lookup, batch, stats, allow_indel_flips, map_batch_size)
+            batch.clear()
+
     for mut_id in range(total_mutations):
         mutation = grg.get_mutation_by_id(mut_id)
         if mutation.allele == MISSING_ALLELE:
@@ -286,26 +297,26 @@ def polarize_grg_from_fasta(
         if ancestral is None:
             stats.after_alignment += 1
             if drop_if_no_match:
-                batch.append((mut_id, "N"))
+                append_to_batch(mut_id, "N")
             continue
 
         if ancestral[0] in UNKNOWN_ALLELES:
             stats.no_alignment += 1
             if drop_if_no_match:
-                batch.append((mut_id, "N"))
+                append_to_batch(mut_id, "N")
             continue
 
         ref_matches = bool(ref) and equals_ignore_case(ref, ancestral[: len(ref)])
         alt_matches = bool(alt) and equals_ignore_case(alt, ancestral[: len(alt)])
 
         if ref_matches and alt_matches:
-            batch.append((mut_id, ref if len(ref) >= len(alt) else alt))
+            append_to_batch(mut_id, ref if len(ref) >= len(alt) else alt)
         elif ref_matches:
-            batch.append((mut_id, ref))
+            append_to_batch(mut_id, ref)
         elif alt_matches:
-            batch.append((mut_id, alt))
+            append_to_batch(mut_id, alt)
         elif drop_if_no_match:
-            batch.append((mut_id, "N"))
+            append_to_batch(mut_id, "N")
 
     if batch:
         polarize_mutations_helper(grg, mut_lookup, batch, stats, allow_indel_flips, map_batch_size)
