@@ -143,6 +143,91 @@ def apply_remaps(grg, removals, remap_mutations, remap_samples, map_batch_size):
         )
 
 
+def build_site_swap_remaps(grg, site_entries, swap_index, ancestral_allele, stats):
+    np = load_numpy()
+    all_samples = np.arange(grg.num_samples, dtype=np.uint32)
+    mutation_ids = [entry[0] for entry in site_entries]
+    missing_node_ids = [entry[2] for entry in site_entries]
+    carrier_matrix = get_downward_indicators(grg, mutation_ids)
+    missing_matrix = get_missingness_indicators(grg, missing_node_ids)
+
+    old_ref = site_entries[0][3].ref_allele
+    position = int(site_entries[0][3].position)
+    time = site_entries[swap_index][3].time
+    missing = np.flatnonzero(missing_matrix[swap_index] > 0).astype(np.uint32)
+    unavailable = missing
+
+    remap_mutations = []
+    remap_samples = []
+    if len(missing) > 0:
+        remap_mutations.append(grgl.Mutation(position, MISSING_ALLELE, ancestral_allele, time))
+        remap_samples.append(missing.tolist())
+        stats.missing_remapped += 1
+
+    for row, (_mut_id, _node_id, _missing_node_id, mutation) in enumerate(site_entries):
+        carriers = np.flatnonzero(carrier_matrix[row] > 0).astype(np.uint32)
+        unavailable = np.union1d(unavailable, carriers)
+        if row != swap_index:
+            remap_mutations.append(grgl.Mutation(position, mutation.allele, ancestral_allele, mutation.time))
+            remap_samples.append(carriers.tolist())
+
+    old_ref_carriers = np.setdiff1d(all_samples, unavailable, assume_unique=True)
+    remap_mutations.append(grgl.Mutation(position, old_ref, ancestral_allele, time))
+    remap_samples.append(old_ref_carriers.tolist())
+    return remap_mutations, remap_samples
+
+
+def polarize_site_from_fasta(grg, site_entries, ancestral_allele, stats, drop_if_no_match, map_batch_size):
+    if not site_entries:
+        return
+
+    position = int(site_entries[0][3].position)
+    old_ref = site_entries[0][3].ref_allele
+    stats.total_seen += len(site_entries)
+
+    if ancestral_allele is None:
+        stats.after_alignment += 1
+        stats.unpolarized.append(position)
+        if drop_if_no_match:
+            removals = [(mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries]
+            apply_remaps(grg, removals, [], [], map_batch_size)
+        return
+
+    ancestral_allele = ancestral_allele.upper()
+    if ancestral_allele in UNKNOWN_ALLELES:
+        stats.no_alignment += 1
+        stats.unpolarized.append(position)
+        if drop_if_no_match:
+            removals = [(mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries]
+            apply_remaps(grg, removals, [], [], map_batch_size)
+        return
+
+    if ancestral_allele == old_ref.upper():
+        stats.already_polarized += len(site_entries)
+        stats.emitted += len(site_entries)
+        return
+
+    swap_index = -1
+    for idx, (_mut_id, _node_id, _missing_node_id, mutation) in enumerate(site_entries):
+        if mutation.allele.upper() == ancestral_allele:
+            swap_index = idx
+            break
+
+    if swap_index < 0:
+        stats.inconsistent += len(site_entries)
+        stats.unpolarized.append(position)
+        if drop_if_no_match:
+            removals = [(mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries]
+            apply_remaps(grg, removals, [], [], map_batch_size)
+        return
+
+    stats.swapped += 1
+    stats.emitted += len(site_entries)
+    removals = [(mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries]
+    remap_mutations, remap_samples = build_site_swap_remaps(grg, site_entries, swap_index, ancestral_allele, stats)
+    apply_remaps(grg, removals, remap_mutations, remap_samples, map_batch_size)
+
+
 def build_mut_lookup(grg):
     mut_lookup = {}
     for mut_id, node_id, missing_node_id in grg.get_mutation_node_miss():
@@ -275,51 +360,37 @@ def polarize_grg_from_fasta(
     stats = PolarizationStats()
     fasta, contig = load_fasta(fasta_file)
     mut_lookup = build_mut_lookup(grg)
-    batch = []
     total_mutations = grg.num_mutations
+    site_entries = []
+    site_key = None
 
-    def append_to_batch(mut_id, ancestral_allele):
-        batch.append((mut_id, ancestral_allele))
-        if len(batch) >= map_batch_size:
-            polarize_mutations_helper(grg, mut_lookup, batch, stats, allow_indel_flips, map_batch_size)
-            batch.clear()
+    def flush_site():
+        if not site_entries:
+            return
+        position = int(site_entries[0][3].position)
+        ancestral = fetch_ancestral(fasta, contig, position, 1)
+        polarize_site_from_fasta(grg, site_entries, ancestral, stats, drop_if_no_match, map_batch_size)
 
     for mut_id in range(total_mutations):
         mutation = grg.get_mutation_by_id(mut_id)
         if mutation.allele == MISSING_ALLELE:
             continue
 
-        ref = mutation.ref_allele
-        alt = mutation.allele
-        max_allele_len = max(len(ref), len(alt))
-        ancestral = fetch_ancestral(fasta, contig, int(mutation.position), max_allele_len)
-
-        if ancestral is None:
-            stats.after_alignment += 1
-            if drop_if_no_match:
-                append_to_batch(mut_id, "N")
+        if mut_id not in mut_lookup:
             continue
 
-        if ancestral[0] in UNKNOWN_ALLELES:
-            stats.no_alignment += 1
-            if drop_if_no_match:
-                append_to_batch(mut_id, "N")
+        node_id, missing_node_id = mut_lookup[mut_id]
+        if node_id == grgl.INVALID_NODE:
             continue
 
-        ref_matches = bool(ref) and equals_ignore_case(ref, ancestral[: len(ref)])
-        alt_matches = bool(alt) and equals_ignore_case(alt, ancestral[: len(alt)])
+        key = (int(mutation.position), mutation.ref_allele)
+        if site_key is not None and key != site_key:
+            flush_site()
+            site_entries.clear()
+        site_key = key
+        site_entries.append((mut_id, node_id, missing_node_id, mutation))
 
-        if ref_matches and alt_matches:
-            append_to_batch(mut_id, ref if len(ref) >= len(alt) else alt)
-        elif ref_matches:
-            append_to_batch(mut_id, ref)
-        elif alt_matches:
-            append_to_batch(mut_id, alt)
-        elif drop_if_no_match:
-            append_to_batch(mut_id, "N")
-
-    if batch:
-        polarize_mutations_helper(grg, mut_lookup, batch, stats, allow_indel_flips, map_batch_size)
+    flush_site()
 
     grg.sort_mutations()
     return stats
