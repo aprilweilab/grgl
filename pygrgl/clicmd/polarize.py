@@ -36,6 +36,13 @@ class Flip:
     time: float
 
 
+@dataclass(frozen=True)
+class SiteSwap:
+    entries: list
+    swap_index: int
+    ancestral_allele: str
+
+
 def add_options(subparser):
     subparser.add_argument("grg_file", help="Input GRG file to polarize")
     subparser.add_argument("fasta_file", help="FASTA containing the ancestral sequence")
@@ -143,41 +150,93 @@ def apply_remaps(grg, removals, remap_mutations, remap_samples, map_batch_size):
         )
 
 
-def build_site_swap_remaps(grg, site_entries, swap_index, ancestral_allele, stats):
+def build_site_swap_remaps(grg, site_swaps, map_batch_size, stats):
+    if not site_swaps:
+        return [], []
+
     np = load_numpy()
     all_samples = np.arange(grg.num_samples, dtype=np.uint32)
-    mutation_ids = [entry[0] for entry in site_entries]
-    missing_node_ids = [entry[2] for entry in site_entries]
-    carrier_matrix = get_downward_indicators(grg, mutation_ids)
-    missing_matrix = get_missingness_indicators(grg, missing_node_ids)
-
-    old_ref = site_entries[0][3].ref_allele
-    position = int(site_entries[0][3].position)
-    time = site_entries[swap_index][3].time
-    missing = np.flatnonzero(missing_matrix[swap_index] > 0).astype(np.uint32)
-    unavailable = missing
-
     remap_mutations = []
     remap_samples = []
-    if len(missing) > 0:
-        remap_mutations.append(grgl.Mutation(position, MISSING_ALLELE, ancestral_allele, time))
-        remap_samples.append(missing.tolist())
-        stats.missing_remapped += 1
 
-    for row, (_mut_id, _node_id, _missing_node_id, mutation) in enumerate(site_entries):
-        carriers = np.flatnonzero(carrier_matrix[row] > 0).astype(np.uint32)
-        unavailable = np.union1d(unavailable, carriers)
-        if row != swap_index:
-            remap_mutations.append(grgl.Mutation(position, mutation.allele, ancestral_allele, mutation.time))
-            remap_samples.append(carriers.tolist())
+    site_state = []
+    flat_entries = []
+    for site_index, site_swap in enumerate(site_swaps):
+        entries = site_swap.entries
+        swap_mutation = entries[site_swap.swap_index][3]
+        site_state.append(
+            {
+                "ancestral_allele": site_swap.ancestral_allele,
+                "old_ref": entries[0][3].ref_allele,
+                "position": int(entries[0][3].position),
+                "time": swap_mutation.time,
+                "unavailable": np.array([], dtype=np.uint32),
+            }
+        )
+        for row_index, entry in enumerate(entries):
+            flat_entries.append((site_index, row_index, site_swap.swap_index, entry))
 
-    old_ref_carriers = np.setdiff1d(all_samples, unavailable, assume_unique=True)
-    remap_mutations.append(grgl.Mutation(position, old_ref, ancestral_allele, time))
-    remap_samples.append(old_ref_carriers.tolist())
+    for start in range(0, len(flat_entries), map_batch_size):
+        entry_batch = flat_entries[start : start + map_batch_size]
+        mutation_ids = [entry[3][0] for entry in entry_batch]
+        missing_node_ids = [entry[3][2] for entry in entry_batch]
+        carrier_matrix = get_downward_indicators(grg, mutation_ids)
+        missing_matrix = get_missingness_indicators(grg, missing_node_ids)
+
+        for row, (site_index, row_index, swap_index, entry) in enumerate(entry_batch):
+            _mut_id, _node_id, _missing_node_id, mutation = entry
+            state = site_state[site_index]
+            carriers = np.flatnonzero(carrier_matrix[row] > 0).astype(np.uint32)
+            state["unavailable"] = np.union1d(state["unavailable"], carriers)
+
+            if row_index == swap_index:
+                missing = np.flatnonzero(missing_matrix[row] > 0).astype(np.uint32)
+                state["unavailable"] = np.union1d(state["unavailable"], missing)
+                if len(missing) > 0:
+                    remap_mutations.append(
+                        grgl.Mutation(
+                            state["position"],
+                            MISSING_ALLELE,
+                            state["ancestral_allele"],
+                            state["time"],
+                        )
+                    )
+                    remap_samples.append(missing.tolist())
+                    stats.missing_remapped += 1
+            else:
+                remap_mutations.append(
+                    grgl.Mutation(
+                        state["position"],
+                        mutation.allele,
+                        state["ancestral_allele"],
+                        mutation.time,
+                    )
+                )
+                remap_samples.append(carriers.tolist())
+
+    for state in site_state:
+        old_ref_carriers = np.setdiff1d(all_samples, state["unavailable"], assume_unique=True)
+        remap_mutations.append(
+            grgl.Mutation(
+                state["position"],
+                state["old_ref"],
+                state["ancestral_allele"],
+                state["time"],
+            )
+        )
+        remap_samples.append(old_ref_carriers.tolist())
+
     return remap_mutations, remap_samples
 
 
-def polarize_site_from_fasta(grg, site_entries, ancestral_allele, stats, drop_if_no_match, map_batch_size):
+def polarize_site_from_fasta(
+    site_entries,
+    ancestral_allele,
+    stats,
+    drop_if_no_match,
+    removals,
+    site_swaps,
+):
     if not site_entries:
         return
 
@@ -189,8 +248,7 @@ def polarize_site_from_fasta(grg, site_entries, ancestral_allele, stats, drop_if
         stats.after_alignment += 1
         stats.unpolarized.append(position)
         if drop_if_no_match:
-            removals = [(mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries]
-            apply_remaps(grg, removals, [], [], map_batch_size)
+            removals.extend((mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries)
         return
 
     ancestral_allele = ancestral_allele.upper()
@@ -198,8 +256,7 @@ def polarize_site_from_fasta(grg, site_entries, ancestral_allele, stats, drop_if
         stats.no_alignment += 1
         stats.unpolarized.append(position)
         if drop_if_no_match:
-            removals = [(mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries]
-            apply_remaps(grg, removals, [], [], map_batch_size)
+            removals.extend((mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries)
         return
 
     if ancestral_allele == old_ref.upper():
@@ -217,14 +274,17 @@ def polarize_site_from_fasta(grg, site_entries, ancestral_allele, stats, drop_if
         stats.inconsistent += len(site_entries)
         stats.unpolarized.append(position)
         if drop_if_no_match:
-            removals = [(mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries]
-            apply_remaps(grg, removals, [], [], map_batch_size)
+            removals.extend((mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries)
         return
 
     stats.swapped += 1
     stats.emitted += len(site_entries)
-    removals = [(mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries]
-    remap_mutations, remap_samples = build_site_swap_remaps(grg, site_entries, swap_index, ancestral_allele, stats)
+    removals.extend((mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries)
+    site_swaps.append(SiteSwap(list(site_entries), swap_index, ancestral_allele))
+
+
+def apply_site_remaps(grg, removals, site_swaps, map_batch_size, stats):
+    remap_mutations, remap_samples = build_site_swap_remaps(grg, site_swaps, map_batch_size, stats)
     apply_remaps(grg, removals, remap_mutations, remap_samples, map_batch_size)
 
 
@@ -363,13 +423,32 @@ def polarize_grg_from_fasta(
     total_mutations = grg.num_mutations
     site_entries = []
     site_key = None
+    pending_removals = []
+    pending_site_swaps = []
+
+    def flush_pending(force=False):
+        if not pending_removals and not pending_site_swaps:
+            return
+        if not force and len(pending_removals) + len(pending_site_swaps) < map_batch_size:
+            return
+        apply_site_remaps(grg, pending_removals, pending_site_swaps, map_batch_size, stats)
+        pending_removals.clear()
+        pending_site_swaps.clear()
 
     def flush_site():
         if not site_entries:
             return
         position = int(site_entries[0][3].position)
         ancestral = fetch_ancestral(fasta, contig, position, 1)
-        polarize_site_from_fasta(grg, site_entries, ancestral, stats, drop_if_no_match, map_batch_size)
+        polarize_site_from_fasta(
+            site_entries,
+            ancestral,
+            stats,
+            drop_if_no_match,
+            pending_removals,
+            pending_site_swaps,
+        )
+        flush_pending()
 
     for mut_id in range(total_mutations):
         mutation = grg.get_mutation_by_id(mut_id)
@@ -391,6 +470,7 @@ def polarize_grg_from_fasta(
         site_entries.append((mut_id, node_id, missing_node_id, mutation))
 
     flush_site()
+    flush_pending(force=True)
 
     grg.sort_mutations()
     return stats
