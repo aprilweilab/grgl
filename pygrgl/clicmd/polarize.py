@@ -231,9 +231,10 @@ def build_site_swap_remaps(grg, site_swaps, map_batch_size, stats):
 
 def polarize_site_from_fasta(
     site_entries,
-    ancestral_allele,
+    ancestral_sequence,
     stats,
     drop_if_no_match,
+    allow_indel_flips,
     removals,
     site_swaps,
 ):
@@ -244,43 +245,47 @@ def polarize_site_from_fasta(
     old_ref = site_entries[0][3].ref_allele
     stats.total_seen += len(site_entries)
 
-    if ancestral_allele is None:
+    if ancestral_sequence is None:
         stats.after_alignment += 1
         stats.unpolarized.append(position)
         if drop_if_no_match:
             removals.extend((mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries)
         return
 
-    ancestral_allele = ancestral_allele.upper()
-    if ancestral_allele in UNKNOWN_ALLELES:
+    ancestral_sequence = ancestral_sequence.upper()
+    if ancestral_sequence[0] in UNKNOWN_ALLELES:
         stats.no_alignment += 1
         stats.unpolarized.append(position)
         if drop_if_no_match:
             removals.extend((mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries)
         return
 
-    if ancestral_allele == old_ref.upper():
-        stats.already_polarized += len(site_entries)
-        stats.emitted += len(site_entries)
-        return
+    matches = []
+    if allele_matches_ancestral(old_ref, ancestral_sequence):
+        matches.append((-1, old_ref))
 
-    swap_index = -1
     for idx, (_mut_id, _node_id, _missing_node_id, mutation) in enumerate(site_entries):
-        if mutation.allele.upper() == ancestral_allele:
-            swap_index = idx
-            break
+        if allele_matches_ancestral(mutation.allele, ancestral_sequence):
+            matches.append((idx, mutation.allele))
 
-    if swap_index < 0:
+    if not matches:
         stats.inconsistent += len(site_entries)
         stats.unpolarized.append(position)
         if drop_if_no_match:
             removals.extend((mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries)
         return
 
+    swap_index, ancestral_allele = max(matches, key=lambda item: len(item[1]))
+
+    if swap_index < 0:
+        stats.already_polarized += len(site_entries)
+        stats.emitted += len(site_entries)
+        return
+
     stats.swapped += 1
     stats.emitted += len(site_entries)
     removals.extend((mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries)
-    site_swaps.append(SiteSwap(list(site_entries), swap_index, ancestral_allele))
+    site_swaps.append(SiteSwap(list(site_entries), swap_index, ancestral_allele.upper()))
 
 
 def apply_site_remaps(grg, removals, site_swaps, map_batch_size, stats):
@@ -407,6 +412,13 @@ def equals_ignore_case(left, right):
     return left.upper() == right.upper()
 
 
+def allele_matches_ancestral(allele, ancestral_sequence):
+    return bool(allele) and len(allele) <= len(ancestral_sequence) and equals_ignore_case(
+        allele,
+        ancestral_sequence[: len(allele)],
+    )
+
+
 def polarize_grg_from_fasta(
     grg,
     fasta_file,
@@ -439,12 +451,16 @@ def polarize_grg_from_fasta(
         if not site_entries:
             return
         position = int(site_entries[0][3].position)
-        ancestral = fetch_ancestral(fasta, contig, position, 1)
+        max_allele_len = max(
+            max(len(entry[3].ref_allele), len(entry[3].allele)) for entry in site_entries
+        )
+        ancestral = fetch_ancestral(fasta, contig, position, max_allele_len)
         polarize_site_from_fasta(
             site_entries,
             ancestral,
             stats,
             drop_if_no_match,
+            allow_indel_flips,
             pending_removals,
             pending_site_swaps,
         )
