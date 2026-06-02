@@ -31,7 +31,6 @@
 #include "grgl/grgnode.h"
 #include "grgl/map_mutations.h"
 #include "grgl/mut_iterator.h"
-#include "grgl/polarization.h"
 #include "grgl/serialize.h"
 #include "grgl/transform.h"
 #include "grgl/ts2grg.h"
@@ -80,16 +79,6 @@ int main(int argc, char** argv) {
         "genomeRange",
         "Only construct GRG for the given genome range: 'x:y' means [x, y) (x inclusive, y exclusive)",
         {'r', "range"});
-    args::ValueFlag<std::string> polarizeFasta(
-        parser, "polarize", "Polarize mutations using this ancestral FASTA (GRG input only)", {"polarize"});
-    args::Flag keepNoMatch(parser,
-                           "keep-no-match",
-                           "Keep mutations with no matching allele in the FASTA (instead of dropping them)",
-                           {"keep-no-match"});
-    args::Flag oneBasedIndexing(parser,
-                                "one-based-indexing",
-                                "Treat mutation positions as 1-based when indexing into the FASTA",
-                                {"one-based-indexing"});
     args::Flag noSimplify(parser, "no-simplify", "Compare the results to the given GRG", {'l', "no-simplify"});
     args::Flag MAFFlip(
         parser, "maf-flip", "Switch the reference allele with the major allele when they differ", {"maf-flip"});
@@ -176,14 +165,6 @@ int main(int argc, char** argv) {
         std::cout << "GRGL Version " << GRGL_MAJOR_VERSION << "." << GRGL_MINOR_VERSION << std::endl;
         return 0;
     }
-    if (polarizeFasta && windowedSplit) {
-        std::cerr << "Cannot combine --polarize with --windowedSplit" << std::endl;
-        return 1;
-    }
-    if (polarizeFasta && supportedInputFormat(*infile)) {
-        std::cerr << "--polarize only supports .grg input files" << std::endl;
-        return 1;
-    }
     if (!infile) {
         std::cout << parser;
         return 0;
@@ -269,7 +250,7 @@ int main(int argc, char** argv) {
             return 2;
         }
     } else if (ends_with(*infile, ".grg")) {
-        const bool mutableNeeded = (bool)mapMutations || (bool)reduce || static_cast<bool>(polarizeFasta);
+        const bool mutableNeeded = (bool)mapMutations || (bool)reduce;
         if (mutableNeeded) {
             theGRG = grgl::loadMutableGRG(*infile);
         } else {
@@ -395,37 +376,6 @@ int main(int argc, char** argv) {
 
     if (showStats) {
         dumpStats(theGRG);
-    }
-
-    if (polarizeFasta) {
-        auto mutGRG = std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG);
-        if (!mutGRG) {
-            std::cerr << "Polarization requires a mutable GRG" << std::endl;
-            return 1;
-        }
-
-        START_TIMING_OPERATION();
-        grgl::PolarizationStats stats = grgl::polarizeGrgFromFasta(
-            mutGRG, *polarizeFasta, !static_cast<bool>(keepNoMatch), static_cast<bool>(oneBasedIndexing));
-        if (verbose) {
-            EMIT_TIMING_MESSAGE("Polarization took ");
-        }
-
-        const std::string outputPath = outfile ? *outfile : *infile;
-        const auto counts = saveGRG(mutGRG, outputPath, !noSimplify);
-        wroteOutput = true;
-
-        std::cout << "Polarization complete" << std::endl;
-        std::cout << "  Total seen:        " << stats.totalSeen << std::endl;
-        std::cout << "  Emitted:           " << stats.emitted << std::endl;
-        std::cout << "  Already polarized: " << stats.alreadyPolarized << std::endl;
-        std::cout << "  Swapped:           " << stats.swapped << std::endl;
-        std::cout << "  Dropped unknown:   " << stats.droppedUnknown << std::endl;
-        std::cout << "  Inconsistent:      " << stats.inconsistent << std::endl;
-        if (verbose) {
-            std::cout << "Saved GRG with " << counts.first << " nodes and " << counts.second << " edges to "
-                      << outputPath << std::endl;
-        }
     }
 
     if (windowedSplit) {

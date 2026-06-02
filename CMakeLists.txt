@@ -159,7 +159,6 @@ set(GRGL_PUBLIC_HEADERS
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/grg.h
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/grgnode.h
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/mutation.h
-    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/polarization.h
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/ts2grg.h
   )
 
@@ -171,7 +170,6 @@ set(GRGL_CORE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/map_mutations.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/mut_iterator.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/mutation.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/polarization.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/serialize.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/transform.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/ts2grg.cpp
