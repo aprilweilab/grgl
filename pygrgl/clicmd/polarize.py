@@ -21,7 +21,7 @@ class PolarizationStats:
     inconsistent: int = 0
     after_alignment: int = 0
     no_alignment: int = 0
-    indel_flip_skipped: int = 0
+    non_snv_skipped: int = 0
     missing_remapped: int = 0
 
 
@@ -56,11 +56,6 @@ def add_options(subparser):
         "--keep-no-match",
         action="store_true",
         help="Keep mutations with no matching allele in the FASTA (instead of dropping them)",
-    )
-    subparser.add_argument(
-        "--allow-indel-flips",
-        action="store_true",
-        help="Allow REF/ALT flips for length-changing alleles; default drops ambiguous indel flips",
     )
     subparser.add_argument(
         "--map-batch-size",
@@ -234,7 +229,6 @@ def polarize_site_from_fasta(
     ancestral_sequence,
     stats,
     drop_if_no_match,
-    allow_indel_flips,
     removals,
     site_swaps,
 ):
@@ -244,6 +238,15 @@ def polarize_site_from_fasta(
     position = int(site_entries[0][3].position)
     old_ref = site_entries[0][3].ref_allele
     stats.total_seen += len(site_entries)
+
+    if len(old_ref) != 1 or any(
+        len(mutation.allele) != 1 for _mut_id, _node_id, _missing_node_id, mutation in site_entries
+    ):
+        stats.non_snv_skipped += len(site_entries)
+        stats.unpolarized.append(position)
+        if drop_if_no_match:
+            removals.extend((mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries)
+        return
 
     if ancestral_sequence is None:
         stats.after_alignment += 1
@@ -284,7 +287,6 @@ def polarize_site_from_fasta(
 
     stats.swapped += 1
     stats.emitted += len(site_entries)
-    removals.extend((mut_id, node_id) for mut_id, node_id, _missing_node_id, _mutation in site_entries)
     site_swaps.append(SiteSwap(list(site_entries), swap_index, ancestral_allele.upper()))
 
 
@@ -300,7 +302,7 @@ def build_mut_lookup(grg):
     return mut_lookup
 
 
-def polarize_mutations_helper(grg, mut_lookup, batch, stats, allow_indel_flips, map_batch_size):
+def polarize_mutations_helper(grg, mut_lookup, batch, stats, map_batch_size):
     results = [False] * len(batch)
     if not batch:
         return results
@@ -330,6 +332,11 @@ def polarize_mutations_helper(grg, mut_lookup, batch, stats, allow_indel_flips, 
 
         ref = mutation.ref_allele
         alt = mutation.allele
+        if len(ref) != 1 or len(alt) != 1:
+            stats.non_snv_skipped += 1
+            stats.unpolarized.append(position)
+            removals.append((mut_id, node_id))
+            continue
 
         if ancestral_allele == ref.upper():
             stats.already_polarized += 1
@@ -338,12 +345,6 @@ def polarize_mutations_helper(grg, mut_lookup, batch, stats, allow_indel_flips, 
             continue
 
         if ancestral_allele == alt.upper():
-            if len(ref) != len(alt) and not allow_indel_flips:
-                stats.indel_flip_skipped += 1
-                stats.unpolarized.append(position)
-                removals.append((mut_id, node_id))
-                continue
-
             stats.swapped += 1
             stats.emitted += 1
             results[idx] = True
@@ -375,9 +376,9 @@ def polarize_mutations_helper(grg, mut_lookup, batch, stats, allow_indel_flips, 
     return results
 
 
-def polarize_mutations(grg, batch, stats, allow_indel_flips=False, map_batch_size=4096):
+def polarize_mutations(grg, batch, stats, map_batch_size=4096):
     mut_lookup = build_mut_lookup(grg)
-    results = polarize_mutations_helper(grg, mut_lookup, batch, stats, allow_indel_flips, map_batch_size)
+    results = polarize_mutations_helper(grg, mut_lookup, batch, stats, map_batch_size)
     grg.sort_mutations()
     return results
 
@@ -423,7 +424,6 @@ def polarize_grg_from_fasta(
     grg,
     fasta_file,
     drop_if_no_match=True,
-    allow_indel_flips=False,
     map_batch_size=4096,
 ):
     if map_batch_size <= 0:
@@ -437,33 +437,83 @@ def polarize_grg_from_fasta(
     site_key = None
     pending_removals = []
     pending_site_swaps = []
+    pending_swap_entry_count = 0
+    pending_map_removals = []
+    pending_remap_mutations = []
+    pending_remap_samples = []
+
+    def materialize_site_swaps():
+        nonlocal pending_swap_entry_count
+        if not pending_site_swaps:
+            return
+        remap_mutations, remap_samples = build_site_swap_remaps(
+            grg, pending_site_swaps, map_batch_size, stats
+        )
+        for site_swap in pending_site_swaps:
+            pending_map_removals.extend(
+                (mut_id, node_id)
+                for mut_id, node_id, _missing_node_id, _mutation in site_swap.entries
+            )
+        pending_remap_mutations.extend(remap_mutations)
+        pending_remap_samples.extend(remap_samples)
+        pending_site_swaps.clear()
+        pending_swap_entry_count = 0
+
+    def flush_remaps():
+        if not pending_map_removals and not pending_remap_mutations:
+            return
+        apply_remaps(
+            grg,
+            pending_map_removals,
+            pending_remap_mutations,
+            pending_remap_samples,
+            map_batch_size,
+        )
+        pending_map_removals.clear()
+        pending_remap_mutations.clear()
+        pending_remap_samples.clear()
 
     def flush_pending(force=False):
-        if not pending_removals and not pending_site_swaps:
+        nonlocal pending_swap_entry_count
+        if force:
+            materialize_site_swaps()
+            if pending_remap_mutations:
+                pending_map_removals[:0] = pending_removals
+                pending_removals.clear()
+                flush_remaps()
+            elif pending_removals:
+                apply_remaps(grg, pending_removals, [], [], map_batch_size)
+                pending_removals.clear()
             return
-        if not force and len(pending_removals) + len(pending_site_swaps) < map_batch_size:
+
+        if pending_swap_entry_count >= map_batch_size:
+            materialize_site_swaps()
+        if len(pending_remap_mutations) >= map_batch_size:
+            pending_map_removals[:0] = pending_removals
+            pending_removals.clear()
+            flush_remaps()
             return
-        apply_site_remaps(grg, pending_removals, pending_site_swaps, map_batch_size, stats)
-        pending_removals.clear()
-        pending_site_swaps.clear()
+        if pending_removals and not pending_site_swaps and len(pending_removals) >= map_batch_size:
+            apply_remaps(grg, pending_removals, [], [], map_batch_size)
+            pending_removals.clear()
 
     def flush_site():
+        nonlocal pending_swap_entry_count
         if not site_entries:
             return
+        previous_swap_count = len(pending_site_swaps)
         position = int(site_entries[0][3].position)
-        max_allele_len = max(
-            max(len(entry[3].ref_allele), len(entry[3].allele)) for entry in site_entries
-        )
-        ancestral = fetch_ancestral(fasta, contig, position, max_allele_len)
+        ancestral = fetch_ancestral(fasta, contig, position, 1)
         polarize_site_from_fasta(
             site_entries,
             ancestral,
             stats,
             drop_if_no_match,
-            allow_indel_flips,
             pending_removals,
             pending_site_swaps,
         )
+        if len(pending_site_swaps) > previous_swap_count:
+            pending_swap_entry_count += len(site_entries)
         flush_pending()
 
     for mut_id in range(total_mutations):
@@ -512,7 +562,6 @@ def polarize_command(arguments):
             grg,
             arguments.fasta_file,
             drop_if_no_match=not arguments.keep_no_match,
-            allow_indel_flips=arguments.allow_indel_flips,
             map_batch_size=arguments.map_batch_size,
         )
     except ValueError as error:
@@ -530,5 +579,5 @@ def polarize_command(arguments):
     print(f"  Inconsistent:         {stats.inconsistent}")
     print(f"  After alignment end:  {stats.after_alignment}")
     print(f"  Alignment mismatch:   {stats.no_alignment}")
-    print(f"  Indel flips skipped:  {stats.indel_flip_skipped}")
+    print(f"  Non-SNVs skipped:     {stats.non_snv_skipped}")
     print(f"  Missingness remapped: {stats.missing_remapped}")
