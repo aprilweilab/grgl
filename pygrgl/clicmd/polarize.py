@@ -104,7 +104,6 @@ def build_flip_remaps(grg, flips, map_batch_size, stats):
 
     for start in range(0, len(flips), map_batch_size):
         flip_batch = flips[start : start + map_batch_size]
-        all_samples = np.arange(grg.num_samples, dtype=np.uint32)
         mutation_ids = [flip.mut_id for flip in flip_batch]
         missing_node_ids = [flip.missing_node_id for flip in flip_batch]
         carrier_matrix = get_downward_indicators(grg, mutation_ids)
@@ -113,8 +112,10 @@ def build_flip_remaps(grg, flips, map_batch_size, stats):
         for row, flip in enumerate(flip_batch):
             carriers = np.flatnonzero(carrier_matrix[row] > 0).astype(np.uint32)
             missing = np.flatnonzero(missing_matrix[row] > 0).astype(np.uint32)
-            unavailable = np.union1d(carriers, missing)
-            flipped_carriers = np.setdiff1d(all_samples, unavailable, assume_unique=True)
+            unavailable = np.zeros(grg.num_samples, dtype=bool)
+            unavailable[carriers] = True
+            unavailable[missing] = True
+            flipped_carriers = np.flatnonzero(~unavailable).astype(np.uint32)
 
             if len(missing) > 0:
                 remap_mutations.append(grgl.Mutation(flip.position, MISSING_ALLELE, flip.ref, flip.time))
@@ -150,7 +151,6 @@ def build_site_swap_remaps(grg, site_swaps, map_batch_size, stats):
         return [], []
 
     np = load_numpy()
-    all_samples = np.arange(grg.num_samples, dtype=np.uint32)
     remap_mutations = []
     remap_samples = []
 
@@ -165,7 +165,7 @@ def build_site_swap_remaps(grg, site_swaps, map_batch_size, stats):
                 "old_ref": entries[0][3].ref_allele,
                 "position": int(entries[0][3].position),
                 "time": swap_mutation.time,
-                "unavailable": np.array([], dtype=np.uint32),
+                "unavailable": np.zeros(grg.num_samples, dtype=bool),
             }
         )
         for row_index, entry in enumerate(entries):
@@ -182,11 +182,11 @@ def build_site_swap_remaps(grg, site_swaps, map_batch_size, stats):
             _mut_id, _node_id, _missing_node_id, mutation = entry
             state = site_state[site_index]
             carriers = np.flatnonzero(carrier_matrix[row] > 0).astype(np.uint32)
-            state["unavailable"] = np.union1d(state["unavailable"], carriers)
+            state["unavailable"][carriers] = True
 
             if row_index == swap_index:
                 missing = np.flatnonzero(missing_matrix[row] > 0).astype(np.uint32)
-                state["unavailable"] = np.union1d(state["unavailable"], missing)
+                state["unavailable"][missing] = True
                 if len(missing) > 0:
                     remap_mutations.append(
                         grgl.Mutation(
@@ -210,7 +210,7 @@ def build_site_swap_remaps(grg, site_swaps, map_batch_size, stats):
                 remap_samples.append(carriers.tolist())
 
     for state in site_state:
-        old_ref_carriers = np.setdiff1d(all_samples, state["unavailable"], assume_unique=True)
+        old_ref_carriers = np.flatnonzero(~state["unavailable"]).astype(np.uint32)
         remap_mutations.append(
             grgl.Mutation(
                 state["position"],
