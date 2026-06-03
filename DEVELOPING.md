@@ -18,14 +18,42 @@ Other environment variables that control the Python-based build are:
 
 ## Utilities
 
-There are two utilities `gconverter` and `gindexer` that are built when performing the build either via CMake or python. These utilities can be run with `--help` to see options; they are used for converting files (.vcf, .vcf.gz, and BGEN) to IGD and for indexing BGEN files (which is required before providing a BGEN input to GRG construction).
+Use [igdtools](https://pypi.org/project/igdtools/) to perform conversion from `.vcf.gz` to IGD for testing with GRG:
+```
+pip install igdtools
+```
+
+There are also two (less well tested) utilities `gconverter` and `gindexer` that are built when performing the build either via CMake or python. These utilities can be run with `--help` to see options; they are used for converting files (.vcf, .vcf.gz, and BGEN) to IGD and for indexing BGEN files (which is required before providing a BGEN input to GRG construction).
 
 ## Testing
 
-* C++ unit tests are built as `grgl_test`, and running that executable will tell you the status of those tests.
-* An end-to-end test can be run via `pytest test/endtoend/run_tests.py`. These tests build GRGs using the currently installed grgl (so make sure you have built/installed your latest changes). The GRGs are then compared against known allele counts to make sure that the mutation to sample relationship was not broken by changes.
+### C++ Unit Tests
+
+Build the C++ code manually, in debug mode:
+```
+mkdir build
+cd build
+cmake .. -DCMAKE_BUILD_TYPE=Debug
+```
+
+Run the tests:
+```
+./grgl_test  # In build/
+```
+
+Add new tests:
+* See `test/unit/test_*.cpp` for examples. If you create a new test file, add it to `CMakeLists.txt` in the `GRGL_TEST_SOURCES` list (search for it).
+
+### End-to-end Tests
+
+End-to-end tests can be run via `pytest test/`. These tests build GRGs using the currently installed grgl (so make sure you have built/installed your latest changes).
+
+Adding a new test can be done by adding a method to one of the existing [unittest.TestCase](https://docs.python.org/3/library/unittest.html#unittest.TestCase) classes. That method must be named like `test_*` for pytest to find it.
+
+Adding a new file can be done by creating a file `test/endtoend/test_*.py` (again, so pytest finds it) following a similar pattern to the existing test files.
 
 ## Code formatting
 
 * The code is formatted via `clang-format`, and CI workflows on Github will fail unless the code is formatted properly. Run `./format.sh` from the top-level repo directory to format code. `./format-check.sh` can be used to verify the code is properly formatted.
+* The `pygrgl/` and `test/endtoend/` directories are formatted via [black](https://pypi.org/project/black/), e.g. `black pygrgl/ test/endtoend/`
 
