@@ -1006,22 +1006,78 @@ public:
     NodeIDList getOrderedNodes(TraversalDirection direction) override {
         // TODO: replace this error with actually using a Visitor here to get the numbering.
         api_exc_check(nodesAreTopo(), "Nodes are not in topological order; use a Visitor instead");
-        NodeIDList result(numNodes());
+        // The "negative" nodes are interleaved with regular positive nodes in
+        // m_nodes (any call sequence of make_node(negative=true) followed by
+        // make_node() yields interleaved IDs -- e.g. an algorithm that adds an
+        // offspring sample then a bubble per recombine_multi call produces
+        // m_negativeNodes = [N, N+2, N+4, ...] with bubbles at the odd
+        // positions). The previous implementation here:
+        //   (a) placed negative IDs at result[0..numNegative-1], then
+        //   (b) wrote std::iota over result[0..numNodes-numNegative-1] with
+        //       values 0..numNodes-numNegative-1, OVERWRITING the negative IDs
+        //       just placed and silently filling result[numNodes-numNegative..]
+        //       with default-constructed 0s, and
+        //   (c) assumed positive IDs were contiguous in 0..numNodes-numNegative-1,
+        //       which is false whenever a single negative-then-positive pair has
+        //       ever been added -- the high positive IDs (e.g. bubble nodes
+        //       created post-load) are simply omitted from the result list.
+        // Consequences observed downstream: matmul DOWN never visited offspring
+        // (their nodeValues stayed at 0 -> samples carried no mutations); fast
+        // serialization paths walking this list never visited bubble nodes, so
+        // save_grg dropped them silently.
+        //
+        // This rewrite uses an explicit set lookup on the negative IDs so the
+        // positive iteration walks the true positive ID set (which may be
+        // sparse). Negatives are placed at the correct end for the requested
+        // direction: at the end for DIRECTION_DOWN (top-down: ancestors first,
+        // leaves last), and at the beginning for DIRECTION_UP (bottom-up:
+        // leaves first, ancestors last).
+        // Within the negative-node section, ordering matters across
+        // generations. Recombination algorithms (e.g. NonDuplicationRecombination)
+        // can attach a new offspring directly to an older offspring via the
+        // path-compression early-attach branch, producing
+        //   older_negative -> newer_negative
+        // DOWN edges in multi-generation simulations. Older offspring
+        // therefore become non-leaf parents of newer offspring.
+        //
+        // Creation order in m_negativeNodes (older first) matches the
+        // older->younger parent->child orientation: for DIRECTION_DOWN
+        // (parents before children), forward iteration is correct; for
+        // DIRECTION_UP (children before parents), iterate in reverse.
+        NodeIDList result;
+        result.reserve(numNodes());
         const size_t numNegative = m_negativeNodes.size();
-        // First, add the negative nodes in reverse order
-        size_t i = 0;
-        for (size_t j = numNegative; j > 0; j--) {
-            result[i++] = m_negativeNodes[j - 1];
-        }
+        NodeIDSet negSet(m_negativeNodes.begin(), m_negativeNodes.end());
         if (direction == grgl::TraversalDirection::DIRECTION_DOWN) {
-            auto it = result.rbegin();
-            std::advance(it, numNegative);
-            std::iota(it, result.rend(), 0);
+            // Positives in DESCENDING ID order (roots first), skipping negatives.
+            for (NodeID id = numNodes(); id > 0; id--) {
+                const NodeID actualId = id - 1;
+                if (negSet.find(actualId) == negSet.end()) {
+                    result.push_back(actualId);
+                }
+            }
+            // Negatives in creation order (older first): parents of any
+            // intra-negative chain visited before their children.
+            for (NodeID nid : m_negativeNodes) {
+                result.push_back(nid);
+            }
         } else {
-            auto it = result.begin();
-            std::advance(it, numNegative);
-            std::iota(it, result.end(), 0);
+            // Negatives in REVERSE creation order (younger first): children
+            // of any intra-negative chain visited before their parents, so
+            // matmulSumChildrenUp on an older negative finds its younger
+            // negative children already finalized.
+            for (auto it = m_negativeNodes.rbegin(); it != m_negativeNodes.rend(); ++it) {
+                result.push_back(*it);
+            }
+            // Positives in ASCENDING ID order (samples first, roots last),
+            // skipping negatives.
+            for (NodeID id = 0; id < numNodes(); id++) {
+                if (negSet.find(id) == negSet.end()) {
+                    result.push_back(id);
+                }
+            }
         }
+        release_assert(result.size() == numNodes());
         return std::move(result);
     }
 
