@@ -230,19 +230,18 @@ class TestGrgModify(unittest.TestCase):
         numpy.testing.assert_allclose(orig_product, product2)
 
         topo_up = pygrgl.get_topo_order(grg, pygrgl.TraversalDirection.UP, [])
+
         # Correct counts.
         self.assertEqual(len(topo_up), grg.num_nodes)
         self.assertEqual(len(topo_up), orig_node_ct + new_above + new_below)
         # Every node appears only once.
         self.assertEqual(len(topo_up), len(set(topo_up)))
-        # The new "above" nodes should be at the beginning
+        # The new "below" nodes should be at the beginning
         self.assertEqual(
-            topo_up[:new_above], list(reversed(above2)) + list(reversed(above1))
+            topo_up[:new_below], list(reversed(below2)) + list(reversed(below1))
         )
-        # The new "below" nodes should be at the end
-        self.assertEqual(
-            topo_up[-new_below:], list(reversed(below2)) + list(reversed(below1))
-        )
+        # The new "above" nodes should be at the end
+        self.assertEqual(topo_up[-new_above:], above1 + above2)
 
         topo_down = pygrgl.get_topo_order(grg, pygrgl.TraversalDirection.DOWN, [])
         # Correct counts.
@@ -250,21 +249,19 @@ class TestGrgModify(unittest.TestCase):
         self.assertEqual(len(topo_down), orig_node_ct + new_above + new_below)
         # Every node appears only once.
         self.assertEqual(len(topo_down), len(set(topo_down)))
-        # The new "below" nodes should be at the beginning
+        # The new "above" nodes should be at the beginning
         self.assertEqual(
-            topo_up[:new_below], list(reversed(below2)) + list(reversed(below1))
+            topo_down[:new_above], list(reversed(above2)) + list(reversed(above1))
         )
         # The new "below" nodes should be at the end
-        self.assertEqual(
-            topo_up[-new_above:], list(reversed(above2)) + list(reversed(above1))
-        )
+        self.assertEqual(topo_down[-new_below:], below1 + below2)
 
         # The two directions should be equivalent, just opposite orders.
         self.assertEqual(topo_up, list(reversed(topo_down)))
 
         # Save our new samples, and verify that this still doesn't change the matmul result.
         grg.set_samples(below2)
-        self.assertEqual(grg.get_samples(), below2)
+        self.assertEqual(grg.get_sample_nodes(), below2)
         product3 = pygrgl.matmul(grg, rand_input, pygrgl.TraversalDirection.DOWN)[0]
         numpy.testing.assert_allclose(orig_product, product3)
 
