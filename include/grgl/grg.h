@@ -451,7 +451,8 @@ public:
             }
         } else {
             const NodeMutMiss query = {nodeId, 0, 0};
-            auto mutIdIt = std::lower_bound(m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end(), query, NodeMutMissLt());
+            auto mutIdIt = std::lower_bound(
+                m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end(), query, NodeMutMissLt());
             while (mutIdIt != m_mutIdsByNodeIdAndMiss.end() && std::get<0>(*mutIdIt) == nodeId) {
                 if (std::get<1>(*mutIdIt) != INVALID_MUTATION_ID) {
                     result.push_back(nodeAndMutAndMissToType<T>(*mutIdIt));
@@ -487,7 +488,8 @@ public:
             return false;
         }
         const std::tuple<NodeID, MutationId, NodeID> query = {nodeId, 0, 0};
-        auto mutIdIt = std::lower_bound(m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end(), query, NodeMutMissLt());
+        auto mutIdIt =
+            std::lower_bound(m_mutIdsByNodeIdAndMiss.begin(), m_mutIdsByNodeIdAndMiss.end(), query, NodeMutMissLt());
         while (mutIdIt != m_mutIdsByNodeIdAndMiss.end() && std::get<0>(*mutIdIt) == nodeId) {
             if (std::get<1>(*mutIdIt) != INVALID_MUTATION_ID) {
                 return true;
@@ -1003,27 +1005,7 @@ public:
 
     bool edgesAreOrdered() const override { return false; }
 
-    NodeIDList getOrderedNodes(TraversalDirection direction) override {
-        // TODO: replace this error with actually using a Visitor here to get the numbering.
-        api_exc_check(nodesAreTopo(), "Nodes are not in topological order; use a Visitor instead");
-        NodeIDList result(numNodes());
-        const size_t numNegative = m_negativeNodes.size();
-        // First, add the negative nodes in reverse order
-        size_t i = 0;
-        for (size_t j = numNegative; j > 0; j--) {
-            result[i++] = m_negativeNodes[j - 1];
-        }
-        if (direction == grgl::TraversalDirection::DIRECTION_DOWN) {
-            auto it = result.rbegin();
-            std::advance(it, numNegative);
-            std::iota(it, result.rend(), 0);
-        } else {
-            auto it = result.begin();
-            std::advance(it, numNegative);
-            std::iota(it, result.end(), 0);
-        }
-        return std::move(result);
-    }
+    NodeIDList getOrderedNodes(TraversalDirection direction) override;
 
     /**
      * Create a new node in the GRG.

@@ -270,4 +270,14 @@ inline std::string getTmpDir() {
     return "/tmp";
 }
 
+template <typename T> inline void vectReverse(std::vector<T>& vect) {
+    if (vect.empty()) {
+        return;
+    }
+    size_t j = vect.size() - 1;
+    for (size_t i = 0; i < j; i++, j--) {
+        std::swap(vect[i], vect[j]);
+    }
+}
+
 #endif /* GRGL_UTIL_H */

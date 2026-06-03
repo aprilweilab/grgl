@@ -585,4 +585,33 @@ void MutableGRG::compact(NodeID nodeId) {
     }
 }
 
+NodeIDList MutableGRG::getOrderedNodes(TraversalDirection direction) {
+    // TODO: replace this error with actually using a Visitor here to get the numbering.
+    api_exc_check(nodesAreTopo(), "Nodes are not in topological order; use a Visitor instead");
+    // The "negative" nodes can be interleaved with regular positive nodes in m_nodes (any call
+    // sequence of make_node(negative=true) followed by make_node() yields interleaved IDs)
+    NodeIDList result;
+    result.reserve(numNodes());
+    const size_t numNegative = m_negativeNodes.size();
+    for (auto it = m_negativeNodes.crbegin(); it != m_negativeNodes.crend(); ++it) {
+        result.push_back(*it);
+    }
+    size_t nextNeg = 0;
+    // Positives in ASCENDING ID order (samples first, roots last), skipping negatives.
+    for (NodeID id = 0; id < numNodes(); id++) {
+        if (nextNeg < numNegative && m_negativeNodes[nextNeg] == id) {
+            nextNeg++;
+            continue;
+        }
+        result.push_back(id);
+    }
+    release_assert(nextNeg == numNegative); // We better have seen all of the negative nodes!
+    release_assert(result.size() == numNodes());
+    // The DOWN direction is just the reverse of the list that we created for UP
+    if (direction == grgl::TraversalDirection::DIRECTION_DOWN) {
+        vectReverse(result);
+    }
+    return std::move(result);
+}
+
 } // namespace grgl
