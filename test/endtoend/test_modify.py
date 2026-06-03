@@ -86,7 +86,9 @@ class TestGrgModify(unittest.TestCase):
         # Pick a different random node and add two mutations to it.
         self.assertTrue(grg.num_nodes > 1001)
         new_mut_id1 = grg.add_mutation(pygrgl.Mutation(0, "FAKE ALT", "00"), 500)
-        new_mut_id2 = grg.add_mutation(pygrgl.Mutation(500_000_000, "FAKE ALT2", "002"), 1001)
+        new_mut_id2 = grg.add_mutation(
+            pygrgl.Mutation(500_000_000, "FAKE ALT2", "002"), 1001
+        )
         self.assertNotEqual(new_mut_id1, new_mut_id2)
         self.assertFalse(grg.mutations_are_ordered)
         # The node->mut map should be updated properly as well
@@ -121,7 +123,7 @@ class TestGrgModify(unittest.TestCase):
         self.assertFalse(grg.samples_are_ordered)
 
         # Do matmul and get the value for sample 10 (which is "old" sample 60)
-        inmat = numpy.ones( (1, grg.num_mutations) )
+        inmat = numpy.ones((1, grg.num_mutations))
         result = pygrgl.matmul(grg, inmat, pygrgl.TraversalDirection.DOWN)[0]
         old_value = result[10]
 
@@ -152,7 +154,9 @@ class TestGrgModify(unittest.TestCase):
 
         negative_new = grg.make_node(negative=True)
         self.assertFalse(grg.nodes_are_ordered)
-        grg.connect(0, -negative_new)                # Connect negative as child: breaks counting order
+        grg.connect(
+            0, -negative_new
+        )  # Connect negative as child: breaks counting order
         self.assertFalse(grg.nodes_are_ordered)
 
         topo_list = pygrgl.get_topo_order(grg, pygrgl.TraversalDirection.UP, [])
@@ -162,10 +166,107 @@ class TestGrgModify(unittest.TestCase):
         # Now TRULY break the topological order, which will force the get_topo_order() to run a DFS
         # and produce a new order
         negative_new = grg.make_node(negative=True)
-        grg.connect(-negative_new, 10)                # Break the order entirely
+        grg.connect(-negative_new, 10)  # Break the order entirely
 
         # FIXME: this will barf right now
         topo_list = pygrgl.get_topo_order(grg, pygrgl.TraversalDirection.UP, [])
+
+    def test_regr_negnodes_matmul(self):
+        """
+        Regression test for the following scenario: load a MutableGRG, add some positive and
+        negative nodes, interleaved (alternating between them). Verify that the topological
+        order produces the correct order (negative nodes first), other newly added nodes last.
+        Verify that DOWN matmul() produces the expected result. Verify that matmul() after
+        set_samples() produces the expected result.
+        """
+        grg = pygrgl.load_mutable_grg(self.grg_filename, load_up_edges=True)
+
+        # Check our order invariant before any changes.
+        topo_up = pygrgl.get_topo_order(grg, pygrgl.TraversalDirection.UP, [])
+        topo_down = pygrgl.get_topo_order(grg, pygrgl.TraversalDirection.DOWN, [])
+        self.assertEqual(topo_up, list(reversed(topo_down)))
+
+        # Get our original matmul result
+        rand_input = numpy.random.standard_normal((1, grg.num_mutations))
+        orig_product = pygrgl.matmul(grg, rand_input, pygrgl.TraversalDirection.DOWN)[0]
+
+        # Just add two rows of new nodes above the previous roots and below the previous samples.
+        orig_node_ct = grg.num_nodes
+        orig_roots = grg.get_root_nodes()
+        orig_samples = grg.get_sample_nodes()
+
+        above1 = []
+        for r in orig_roots:
+            a = grg.make_node()
+            grg.connect(a, r)
+            above1.append(a)
+
+        below1 = []
+        for s in orig_samples:
+            b = grg.make_node(negative=True)
+            grg.connect(s, -b)
+            below1.append(b)
+
+        above2 = []
+        for r in above1:
+            a = grg.make_node()
+            grg.connect(a, r)
+            above2.append(a)
+
+        below2 = []
+        for s in below1:
+            b = grg.make_node(negative=True)
+            grg.connect(s, -b)
+            below2.append(b)
+
+        self.assertFalse(grg.nodes_are_ordered)
+
+        new_below = len(orig_samples) * 2
+        new_above = len(orig_roots) * 2
+
+        # Compare to our original matmul result. We have not modified the Mutations or Samples,
+        # so this should be identical!
+        product2 = pygrgl.matmul(grg, rand_input, pygrgl.TraversalDirection.DOWN)[0]
+        numpy.testing.assert_allclose(orig_product, product2)
+
+        topo_up = pygrgl.get_topo_order(grg, pygrgl.TraversalDirection.UP, [])
+        # Correct counts.
+        self.assertEqual(len(topo_up), grg.num_nodes)
+        self.assertEqual(len(topo_up), orig_node_ct + new_above + new_below)
+        # Every node appears only once.
+        self.assertEqual(len(topo_up), len(set(topo_up)))
+        # The new "above" nodes should be at the beginning
+        self.assertEqual(
+            topo_up[:new_above], list(reversed(above2)) + list(reversed(above1))
+        )
+        # The new "below" nodes should be at the end
+        self.assertEqual(
+            topo_up[-new_below:], list(reversed(below2)) + list(reversed(below1))
+        )
+
+        topo_down = pygrgl.get_topo_order(grg, pygrgl.TraversalDirection.DOWN, [])
+        # Correct counts.
+        self.assertEqual(len(topo_down), grg.num_nodes)
+        self.assertEqual(len(topo_down), orig_node_ct + new_above + new_below)
+        # Every node appears only once.
+        self.assertEqual(len(topo_down), len(set(topo_down)))
+        # The new "below" nodes should be at the beginning
+        self.assertEqual(
+            topo_up[:new_below], list(reversed(below2)) + list(reversed(below1))
+        )
+        # The new "below" nodes should be at the end
+        self.assertEqual(
+            topo_up[-new_above:], list(reversed(above2)) + list(reversed(above1))
+        )
+
+        # The two directions should be equivalent, just opposite orders.
+        self.assertEqual(topo_up, list(reversed(topo_down)))
+
+        # Save our new samples, and verify that this still doesn't change the matmul result.
+        grg.set_samples(below2)
+        self.assertEqual(grg.get_samples(), below2)
+        product3 = pygrgl.matmul(grg, rand_input, pygrgl.TraversalDirection.DOWN)[0]
+        numpy.testing.assert_allclose(orig_product, product3)
 
 
 if __name__ == "__main__":
