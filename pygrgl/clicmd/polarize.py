@@ -17,23 +17,11 @@ class PolarizationStats:
     emitted: int = 0
     already_polarized: int = 0
     swapped: int = 0
-    dropped_unknown: int = 0
     inconsistent: int = 0
     after_alignment: int = 0
     no_alignment: int = 0
     non_snv_skipped: int = 0
     missing_remapped: int = 0
-
-
-@dataclass(frozen=True)
-class Flip:
-    mut_id: int
-    node_id: int
-    missing_node_id: int
-    position: int
-    ref: str
-    alt: str
-    time: float
 
 
 @dataclass(frozen=True)
@@ -50,7 +38,8 @@ def add_options(subparser):
         "-o",
         "--output",
         dest="output_file",
-        help="Output GRG file (defaults to overwriting the input file)",
+        required=True,
+        help="Output GRG file",
     )
     subparser.add_argument(
         "--keep-no-match",
@@ -73,27 +62,6 @@ def load_numpy():
     return np
 
 
-def get_downward_indicators(grg, mutation_ids):
-    np = load_numpy()
-    values = np.zeros((len(mutation_ids), grg.num_mutations), dtype=np.int32)
-    for row, mut_id in enumerate(mutation_ids):
-        values[row, mut_id] = 1
-    return grgl.matmul(grg, values, grgl.TraversalDirection.DOWN)
-
-
-def get_missingness_indicators(grg, missing_node_ids):
-    np = load_numpy()
-    if not any(missing_node_id != grgl.INVALID_NODE for missing_node_id in missing_node_ids):
-        return np.zeros((len(missing_node_ids), grg.num_samples), dtype=np.int32)
-
-    values = np.zeros((len(missing_node_ids), grg.num_mutations), dtype=np.int32)
-    init = np.zeros((len(missing_node_ids), grg.num_nodes), dtype=np.int32)
-    for row, missing_node_id in enumerate(missing_node_ids):
-        if missing_node_id != grgl.INVALID_NODE:
-            init[row, missing_node_id] = 1
-    return grgl.matmul(grg, values, grgl.TraversalDirection.DOWN, init=init)
-
-
 def get_descendant_samples(grg, node_id, np):
     if node_id == grgl.INVALID_NODE:
         return np.array([], dtype=np.uint32)
@@ -104,40 +72,7 @@ def get_descendant_samples(grg, node_id, np):
     )
 
 
-def build_flip_remaps(grg, flips, map_batch_size, stats):
-    if not flips:
-        return [], []
-
-    np = load_numpy()
-    remap_mutations = []
-    remap_samples = []
-
-    for start in range(0, len(flips), map_batch_size):
-        flip_batch = flips[start : start + map_batch_size]
-        mutation_ids = [flip.mut_id for flip in flip_batch]
-        missing_node_ids = [flip.missing_node_id for flip in flip_batch]
-        carrier_matrix = get_downward_indicators(grg, mutation_ids)
-        missing_matrix = get_missingness_indicators(grg, missing_node_ids)
-
-        for row, flip in enumerate(flip_batch):
-            carriers = np.flatnonzero(carrier_matrix[row] > 0).astype(np.uint32)
-            missing = np.flatnonzero(missing_matrix[row] > 0).astype(np.uint32)
-            unavailable = np.zeros(grg.num_samples, dtype=bool)
-            unavailable[carriers] = True
-            unavailable[missing] = True
-            flipped_carriers = np.flatnonzero(~unavailable).astype(np.uint32)
-
-            if len(missing) > 0:
-                remap_mutations.append(grgl.Mutation(flip.position, MISSING_ALLELE, flip.ref, flip.time))
-                remap_samples.append(missing.tolist())
-                stats.missing_remapped += 1
-
-            remap_mutations.append(grgl.Mutation(flip.position, flip.ref, flip.alt, flip.time))
-            remap_samples.append(flipped_carriers.tolist())
-
-    return remap_mutations, remap_samples
-
-
+# apply all remaps in a batch (can be from multiple sites)
 def apply_remaps(grg, removals, remap_mutations, remap_samples, map_batch_size):
     if not removals and not remap_mutations:
         return
@@ -156,6 +91,7 @@ def apply_remaps(grg, removals, remap_mutations, remap_samples, map_batch_size):
         )
 
 
+# compute mutation removals and remaps for one site
 def build_site_swap_remaps(grg, site_swaps, map_batch_size, stats):
     if not site_swaps:
         return [], [], []
@@ -237,7 +173,8 @@ def build_site_swap_remaps(grg, site_swaps, map_batch_size, stats):
     return removals, remap_mutations, remap_samples
 
 
-def polarize_site_from_fasta(
+# determine whether a site is already polarized or needs a swap
+def classify_site(
     site_entries,
     ancestral_sequence,
     stats,
@@ -303,99 +240,11 @@ def polarize_site_from_fasta(
     site_swaps.append(SiteSwap(list(site_entries), swap_index, ancestral_allele.upper()))
 
 
-def apply_site_remaps(grg, removals, site_swaps, map_batch_size, stats):
-    site_removals, remap_mutations, remap_samples = build_site_swap_remaps(
-        grg, site_swaps, map_batch_size, stats
-    )
-    apply_remaps(grg, removals + site_removals, remap_mutations, remap_samples, map_batch_size)
-
-
 def build_mut_lookup(grg):
-    mut_lookup = {}
+    mut_lookup = [None] * grg.num_mutations
     for mut_id, node_id, missing_node_id in grg.get_mutation_node_miss():
         mut_lookup[int(mut_id)] = (int(node_id), int(missing_node_id))
     return mut_lookup
-
-
-def polarize_mutations_helper(grg, mut_lookup, batch, stats, map_batch_size):
-    results = [False] * len(batch)
-    if not batch:
-        return results
-
-    removals = []
-    flips = []
-
-    for idx, (mut_id, ancestral_allele) in enumerate(batch):
-        stats.total_seen += 1
-
-        if mut_id not in mut_lookup:
-            continue
-
-        node_id, missing_node_id = mut_lookup[mut_id]
-        if node_id == grgl.INVALID_NODE:
-            continue
-
-        mutation = grg.get_mutation_by_id(mut_id)
-        position = int(mutation.position)
-        ancestral_allele = ancestral_allele.upper()
-
-        if ancestral_allele in UNKNOWN_ALLELES:
-            stats.dropped_unknown += 1
-            stats.unpolarized.append(position)
-            removals.append((mut_id, node_id))
-            continue
-
-        ref = mutation.ref_allele
-        alt = mutation.allele
-        if len(ref) != 1 or len(alt) != 1:
-            stats.non_snv_skipped += 1
-            stats.unpolarized.append(position)
-            removals.append((mut_id, node_id))
-            continue
-
-        if ancestral_allele == ref.upper():
-            stats.already_polarized += 1
-            stats.emitted += 1
-            results[idx] = True
-            continue
-
-        if ancestral_allele == alt.upper():
-            stats.swapped += 1
-            stats.emitted += 1
-            results[idx] = True
-            flips.append(
-                Flip(
-                    mut_id=mut_id,
-                    node_id=node_id,
-                    missing_node_id=missing_node_id,
-                    position=position,
-                    ref=ref,
-                    alt=alt,
-                    time=mutation.time,
-                )
-            )
-            continue
-
-        stats.inconsistent += 1
-        stats.unpolarized.append(position)
-        removals.append((mut_id, node_id))
-
-    remap_mutations, remap_samples = build_flip_remaps(grg, flips, map_batch_size, stats)
-    apply_remaps(
-        grg,
-        removals + [(flip.mut_id, flip.node_id) for flip in flips],
-        remap_mutations,
-        remap_samples,
-        map_batch_size,
-    )
-    return results
-
-
-def polarize_mutations(grg, batch, stats, map_batch_size=4096):
-    mut_lookup = build_mut_lookup(grg)
-    results = polarize_mutations_helper(grg, mut_lookup, batch, stats, map_batch_size)
-    grg.sort_mutations()
-    return results
 
 
 def load_fasta(path: str) -> Tuple[object, str]:
@@ -516,7 +365,7 @@ def polarize_grg_from_fasta(
         previous_swap_count = len(pending_site_swaps)
         position = int(site_entries[0][3].position)
         ancestral = fetch_ancestral(ancestral_sequence, position, 1)
-        polarize_site_from_fasta(
+        classify_site(
             site_entries,
             ancestral,
             stats,
@@ -533,10 +382,11 @@ def polarize_grg_from_fasta(
         if mutation.allele == MISSING_ALLELE:
             continue
 
-        if mut_id not in mut_lookup:
+        lookup_entry = mut_lookup[mut_id]
+        if lookup_entry is None:
             continue
 
-        node_id, missing_node_id = mut_lookup[mut_id]
+        node_id, missing_node_id = lookup_entry
         if node_id == grgl.INVALID_NODE:
             continue
 
@@ -562,8 +412,6 @@ def polarize_command(arguments):
         print(f"FASTA file does not exist: {arguments.fasta_file}", file=sys.stderr)
         sys.exit(2)
 
-    output_path = arguments.output_file if arguments.output_file else arguments.grg_file
-
     grg = grgl.load_mutable_grg(arguments.grg_file, load_up_edges=True)
     if grg is None:
         print(f"Failed to load GRG: {arguments.grg_file}", file=sys.stderr)
@@ -580,14 +428,13 @@ def polarize_command(arguments):
         print(str(error), file=sys.stderr)
         sys.exit(2)
 
-    grgl.save_grg(grg, output_path)
+    grgl.save_grg(grg, arguments.output_file)
 
     print("Polarization complete")
     print(f"  Total seen:           {stats.total_seen}")
     print(f"  Emitted:              {stats.emitted}")
     print(f"  Already polarized:    {stats.already_polarized}")
     print(f"  Swapped:              {stats.swapped}")
-    print(f"  Dropped unknown:      {stats.dropped_unknown}")
     print(f"  Inconsistent:         {stats.inconsistent}")
     print(f"  After alignment end:  {stats.after_alignment}")
     print(f"  Alignment mismatch:   {stats.no_alignment}")
