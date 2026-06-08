@@ -377,7 +377,10 @@ public:
         return m_mutations.cref(mutId);
     }
 
-    void setMutationById(MutationId mutId, Mutation mutation) { m_mutations.atRef(mutId) = std::move(mutation); }
+    void setMutationById(MutationId mutId, Mutation mutation) {
+        m_mutations.atRef(mutId) = std::move(mutation);
+        m_mutsAreOrdered = false;
+    }
 
     /**
      * Get the mutations associated with no nodes. By default, the template argument is MutationId,

@@ -94,6 +94,16 @@ def get_missingness_indicators(grg, missing_node_ids):
     return grgl.matmul(grg, values, grgl.TraversalDirection.DOWN, init=init)
 
 
+def get_descendant_samples(grg, node_id, np):
+    if node_id == grgl.INVALID_NODE:
+        return np.array([], dtype=np.uint32)
+    descendants = grgl.get_bfs_order(grg, grgl.TraversalDirection.DOWN, [node_id])
+    return np.fromiter(
+        (node for node in descendants if node < grg.num_samples),
+        dtype=np.uint32,
+    )
+
+
 def build_flip_remaps(grg, flips, map_batch_size, stats):
     if not flips:
         return [], []
@@ -148,9 +158,10 @@ def apply_remaps(grg, removals, remap_mutations, remap_samples, map_batch_size):
 
 def build_site_swap_remaps(grg, site_swaps, map_batch_size, stats):
     if not site_swaps:
-        return [], []
+        return [], [], []
 
     np = load_numpy()
+    removals = []
     remap_mutations = []
     remap_samples = []
 
@@ -159,6 +170,7 @@ def build_site_swap_remaps(grg, site_swaps, map_batch_size, stats):
     for site_index, site_swap in enumerate(site_swaps):
         entries = site_swap.entries
         swap_mutation = entries[site_swap.swap_index][3]
+        has_missing = any(entry[2] != grgl.INVALID_NODE for entry in entries)
         site_state.append(
             {
                 "ancestral_allele": site_swap.ancestral_allele,
@@ -166,6 +178,7 @@ def build_site_swap_remaps(grg, site_swaps, map_batch_size, stats):
                 "position": int(entries[0][3].position),
                 "time": swap_mutation.time,
                 "unavailable": np.zeros(grg.num_samples, dtype=bool),
+                "full_remap": has_missing,
             }
         )
         for row_index, entry in enumerate(entries):
@@ -173,19 +186,16 @@ def build_site_swap_remaps(grg, site_swaps, map_batch_size, stats):
 
     for start in range(0, len(flat_entries), map_batch_size):
         entry_batch = flat_entries[start : start + map_batch_size]
-        mutation_ids = [entry[3][0] for entry in entry_batch]
-        missing_node_ids = [entry[3][2] for entry in entry_batch]
-        carrier_matrix = get_downward_indicators(grg, mutation_ids)
-        missing_matrix = get_missingness_indicators(grg, missing_node_ids)
 
-        for row, (site_index, row_index, swap_index, entry) in enumerate(entry_batch):
+        for site_index, row_index, swap_index, entry in entry_batch:
             _mut_id, _node_id, _missing_node_id, mutation = entry
             state = site_state[site_index]
-            carriers = np.flatnonzero(carrier_matrix[row] > 0).astype(np.uint32)
+            carriers = get_descendant_samples(grg, _node_id, np)
             state["unavailable"][carriers] = True
 
             if row_index == swap_index:
-                missing = np.flatnonzero(missing_matrix[row] > 0).astype(np.uint32)
+                removals.append((_mut_id, _node_id))
+                missing = get_descendant_samples(grg, _missing_node_id, np)
                 state["unavailable"][missing] = True
                 if len(missing) > 0:
                     remap_mutations.append(
@@ -199,15 +209,18 @@ def build_site_swap_remaps(grg, site_swaps, map_batch_size, stats):
                     remap_samples.append(missing.tolist())
                     stats.missing_remapped += 1
             else:
-                remap_mutations.append(
-                    grgl.Mutation(
-                        state["position"],
-                        mutation.allele,
-                        state["ancestral_allele"],
-                        mutation.time,
-                    )
+                updated_mutation = grgl.Mutation(
+                    state["position"],
+                    mutation.allele,
+                    state["ancestral_allele"],
+                    mutation.time,
                 )
-                remap_samples.append(carriers.tolist())
+                if state["full_remap"]:
+                    removals.append((_mut_id, _node_id))
+                    remap_mutations.append(updated_mutation)
+                    remap_samples.append(carriers.tolist())
+                else:
+                    grg.set_mutation_by_id(_mut_id, updated_mutation)
 
     for state in site_state:
         old_ref_carriers = np.flatnonzero(~state["unavailable"]).astype(np.uint32)
@@ -221,7 +234,7 @@ def build_site_swap_remaps(grg, site_swaps, map_batch_size, stats):
         )
         remap_samples.append(old_ref_carriers.tolist())
 
-    return remap_mutations, remap_samples
+    return removals, remap_mutations, remap_samples
 
 
 def polarize_site_from_fasta(
@@ -291,8 +304,10 @@ def polarize_site_from_fasta(
 
 
 def apply_site_remaps(grg, removals, site_swaps, map_batch_size, stats):
-    remap_mutations, remap_samples = build_site_swap_remaps(grg, site_swaps, map_batch_size, stats)
-    apply_remaps(grg, removals, remap_mutations, remap_samples, map_batch_size)
+    site_removals, remap_mutations, remap_samples = build_site_swap_remaps(
+        grg, site_swaps, map_batch_size, stats
+    )
+    apply_remaps(grg, removals + site_removals, remap_mutations, remap_samples, map_batch_size)
 
 
 def build_mut_lookup(grg):
@@ -399,14 +414,14 @@ def load_fasta(path: str) -> Tuple[object, str]:
     return fasta, contigs[0]
 
 
-def fetch_ancestral(fasta, contig, position, length):
+def fetch_ancestral(sequence, position, length):
     if length <= 0:
         return None
     if position <= 0:
         return None
-    if position + length - 1 > len(fasta[contig]):
+    if position + length - 1 > len(sequence):
         return None
-    return str(fasta.get_seq(contig, position, position + length - 1)).upper()
+    return sequence[position - 1 : position - 1 + length]
 
 
 def equals_ignore_case(left, right):
@@ -431,6 +446,7 @@ def polarize_grg_from_fasta(
 
     stats = PolarizationStats()
     fasta, contig = load_fasta(fasta_file)
+    ancestral_sequence = str(fasta[contig][:]).upper()
     mut_lookup = build_mut_lookup(grg)
     total_mutations = grg.num_mutations
     site_entries = []
@@ -446,14 +462,10 @@ def polarize_grg_from_fasta(
         nonlocal pending_swap_entry_count
         if not pending_site_swaps:
             return
-        remap_mutations, remap_samples = build_site_swap_remaps(
+        site_removals, remap_mutations, remap_samples = build_site_swap_remaps(
             grg, pending_site_swaps, map_batch_size, stats
         )
-        for site_swap in pending_site_swaps:
-            pending_map_removals.extend(
-                (mut_id, node_id)
-                for mut_id, node_id, _missing_node_id, _mutation in site_swap.entries
-            )
+        pending_map_removals.extend(site_removals)
         pending_remap_mutations.extend(remap_mutations)
         pending_remap_samples.extend(remap_samples)
         pending_site_swaps.clear()
@@ -503,7 +515,7 @@ def polarize_grg_from_fasta(
             return
         previous_swap_count = len(pending_site_swaps)
         position = int(site_entries[0][3].position)
-        ancestral = fetch_ancestral(fasta, contig, position, 1)
+        ancestral = fetch_ancestral(ancestral_sequence, position, 1)
         polarize_site_from_fasta(
             site_entries,
             ancestral,
