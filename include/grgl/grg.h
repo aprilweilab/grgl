@@ -378,7 +378,8 @@ public:
     }
 
     void setMutationById(MutationId mutId, Mutation mutation) {
-        m_mutations.atRef(mutId) = std::move(mutation);
+        api_exc_check(mutId < m_mutations.size(), "Invalid MutationID: " << mutId);
+        m_mutations.ref(mutId) = std::move(mutation);
         m_mutsAreOrdered = false;
     }
 

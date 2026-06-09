@@ -988,17 +988,21 @@ PYBIND11_MODULE(_grgl, m) {
              const std::vector<grgl::NodeIDList>& samples,
              bool verbose,
              size_t mutationBatchSize) {
+              if (mutationBatchSize == 0) {
+                mutationBatchSize = mutations.size();
+              }
               return grgl::mapMutations(grg, mutations, samples, verbose, mutationBatchSize);
           },
           py::arg("grg"),
           py::arg("mutations"),
           py::arg("samples"),
           py::arg("verbose") = false,
-          py::arg("mutation_batch_size") = 64,
+          py::arg("mutation_batch_size") = 0,
           R"^(
-        Map the provided mutations into a MutableGRG.
-
-        The entire input is processed as one batch; callers should split work into smaller chunks if peak RAM is a concern.
+        Map the provided mutations into a MutableGRG. By default, the entire input is processed as one batch
+        (a single graph traversal; RAM intensive). Set the mutation_batch_size parameter to perform the mapping
+        in batches, which saves RAM. Or you can pass in smaller lists of mutations and call the function multiple
+        times.
 
         :param grg: The MutableGRG that will be modified in-place.
         :type grg: pygrgl.MutableGRG

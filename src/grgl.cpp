@@ -236,7 +236,6 @@ int main(int argc, char** argv) {
     constexpr double REDUCE_FRAC_DROP = 0.8; // Stop reducing if we cumulatively have dropped 80% of edges
 
     grgl::GRGPtr theGRG;
-    bool wroteOutput = false;
     START_TIMING_OPERATION();
     if (ends_with(*infile, ".trees")) {
         UNSUPPORTED_FOR_INPUT(countVariants, "--count-variants");
@@ -497,7 +496,7 @@ int main(int argc, char** argv) {
         }
         workers.doAllWork(jobs);
         EMIT_TIMING_MESSAGE("Split GRG into " << windows.size() << " parts in ");
-    } else if (outfile && !wroteOutput) {
+    } else if (outfile) {
         START_TIMING_OPERATION();
         auto counts = saveGRG(theGRG, *outfile, !noSimplify);
         if (verbose) {
