@@ -99,7 +99,7 @@ int main(int argc, char** argv) {
     args::ValueFlag<size_t> jobsArg(
         parser,
         "jobs",
-        "Use this many threads for the given task. Currently only applies to the --split command",
+        "Use this many threads for the given task. Applies to --split and mutation mapping.",
         {'j', "jobs"});
 
     ///// Build tree (shape) related arguments /////
@@ -341,10 +341,14 @@ int main(int argc, char** argv) {
             stats = grgl::mapMutations(std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG),
                                        *unmappedMutations,
                                        verbose,
-                                       *mapMutationsBatchSize);
+                                       *mapMutationsBatchSize,
+                                       jobsArg ? *jobsArg : 1);
         } else {
-            stats =
-                grgl::mapMutations(std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG), *unmappedMutations, verbose);
+            stats = grgl::mapMutations(std::dynamic_pointer_cast<grgl::MutableGRG>(theGRG),
+                                       *unmappedMutations,
+                                       verbose,
+                                       64,
+                                       jobsArg ? *jobsArg : 1);
         }
         if (verbose) {
             EMIT_TIMING_MESSAGE("Mapping mutations took");

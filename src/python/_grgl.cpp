@@ -922,14 +922,16 @@ PYBIND11_MODULE(_grgl, m) {
              const std::vector<grgl::Mutation>& mutations,
              const std::vector<grgl::NodeIDList>& samples,
              bool verbose,
-             size_t mutationBatchSize) {
-              return grgl::mapMutations(grg, mutations, samples, verbose, mutationBatchSize);
+             size_t mutationBatchSize,
+             size_t threadCount) {
+              return grgl::mapMutations(grg, mutations, samples, verbose, mutationBatchSize, threadCount);
           },
           py::arg("grg"),
           py::arg("mutations"),
           py::arg("samples"),
           py::arg("verbose") = false,
           py::arg("mutation_batch_size") = 64,
+          py::arg("thread_count") = 1,
           R"^(
         Map the provided mutations into a MutableGRG.
 
@@ -945,6 +947,8 @@ PYBIND11_MODULE(_grgl, m) {
         :type verbose: bool
         :param mutation_batch_size: Number of mutations to accumulate before mapping.
         :type mutation_batch_size: int
+        :param thread_count: Number of worker threads to use for candidate processing per batch.
+        :type thread_count: int
         :return: Mapping statistics.
         :rtype: pygrgl.MutationMappingStats
     )^");

@@ -91,6 +91,8 @@ else()
   check_cxx_compiler_flag(-mavx2 COMPILER_SUPPORTS_AVX2)
 endif()
 
+find_package(OpenMP)
+
 # The current potential use for AVX (beyond libvbyte, which is enabled elsewhere) is not
 # sufficient performance improvement to enable. Enabling means we should support dynamic
 # detection as well, since the Python bdist's are built with AVX available.
@@ -220,6 +222,11 @@ endif()
 add_library(grgl STATIC ${GRGL_CORE_SOURCES})
 target_compile_options(grgl PRIVATE
                        $<$<COMPILE_LANGUAGE:CXX>:-fPIC>)
+if(OpenMP_CXX_FOUND)
+  target_link_libraries(grgl PRIVATE OpenMP::OpenMP_CXX)
+else()
+  message(STATUS "OpenMP not found; mutation mapping will use the serial fallback")
+endif()
 
 # Link CUDA libraries if enabled
 if(ENABLE_CUDA)

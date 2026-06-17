@@ -203,13 +203,15 @@ class HaplotypeIndex;
 MutationMappingStats mapMutations(const MutableGRGPtr& grg,
                                   MutationIterator& mutations,
                                   bool verbose = false,
-                                  size_t mutationBatchSize = 64);
+                                  size_t mutationBatchSize = 64,
+                                  size_t threadCount = 1);
 
 MutationMappingStats mapMutations(const MutableGRGPtr& grg,
                                   const std::vector<Mutation>& mutations,
                                   const std::vector<NodeIDList>& samples,
                                   bool verbose = false,
-                                  size_t mutationBatchSize = 64);
+                                  size_t mutationBatchSize = 64,
+                                  size_t threadCount = 1);
 
 }; // namespace grgl
 

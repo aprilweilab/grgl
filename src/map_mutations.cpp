@@ -43,6 +43,10 @@
 #define DEFINE_MUTEX(name)
 #define CREATE_GUARD(mutex)
 #endif
+
+#if defined(_OPENMP)
+#include <omp.h>
+#endif
 // When enabled: garbage collects unneeded sample sets
 #define CLEANUP_SAMPLE_SETS_MAPPING 1
 
@@ -60,10 +64,37 @@ namespace grgl {
 using NodeSamples = std::tuple<NodeID, size_t>;
 using CandidateList = std::vector<NodeSamples>;
 
+struct CandidatePlan {
+    bool exactMatch{false};
+    NodeID exactMatchCandidate{INVALID_NODE_ID};
+    NodeIDList reusedCandidates;
+    NodeIDList uncoveredSamples;
+    size_t individualCoalCount{0};
+    MutationMappingStats stats;
+};
+
 static bool cmpNodeSamples(const NodeSamples& ns1, const NodeSamples& ns2) {
     const size_t samplesCount1 = std::get<1>(ns1);
     const size_t samplesCount2 = std::get<1>(ns2);
     return samplesCount1 < samplesCount2;
+}
+
+static void accumulateStats(MutationMappingStats& total, const MutationMappingStats& delta) {
+    total.mutationsWithNoCandidates += delta.mutationsWithNoCandidates;
+    total.reusedNodes += delta.reusedNodes;
+    total.reusedNodeCoverage += delta.reusedNodeCoverage;
+    total.reusedExactly += delta.reusedExactly;
+    total.singletonSampleEdges += delta.singletonSampleEdges;
+    total.numWithSingletons += delta.numWithSingletons;
+    total.maxSingletons = std::max(total.maxSingletons, delta.maxSingletons);
+    total.reusedMutNodes += delta.reusedMutNodes;
+    total.reuseSizeBiggerThanHistMax += delta.reuseSizeBiggerThanHistMax;
+    if (total.reuseSizeHist.size() < delta.reuseSizeHist.size()) {
+        total.reuseSizeHist.resize(delta.reuseSizeHist.size(), 0);
+    }
+    for (size_t i = 0; i < delta.reuseSizeHist.size(); ++i) {
+        total.reuseSizeHist[i] += delta.reuseSizeHist[i];
+    }
 }
 
 // What percentage of total samples must be covered before we switch to dense bitvecs
@@ -438,10 +469,10 @@ public:
         return keepGoing;
     }
 
-    const std::unique_ptr<SampleCoverageSet>& getSamplesForCandidate(NodeID candidateId) const {
+    const SampleCoverageSet& getSamplesForCandidate(NodeID candidateId) const {
         const std::unique_ptr<SampleCoverageSet>& value = m_sampleCoverage[candidateId];
         release_assert(value);
-        return value;
+        return *value;
     }
 
     size_t batchBitCount() const { return m_batchBitCount; }
@@ -606,132 +637,200 @@ bool TopoCandidateCollectorVisitor::safeVisit(const grgl::GRGPtr& grg, const grg
 // 3. Below, when we have "left-over" samples that did not have any candidate nodes, we will check for any
 //    coalescence within the left-over samples, or between the left-over samples and nodes that have already
 //    been covered.
-static NodeIDList processCandidateSet(const MutableGRGPtr& grg,
-                                      const Mutation& newMutation,
-                                      const NodeIDList& mutSamples,
-                                      const TopoCandidateCollectorVisitor& collector,
-                                      CandidateList& candidates,
-                                      MutationMappingStats& stats,
-                                      const NodeID shapeNodeIdMax,
-                                      std::pair<BpPosition, NodeID>& currentMissing) {
+static CandidatePlan greedyAddMutationImmutable(const MutableGRGPtr& grg,
+                                                const NodeIDList& mutSamples,
+                                                const TopoCandidateCollectorVisitor& collector,
+                                                CandidateList candidates,
+                                                const NodeID shapeNodeIdMax) {
+    CandidatePlan plan;
+    plan.stats.reuseSizeHist.resize(STATS_HIST_SIZE, 0);
+
     std::sort(candidates.begin(), candidates.end());
     auto endOfUnique = std::unique(candidates.begin(), candidates.end());
     candidates.erase(endOfUnique, candidates.end());
     std::sort(candidates.begin(), candidates.end(), cmpNodeSamples);
 
-    // The missingness node associated with this mutation. This relies on the fact that
-    // missing data is always emitted BEFORE other data for the same site, which is a
-    // property of the MutationIterator.
-    const NodeID missingnessNode =
-        (currentMissing.first == newMutation.getPosition()) ? currentMissing.second : INVALID_NODE_ID;
-
     const int ploidy = grg->getPloidy();
     if (candidates.empty()) {
-        stats.mutationsWithNoCandidates++;
+        plan.stats.mutationsWithNoCandidates++;
     } else {
-        // Exact match scenario. Return early.
         const auto& candidate = candidates.back();
         const size_t candidateSetSize = std::get<1>(candidate);
         if (candidateSetSize == mutSamples.size()) {
-            const auto candidateId = std::get<0>(candidate);
-            stats.reusedExactly++;
-            if (!newMutation.isMissing()) {
-                grg->addMutation(newMutation, candidateId, missingnessNode);
-            } else {
-                currentMissing = {newMutation.getPosition(), candidateId};
+            plan.exactMatch = true;
+            plan.exactMatchCandidate = std::get<0>(candidate);
+            plan.stats.reusedExactly++;
+            if (plan.exactMatchCandidate >= shapeNodeIdMax) {
+                plan.stats.reusedMutNodes++;
             }
-            if (candidateId >= shapeNodeIdMax) {
-                stats.reusedMutNodes++;
-            }
-            return {};
+            return plan;
         }
     }
 
-    size_t individualCoalCount = 0;
     const size_t batchBitCount = collector.batchBitCount();
     BitVecCoverageSet coalTrackingSet{grg->numSamples(), batchBitCount};
     BitVecCoverageSet coverageSet{grg->numSamples(), batchBitCount};
-
-    const NodeID mutNodeId = grg->makeNode(1, true);
-    if (!newMutation.isMissing()) {
-        grg->addMutation(newMutation, mutNodeId, missingnessNode);
-    } else {
-        currentMissing = {newMutation.getPosition(), mutNodeId};
-    }
-
-    NodeIDList addedNodes;
     const size_t numMutSamples = mutSamples.size();
+
     while (!candidates.empty() && coverageSet.numSamplesNonOverlapping() < numMutSamples) {
         const auto& candidate = candidates.back();
         const auto candidateId = std::get<0>(candidate);
-        const std::unique_ptr<SampleCoverageSet>& candidateSet = collector.getSamplesForCandidate(candidateId);
-        release_assert(!candidateSet->empty());
+        const SampleCoverageSet& candidateSet = collector.getSamplesForCandidate(candidateId);
+        release_assert(!candidateSet.empty());
 
-        // Different candidates may cover different subsets of the sample set that we are currently trying to cover.
-        // Those sample sets MUST be non-overlapping or we will introduce a diamond into the graph.
-        if (!coverageSet.overlapsWith(*candidateSet)) {
-            // Mark all the sample nodes as covered. Only track coalescences for diploid data.
+        if (!coverageSet.overlapsWith(candidateSet)) {
             if (ploidy == PLOIDY_COAL_PROP) {
-                coverageSet.mergeSampleCoverage(*candidateSet, coalTrackingSet, individualCoalCount);
+                coverageSet.mergeSampleCoverage(candidateSet, coalTrackingSet, plan.individualCoalCount);
             } else {
-                coverageSet.mergeSampleCoverage(*candidateSet);
-            }
-            if (candidateId >= shapeNodeIdMax) {
-                stats.reusedMutNodes++;
+                coverageSet.mergeSampleCoverage(candidateSet);
             }
 
-            // Use this candidate to cover the sample subset.
-            stats.reusedNodes++;
-            grg->connect(mutNodeId, candidateId);
-            stats.reusedNodeCoverage += candidateSet->numSamplesCovered();
-            if (candidateSet->numSamplesCovered() >= stats.reuseSizeHist.size()) {
-                stats.reuseSizeBiggerThanHistMax++;
+            if (candidateId >= shapeNodeIdMax) {
+                plan.stats.reusedMutNodes++;
+            }
+
+            plan.stats.reusedNodes++;
+            plan.reusedCandidates.push_back(candidateId);
+            plan.stats.reusedNodeCoverage += candidateSet.numSamplesCovered();
+            if (candidateSet.numSamplesCovered() >= plan.stats.reuseSizeHist.size()) {
+                plan.stats.reuseSizeBiggerThanHistMax++;
             } else {
-                stats.reuseSizeHist[candidateSet->numSamplesCovered()]++;
+                plan.stats.reuseSizeHist[candidateSet.numSamplesCovered()]++;
             }
         }
         candidates.pop_back();
     }
 
-    // Any leftovers, we just connect directly from the new mutation node to the samples.
-    NodeIDSet uncovered;
     for (const NodeID sampleNodeId : mutSamples) {
         if (!coverageSet.contains(sampleNodeId)) {
-            uncovered.emplace(sampleNodeId);
+            plan.uncoveredSamples.emplace_back(sampleNodeId);
             if (ploidy == PLOIDY_COAL_PROP) {
-                NodeID individualId = (sampleNodeId / 2) * 2;
+                const NodeID individualId = (sampleNodeId / 2) * 2;
                 if (coalTrackingSet.contains(individualId)) {
-                    individualCoalCount++;
+                    plan.individualCoalCount++;
                 } else {
                     coalTrackingSet.addElem(individualId);
                 }
             }
         }
     }
-    if (ploidy == PLOIDY_COAL_PROP) {
-        grg->setNumIndividualCoals(mutNodeId, individualCoalCount);
+
+    if (!plan.uncoveredSamples.empty()) {
+        plan.stats.numWithSingletons++;
+    }
+    plan.stats.maxSingletons = std::max(plan.uncoveredSamples.size(), plan.stats.maxSingletons);
+    plan.stats.singletonSampleEdges += plan.uncoveredSamples.size();
+    return plan;
+}
+
+static NodeIDList applyBatchModifications(const MutableGRGPtr& grg,
+                                          const MutationBatch& mutBatch,
+                                          const std::vector<CandidatePlan>& batchResults,
+                                          std::pair<BpPosition, NodeID>& currentMissing) {
+    NodeIDList added;
+    const size_t batchSize = mutBatch.numMutations();
+    for (size_t i = 0; i < batchSize; ++i) {
+        const CandidatePlan& plan = batchResults[i];
+        const Mutation& mut = mutBatch.getMutation(i);
+        const NodeID missingnessNode =
+            (currentMissing.first == mut.getPosition()) ? currentMissing.second : INVALID_NODE_ID;
+
+        if (plan.exactMatch) {
+            if (!mut.isMissing()) {
+                grg->addMutation(mut, plan.exactMatchCandidate, missingnessNode);
+            } else {
+                currentMissing = {mut.getPosition(), plan.exactMatchCandidate};
+            }
+            continue;
+        }
+
+        const NodeID mutNodeId = grg->makeNode(1, true);
+        if (!mut.isMissing()) {
+            grg->addMutation(mut, mutNodeId, missingnessNode);
+        } else {
+            currentMissing = {mut.getPosition(), mutNodeId};
+        }
+
+        if (grg->getPloidy() == PLOIDY_COAL_PROP) {
+            grg->setNumIndividualCoals(mutNodeId, plan.individualCoalCount);
+        }
+
+        for (const auto candidateId : plan.reusedCandidates) {
+            grg->connect(mutNodeId, candidateId);
+        }
+        for (const auto sampleNodeId : plan.uncoveredSamples) {
+            grg->connect(mutNodeId, sampleNodeId);
+        }
+        added.push_back(mutNodeId);
+    }
+    return added;
+}
+
+static NodeIDList processBatchPar(const MutableGRGPtr& grg,
+                                  const MutationBatch& mutBatch,
+                                  const TopoCandidateCollectorVisitor& collector,
+                                  const NodeID shapeNodeIdMax,
+                                  std::pair<BpPosition, NodeID>& currentMissing,
+                                  MutationMappingStats& stats,
+                                  const size_t threadCount) {
+    const size_t batchSize = mutBatch.numMutations();
+    std::vector<CandidatePlan> batchTasks(batchSize);
+    std::vector<MutationMappingStats> localStats(batchSize);
+
+    if (batchSize == 0) {
+        return {};
     }
 
-    if (!uncovered.empty()) {
-        stats.numWithSingletons++;
+#if defined(_OPENMP)
+    const size_t numThreads = threadCount == 0 ? static_cast<size_t>(omp_get_max_threads()) : threadCount;
+    if (numThreads <= 1) {
+        for (size_t i = 0; i < batchSize; ++i) {
+            batchTasks[i] = greedyAddMutationImmutable(
+                grg, mutBatch.sampleSet(i), collector, collector.m_collectedNodes[i], shapeNodeIdMax);
+            localStats[i] = batchTasks[i].stats;
+        }
+        for (const auto& threadStat : localStats) {
+            accumulateStats(stats, threadStat);
+        }
+        return applyBatchModifications(grg, mutBatch, batchTasks, currentMissing);
     }
-    stats.maxSingletons = std::max(uncovered.size(), stats.maxSingletons);
+    omp_set_num_threads(static_cast<int>(numThreads));
+#pragma omp parallel
+    {
+#pragma omp single
+        {
+            for (size_t i = 0; i < batchSize; ++i) {
+#pragma omp task firstprivate(i)
+                {
+                    batchTasks[i] = greedyAddMutationImmutable(
+                        grg, mutBatch.sampleSet(i), collector, collector.m_collectedNodes[i], shapeNodeIdMax);
+                    localStats[i] = batchTasks[i].stats;
+                }
+            }
+#pragma omp taskwait
+        }
+    }
+#else
+    for (size_t i = 0; i < batchSize; ++i) {
+        batchTasks[i] = greedyAddMutationImmutable(
+            grg, mutBatch.sampleSet(i), collector, collector.m_collectedNodes[i], shapeNodeIdMax);
+        localStats[i] = batchTasks[i].stats;
+    }
+#endif
 
-    for (auto sampleNodeId : uncovered) {
-        grg->connect(mutNodeId, sampleNodeId);
-        stats.singletonSampleEdges++;
+    for (const auto& threadStat : localStats) {
+        accumulateStats(stats, threadStat);
     }
 
-    // This node needs to be last, for the way we update things.
-    addedNodes.push_back(mutNodeId);
-    return addedNodes;
+    return applyBatchModifications(grg, mutBatch, batchTasks, currentMissing);
 }
 
 static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
                                     const MutationBatch& mutBatch,
                                     MutationMappingStats& stats,
                                     const NodeID shapeNodeIdMax,
-                                    std::pair<BpPosition, NodeID>& currentMissing) {
+                                    std::pair<BpPosition, NodeID>& currentMissing,
+                                    const size_t threadCount) {
     // The topological order of nodeIDs is maintained throughout this algorithm.
     release_assert(grg->nodesAreOrdered());
     const NodeIDList& mutSamples = mutBatch.seedList();
@@ -739,20 +838,7 @@ static NodeIDList greedyAddMutation(const MutableGRGPtr& grg,
     TopoCandidateCollectorVisitor collector(mutBatch);
     grg->visitTopo(collector, grgl::TraversalDirection::DIRECTION_UP, mutSamples);
 
-    NodeIDList totalAdded{};
-    std::vector<CandidateList>& candidateList = collector.m_collectedNodes;
-    for (int i = 0; i < static_cast<int>(mutBatch.numMutations()); i++) {
-        NodeIDList added = processCandidateSet(grg,
-                                               mutBatch.getMutation(i),
-                                               mutBatch.sampleSet(i),
-                                               collector,
-                                               candidateList[i],
-                                               stats,
-                                               shapeNodeIdMax,
-                                               currentMissing);
-        totalAdded.insert(totalAdded.end(), added.begin(), added.end());
-    }
-    return totalAdded;
+    return processBatchPar(grg, mutBatch, collector, shapeNodeIdMax, currentMissing, stats, threadCount);
 }
 
 static MutationMappingStats
@@ -760,7 +846,8 @@ mapMutationsImpl(const MutableGRGPtr& grg,
                  size_t totalMutations,
                  std::function<bool(MutationAndSamples&, size_t&)> next,
                  bool verbose,
-                 size_t mutationBatchSize) {
+                 size_t mutationBatchSize,
+                 size_t threadCount) {
     auto operationStartTime = std::chrono::high_resolution_clock::now();
 #define START_TIMING_OPERATION() operationStartTime = std::chrono::high_resolution_clock::now();
 #define EMIT_TIMING_MESSAGE(msg)                                                                                       \
@@ -823,13 +910,13 @@ mapMutationsImpl(const MutableGRGPtr& grg,
                 mutBatch.addMutation(unmapped.mutation, mutSamples);
 
                 if (mutBatch.numMutations() == mutationBatchSize) {
-                    greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
+                    greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing, threadCount);
                     mutBatch.clear();
                 }
             }
         } else {
             if (mutBatch.numMutations() > 0) {
-                greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
+                greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing, threadCount);
                 mutBatch.clear();
             }
             stats.emptyMutations++;
@@ -860,25 +947,30 @@ mapMutationsImpl(const MutableGRGPtr& grg,
     }
 
     if (mutBatch.numMutations() > 0) {
-        NodeIDList addedNodes = greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing);
+        greedyAddMutation(grg, mutBatch, stats, shapeNodeIdMax, currentMissing, threadCount);
     }
     return stats;
 }
 
 MutationMappingStats
-mapMutations(const MutableGRGPtr& grg, MutationIterator& mutations, bool verbose, size_t mutationBatchSize) {
+mapMutations(const MutableGRGPtr& grg,
+             MutationIterator& mutations,
+             bool verbose,
+             size_t mutationBatchSize,
+             size_t threadCount) {
     auto next = [&mutations](MutationAndSamples& unmapped, size_t& totalSamples) {
         return mutations.next(unmapped, totalSamples);
     };
 
-    return mapMutationsImpl(grg, mutations.countMutations(), std::move(next), verbose, mutationBatchSize);
+    return mapMutationsImpl(grg, mutations.countMutations(), std::move(next), verbose, mutationBatchSize, threadCount);
 }
 
 MutationMappingStats mapMutations(const MutableGRGPtr& grg,
                                   const std::vector<Mutation>& mutations,
                                   const std::vector<NodeIDList>& samples,
                                   bool verbose,
-                                  size_t mutationBatchSize) {
+                                  size_t mutationBatchSize,
+                                  size_t threadCount) {
     api_exc_check(mutations.size() == samples.size(),
                   "mutations and samples must be the same length in mapMutations");
 
@@ -894,7 +986,7 @@ MutationMappingStats mapMutations(const MutableGRGPtr& grg,
         return true;
     };
 
-    return mapMutationsImpl(grg, mutations.size(), std::move(next), verbose, mutationBatchSize);
+    return mapMutationsImpl(grg, mutations.size(), std::move(next), verbose, mutationBatchSize, threadCount);
 }
 
 } // namespace grgl

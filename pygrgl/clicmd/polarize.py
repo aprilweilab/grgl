@@ -52,6 +52,12 @@ def add_options(subparser):
         default=4096,
         help="Number of flipped mutations to process per carrier-read and remap batch",
     )
+    subparser.add_argument(
+        "--thread-count",
+        type=int,
+        default=1,
+        help="Number of worker threads to use for candidate processing during remaps",
+    )
 
 
 def load_numpy():
@@ -73,7 +79,7 @@ def get_descendant_samples(grg, node_id, np):
 
 
 # apply all remaps in a batch (can be from multiple sites)
-def apply_remaps(grg, removals, remap_mutations, remap_samples, map_batch_size):
+def apply_remaps(grg, removals, remap_mutations, remap_samples, map_batch_size, thread_count):
     if not removals and not remap_mutations:
         return
 
@@ -88,6 +94,7 @@ def apply_remaps(grg, removals, remap_mutations, remap_samples, map_batch_size):
             remap_samples,
             verbose=False,
             mutation_batch_size=map_batch_size,
+            thread_count=thread_count,
         )
 
 
@@ -289,9 +296,12 @@ def polarize_grg_from_fasta(
     fasta_file,
     drop_if_no_match=True,
     map_batch_size=4096,
+    thread_count=1,
 ):
     if map_batch_size <= 0:
         raise ValueError("--map-batch-size must be greater than zero")
+    if thread_count <= 0:
+        raise ValueError("--thread-count must be greater than zero")
 
     stats = PolarizationStats()
     fasta, contig = load_fasta(fasta_file)
@@ -329,6 +339,7 @@ def polarize_grg_from_fasta(
             pending_remap_mutations,
             pending_remap_samples,
             map_batch_size,
+            thread_count,
         )
         pending_map_removals.clear()
         pending_remap_mutations.clear()
@@ -343,7 +354,7 @@ def polarize_grg_from_fasta(
                 pending_removals.clear()
                 flush_remaps()
             elif pending_removals:
-                apply_remaps(grg, pending_removals, [], [], map_batch_size)
+                apply_remaps(grg, pending_removals, [], [], map_batch_size, thread_count)
                 pending_removals.clear()
             return
 
@@ -355,7 +366,7 @@ def polarize_grg_from_fasta(
             flush_remaps()
             return
         if pending_removals and not pending_site_swaps and len(pending_removals) >= map_batch_size:
-            apply_remaps(grg, pending_removals, [], [], map_batch_size)
+            apply_remaps(grg, pending_removals, [], [], map_batch_size, thread_count)
             pending_removals.clear()
 
     def flush_site():
@@ -423,6 +434,7 @@ def polarize_command(arguments):
             arguments.fasta_file,
             drop_if_no_match=not arguments.keep_no_match,
             map_batch_size=arguments.map_batch_size,
+            thread_count=arguments.thread_count,
         )
     except ValueError as error:
         print(str(error), file=sys.stderr)
