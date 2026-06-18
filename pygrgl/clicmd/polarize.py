@@ -1,7 +1,7 @@
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import pygrgl as grgl
 
@@ -22,6 +22,49 @@ class PolarizationStats:
     no_alignment: int = 0
     non_snv_skipped: int = 0
     missing_remapped: int = 0
+    mapping_stats: Optional["MutationMappingStatsSummary"] = None
+
+
+@dataclass
+class MutationMappingStatsSummary:
+    total_mutations: int = 0
+    empty_mutations: int = 0
+    mutations_with_one_sample: int = 0
+    mutations_with_no_candidates: int = 0
+    reused_nodes: int = 0
+    reused_node_coverage: int = 0
+    reused_exactly: int = 0
+    singleton_sample_edges: int = 0
+    new_tree_nodes: int = 0
+    samples_processed: int = 0
+    num_candidates: int = 0
+    reuse_size_bigger_than_hist_max: int = 0
+    num_with_singletons: int = 0
+    max_singletons: int = 0
+    reused_mut_nodes: int = 0
+    reuse_size_hist: List[int] = field(default_factory=list)
+
+
+def accumulate_mapping_stats(total, delta):
+    total.total_mutations += delta.total_mutations
+    total.empty_mutations += delta.empty_mutations
+    total.mutations_with_one_sample += delta.mutations_with_one_sample
+    total.mutations_with_no_candidates += delta.mutations_with_no_candidates
+    total.reused_nodes += delta.reused_nodes
+    total.reused_node_coverage += delta.reused_node_coverage
+    total.reused_exactly += delta.reused_exactly
+    total.singleton_sample_edges += delta.singleton_sample_edges
+    total.new_tree_nodes += delta.new_tree_nodes
+    total.samples_processed += delta.samples_processed
+    total.num_candidates += delta.num_candidates
+    total.reuse_size_bigger_than_hist_max += delta.reuse_size_bigger_than_hist_max
+    total.num_with_singletons += delta.num_with_singletons
+    total.max_singletons = max(total.max_singletons, delta.max_singletons)
+    total.reused_mut_nodes += delta.reused_mut_nodes
+    if len(total.reuse_size_hist) < len(delta.reuse_size_hist):
+        total.reuse_size_hist.extend([0] * (len(delta.reuse_size_hist) - len(total.reuse_size_hist)))
+    for idx, value in enumerate(delta.reuse_size_hist):
+        total.reuse_size_hist[idx] += value
 
 
 @dataclass(frozen=True)
@@ -88,7 +131,7 @@ def apply_remaps(grg, removals, remap_mutations, remap_samples, map_batch_size, 
         grg.remove_mutation(mut_id, node_id)
 
     if remap_mutations:
-        grgl.map_mutations(
+        mapping_stats = grgl.map_mutations(
             grg,
             remap_mutations,
             remap_samples,
@@ -96,6 +139,7 @@ def apply_remaps(grg, removals, remap_mutations, remap_samples, map_batch_size, 
             mutation_batch_size=map_batch_size,
             thread_count=thread_count,
         )
+        return mapping_stats
 
 
 # compute mutation removals and remaps for one site
@@ -316,6 +360,7 @@ def polarize_grg_from_fasta(
     pending_map_removals = []
     pending_remap_mutations = []
     pending_remap_samples = []
+    mapping_stats = MutationMappingStatsSummary()
 
     def materialize_site_swaps():
         nonlocal pending_swap_entry_count
@@ -333,7 +378,7 @@ def polarize_grg_from_fasta(
     def flush_remaps():
         if not pending_map_removals and not pending_remap_mutations:
             return
-        apply_remaps(
+        remap_stats = apply_remaps(
             grg,
             pending_map_removals,
             pending_remap_mutations,
@@ -341,6 +386,8 @@ def polarize_grg_from_fasta(
             map_batch_size,
             thread_count,
         )
+        if remap_stats is not None:
+            accumulate_mapping_stats(mapping_stats, remap_stats)
         pending_map_removals.clear()
         pending_remap_mutations.clear()
         pending_remap_samples.clear()
@@ -412,6 +459,7 @@ def polarize_grg_from_fasta(
     flush_pending(force=True)
 
     grg.sort_mutations()
+    stats.mapping_stats = mapping_stats
     return stats
 
 
@@ -452,3 +500,21 @@ def polarize_command(arguments):
     print(f"  Alignment mismatch:   {stats.no_alignment}")
     print(f"  Non-SNVs skipped:     {stats.non_snv_skipped}")
     print(f"  Missingness remapped: {stats.missing_remapped}")
+    if stats.mapping_stats is not None:
+        mapping = stats.mapping_stats
+        print("  Mutation mapping:")
+        print(f"    Total mutations:     {mapping.total_mutations}")
+        print(f"    Empty mutations:     {mapping.empty_mutations}")
+        print(f"    One-sample muts:     {mapping.mutations_with_one_sample}")
+        print(f"    No candidates:       {mapping.mutations_with_no_candidates}")
+        print(f"    Reused nodes:        {mapping.reused_nodes}")
+        print(f"    Reused coverage:     {mapping.reused_node_coverage}")
+        print(f"    Reused exactly:      {mapping.reused_exactly}")
+        print(f"    Singleton edges:     {mapping.singleton_sample_edges}")
+        print(f"    New tree nodes:      {mapping.new_tree_nodes}")
+        print(f"    Samples processed:   {mapping.samples_processed}")
+        print(f"    Candidates:          {mapping.num_candidates}")
+        print(f"    Reuse hist overflow:  {mapping.reuse_size_bigger_than_hist_max}")
+        print(f"    With singletons:     {mapping.num_with_singletons}")
+        print(f"    Max singletons:      {mapping.max_singletons}")
+        print(f"    Reused mut nodes:    {mapping.reused_mut_nodes}")
