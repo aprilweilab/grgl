@@ -1,1 +1,1 @@
-include CMakeLists.txt LICENSE README.md requirements.txt
+include CMakeLists.txt LICENSE README.md pyproject.toml requirements.txt
