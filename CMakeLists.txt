@@ -4,6 +4,7 @@ include(CheckCXXCompilerFlag)
 unset(COMPILER_SUPPORTS_AVX CACHE)
 unset(COMPILER_SUPPORTS_AVX2 CACHE)
 include(ExternalProject)
+find_package(ZLIB REQUIRED)
 
 option(PYTHON_SUPPORT "Build Python loadable module" OFF)
 option(ENABLE_CHECKERS "Enable external tools like clang-tidy" OFF)
@@ -263,7 +264,7 @@ add_executable(grgl_tool
                ${CMAKE_CURRENT_LIST_DIR}/src/grgl.cpp
                )
 set_target_properties(grgl_tool PROPERTIES OUTPUT_NAME "grgl")
-target_link_libraries(grgl_tool tskit grgl ${BGEN_LIBS} z vbyte pthread ${GRGL_EXTRA_LIBS})
+target_link_libraries(grgl_tool tskit grgl ${BGEN_LIBS} ZLIB::ZLIB vbyte pthread ${GRGL_EXTRA_LIBS})
 
 # Tool for processing GRG files (stats, etc).
 add_executable(grgp_tool
@@ -287,13 +288,13 @@ add_executable(gconverter
                ${CMAKE_CURRENT_LIST_DIR}/src/mut_iterator.cpp
                ${CMAKE_CURRENT_LIST_DIR}/src/mutation.cpp
                )
-target_link_libraries(gconverter ${BGEN_LIBS} z)
+target_link_libraries(gconverter ${BGEN_LIBS} ZLIB::ZLIB)
 
 # Tool for indexing input files.
 add_executable(gindexer
                ${CMAKE_CURRENT_LIST_DIR}/src/gindexer.cpp
                )
-target_link_libraries(gindexer ${BGEN_LIBS} z)
+target_link_libraries(gindexer ${BGEN_LIBS} ZLIB::ZLIB)
 
 install(TARGETS grgl_tool grgl_merge gconverter gindexer)
 
@@ -301,7 +302,7 @@ install(TARGETS grgl_tool grgl_merge gconverter gindexer)
 if(PYTHON_SUPPORT)
     add_subdirectory(third-party/pybind11)
     pybind11_add_module(_grgl src/python/_grgl.cpp)
-    target_link_libraries(_grgl PRIVATE grgl tskit vbyte)
+    target_link_libraries(_grgl PRIVATE grgl tskit vbyte ZLIB::ZLIB)
     if(ENABLE_CUDA)
         target_link_libraries(_grgl PRIVATE CUDA::cudart)
     endif()
@@ -349,7 +350,7 @@ if(ENABLE_TESTS)
 
   # Now simply link against gtest or gtest_main as needed. Eg
   add_executable(grgl_test ${GRGL_TEST_SOURCES})
-  target_link_libraries(grgl_test gtest_main tskit grgl z ${BGEN_LIBS} vbyte)
+  target_link_libraries(grgl_test gtest_main tskit grgl ZLIB::ZLIB ${BGEN_LIBS} vbyte)
   if(ENABLE_CUDA)
       target_link_libraries(grgl_test CUDA::cudart) #CUDA::cublas
   endif()
