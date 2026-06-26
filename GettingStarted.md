@@ -78,7 +78,7 @@ cells in the notebook one at a time.
 
 ## Next steps
 
-When working with anything but the smallest datasets, you'll want to convert your data to
+When working with anything but the smallest datasets, it can be ideal to convert your data to
 [IGD](https://github.com/aprilweilab/picovcf/blob/main/README.md#indexable-genotype-data-igd)
 before generating a GRG, or use a BGZF-compressed VCF with tabix index. 
 

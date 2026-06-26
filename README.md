@@ -6,33 +6,47 @@
 # Genotype Representation Graphs
 
 A Genotype Representation Graph (GRG) is a compact way to store reference-aligned genotype data for large
-genetic datasets. These datasets are typically stored in tabular formats (VCF, BCF, BGEN, etc.) and then
-compressed using off-the-shelf compression. In contrast, a GRG contains Mutation nodes (representing variants)
-and Sample nodes (representing haploid samples), where there is a path from a Mutation node to a Sample
-node if-and-only-if that sample contains that mutation. These paths go through internal nodes that represent
-common ancestry between multiple samples, and this can result in significant compression **(30-50x smaller than
+genetic datasets. Computations with GRG can either be performed in a "graph native" way ([DFS](https://grgl.readthedocs.io/en/stable/python_api.html#pygrgl.get_dfs_order),
+[BFS](https://grgl.readthedocs.io/en/stable/python_api.html#pygrgl.get_bfs_order), or [topological order](https://grgl.readthedocs.io/en/stable/python_api.html#pygrgl.get_topo_order) 
+traversals) or using [matrix multiplication](https://grgl.readthedocs.io/en/stable/python_api.html#pygrgl.matmul), which also supports the 
+standardized matrix and GRM through [LinearOperators](https://grgl.readthedocs.io/en/stable/tutorials/LinearOperators.html).
+
+A GRG can be constructed from [.vcf.gz](https://grgl.readthedocs.io/en/stable/tutorials/VCFToGRG.html), [IGD](https://grgl.readthedocs.io/en/stable/tutorials/IGDToGRG.html),
+[tskit tree-sequence ARGs](https://grgl.readthedocs.io/en/stable/tutorials/WorkingWithSimData.html), or through
+Python APIs for [node](https://grgl.readthedocs.io/en/stable/python_api.html#pygrgl.MutableGRG.make_node) and 
+[edge](https://grgl.readthedocs.io/en/stable/python_api.html#pygrgl.MutableGRG.connect) creation.
+
+A GRG contains Mutation nodes (representing variants) and Sample nodes (representing haploid samples), where there is a path from
+a Mutation node to a Sample node if-and-only-if that sample contains that mutation. These paths go through internal nodes that represent
+common ancestry between multiple samples, and this can result in significant compression **(25-50x smaller than
 .vcf.gz)**. Calculations on the whole dataset can be performed very quickly on GRG, using GRGL. 
 
-Recent releases (after v2.3) support the following improvements over the [initial paper](https://www.nature.com/articles/s43588-024-00739-9):
-1. Graphs are more than 2x smaller (in RAM and on disk)
-2. Graph construction is 10-25x faster
-3. Loading graphs from disk is 10-20x faster
-4. First-class matrix multiplication API [matmul](https://grgl.readthedocs.io/en/stable/python_api.html#pygrgl.matmul)
-5. (Prototype) unphased data is supported
-6. GWAS, GWAS with covariates, PCA, and other analyses are available with [grapp](https://github.com/aprilweilab/grapp) (`pip install grapp`)
-7. Phenotype simulation is available with [grg_pheno_sim](https://github.com/aprilweilab/grg_pheno_sim/) (`pip install grg_pheno_sim`)
-8. Construction from `.vcf.gz` now supports tabix indexes, making that input format feasible for large datasets
-9. Better support for missing data, see [the documentation](https://grgl.readthedocs.io/en/stable/)
+If you use GRG in your research, please cite the [initial paper](https://www.nature.com/articles/s43588-024-00739-9):
 
-If you need to cite something, use
-["Enabling efficient analysis of biobank-scale data with genotype representation graphs"](https://www.nature.com/articles/s43588-024-00739-9).
+> DeHaas, Drew, Ziqing Pan, and Xinzhu Wei. "Enabling efficient analysis of biobank-scale data with genotype representation graphs." Nature computational science 5, no. 2 (2025): 112-124.
+
+If you use [grapp](https://github.com/aprilweilab/grapp) for PCA, GWAS, LinearOperators, etc., you can cite the
+[recent preprint](https://doi.org/10.64898/2026.04.10.717786):
+
+> DeHaas, Drew, Chris Adonizio, Ziqing Pan, and Xinzhu Wei. "General, orders-of-magnitude faster whole-genome analysis with genotype representation graphs." bioRxiv (2026).
+
+This preprint also describes improvements in GRGL v2.5: graphs are smaller, faster to construct, and faster for computation.
+
+* Unlike other graph-based methods (e.g., ARG inference), GRG can be constructed very quickly from tabular datasets, similar to the cost of creating a PLINK2 PGEN file.
+* There is experimental support for unphased data, but it does not compress nearly as well as phased data.
+* Construction from `.vcf.gz` now supports tabix indexes, making that input format feasible for large datasets
+* Missing data is supported, see [the documentation](https://grgl.readthedocs.io/en/stable/)
+
+<a href="https://github.com/aprilweilab/grgl/blob/main/readme.fig.png"><img src="readme.fig.png" width="50%" alt="GRG possible workflows including PCA, GWAS, and arbitrary linear algebra operations"/></a>
+
 
 # Documentation
 
 Check out [the main documentation](https://grgl.readthedocs.io/en/latest/) for core API documentation, examples, tutorials, etc. Things covered in the documentation include:
 * Creating and using GRGs
-* Performing GWAS, PCA, GWAS with covariates, or other analyses with GRG
-* Simulating phenotypes with GRG
+* Performing GWAS, PCA, GWAS with covariates, or other analyses with GRG via [grapp](https://github.com/aprilweilab/grapp) (`pip install grapp`)
+  * See also the [grapp API reference](https://grapp.readthedocs.io/en/latest/)
+* Simulating phenotypes with GRG via [grg_pheno_sim](https://github.com/aprilweilab/grg_pheno_sim/) (`pip install grg_pheno_sim` -- see [the paper](https://doi.org/10.1093/bioadv/vbag040))
 * Using GRG with Python (integration with [numpy](https://numpy.org/), [pandas](https://pandas.pydata.org/), [scipy](https://scipy.org/), etc.)
 
 You can also download the tutorials as [Jupyter Notebooks](https://github.com/aprilweilab/grgl/tree/main/doc/tutorials/notebooks) and work through them interactively.
@@ -122,6 +136,11 @@ Load a GRG and emit some simple statistics about the GRG itself:
 grg process stats my_arg_data.grg
 ```
 
+You can also use [grapp](https://github.com/aprilweilab/grapp) to see the same stats:
+```
+grapp show -i my_arg_data.grg
+```
+
 To construct a GRG from a VCF file, use the `grg construct` command. (**NOTE** raw VCF is incredibly slow for non-trivial datasets, use BGZF indexed with tabix or IGD):
 ```
 grg construct -j 1 path/to/foo.vcf.gz
@@ -134,7 +153,7 @@ igdtools path/to/foo.vcf -o foo.igd
 grg construct -j 1 foo.igd
 ```
 
-Increase `-j` to the number of threads you have.
+Increase `-j` to the number of threads you have. `igdtools` can also use more threads if the VCF is BGZF and tabix indexed.
 Construction for small datasets (such as those included as tests in this repository) should be very fast, on the order of seconds. Really large datasets (such as Biobank-scale whole genome sequences) can take on the order of hours when using lots of threads (e.g., 70). 1,000 Genomes Project chromosomes usually take on the order of a few minutes.
 
 ## Usage (Python API)
