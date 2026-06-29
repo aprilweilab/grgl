@@ -241,7 +241,6 @@ std::vector<NodeIDSizeT> calculateCoalsForSamples(const GRGPtr& grg, const NodeI
 
 // Set which samples we want to keep; if never called then we keep all samples.
 NodeIDSizeT RenumberAndWriteVisitor::setKeepSamples(const grgl::GRGPtr& grg, grgl::NodeIDList sampleIDList, bool warn) {
-    // FIXME: this likely doesn't work properly if we setSamples(), needs to be thought through.
     NodeIDSizeT numSamples = 0;
     NodeID prevSampleId = INVALID_NODE_ID;
     std::sort(sampleIDList.begin(), sampleIDList.end());
