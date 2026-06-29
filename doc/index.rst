@@ -32,7 +32,7 @@ in one spot. If you want detailed API documentation, they can be found at:
   Constructing GRGs <construct>
   Converting Tree-Sequences <ts_convert>
   Graph Traversals <traversal>
-  Calculating dot products <dot_products>
+  Matrix multiplication <matmul>
   python_api
   cpp_api
   Examples and applications <examples_and_applications>
