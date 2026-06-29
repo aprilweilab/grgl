@@ -242,32 +242,11 @@ py::array matMul(grgl::GRGPtr& grg,
     api_exc_check(false, "Unsupported numpy dtype: " << arr.dtype());
 }
 
-class NodeNumberingIterator : public grgl::GRGVisitor {
-public:
-    NodeNumberingIterator(grgl::DfsPass pass)
-        : m_dfsPass(pass) {}
-
-    bool visit(const grgl::GRGPtr& grg,
-               grgl::NodeID nodeId,
-               grgl::TraversalDirection direction,
-               grgl::DfsPass dfsPass = grgl::DFS_PASS_NONE) override {
-        if (dfsPass != m_dfsPass) {
-            return true;
-        }
-        m_nodeIds.push_back(nodeId);
-        return true;
-    }
-
-    grgl::NodeIDList m_nodeIds;
-    grgl::DfsPass m_dfsPass;
-};
-
 std::vector<grgl::NodeID> getBfsOrder(const grgl::GRGPtr& grg,
                                       grgl::TraversalDirection direction,
                                       const grgl::NodeIDList& seedList,
                                       ssize_t maxQueueWidth = -1) {
-    api_exc_check(seedList.empty(), "Cannot do a BFS from empty list of seeds");
-    NodeNumberingIterator iterator(grgl::DFS_PASS_NONE);
+    grgl::NodeNumberingVisitor iterator(grgl::DFS_PASS_NONE);
     grg->visitBfs(iterator, direction, seedList, maxQueueWidth);
     return std::move(iterator.m_nodeIds);
 }
@@ -276,8 +255,7 @@ std::vector<grgl::NodeID> getDfsOrder(const grgl::GRGPtr& grg,
                                       grgl::TraversalDirection direction,
                                       const grgl::NodeIDList& seedList,
                                       bool forwardOnly = false) {
-    api_exc_check(seedList.empty(), "Cannot do a DFS from empty list of seeds");
-    NodeNumberingIterator iterator(forwardOnly ? grgl::DFS_PASS_THERE : grgl::DFS_PASS_BACK_AGAIN);
+    grgl::NodeNumberingVisitor iterator(forwardOnly ? grgl::DFS_PASS_THERE : grgl::DFS_PASS_BACK_AGAIN);
     grg->visitDfs(iterator, direction, seedList, forwardOnly);
     return std::move(iterator.m_nodeIds);
 }
@@ -285,9 +263,9 @@ std::vector<grgl::NodeID> getDfsOrder(const grgl::GRGPtr& grg,
 std::vector<grgl::NodeID>
 getTopoOrder(const grgl::GRGPtr& grg, grgl::TraversalDirection direction, const grgl::NodeIDList& seedList) {
     if (seedList.empty()) {
-        return std::move(grg->getOrderedNodes(direction));
+        return std::move(grg->getOrderedNodes(direction, /*allowSort=*/true));
     }
-    NodeNumberingIterator iterator(grgl::DFS_PASS_NONE);
+    grgl::NodeNumberingVisitor iterator(grgl::DFS_PASS_NONE);
     grg->visitTopo(iterator, direction, seedList);
     return std::move(iterator.m_nodeIds);
 }

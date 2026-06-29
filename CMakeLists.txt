@@ -13,6 +13,7 @@ option(ENABLE_BGEN "Enable BGEN support" OFF)
 option(ENABLE_CPU_PROF "Enable gperftools CPU profiler" OFF)
 option(ENABLE_MEM_PROF "Enable gperftools memory profiler" OFF)
 option(ENABLE_CUDA "Enable CUDA support" OFF)
+option(CHECK_NEGATIVE "Debug option: extra checks on the use of negative nodes" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -74,6 +75,11 @@ add_compile_options(
     -DVCF_GZ_SUPPORT 
     $<$<COMPILE_LANGUAGE:CXX>:-Werror>
 )
+
+if (${CHECK_NEGATIVE})
+  add_compile_options(-DGRGL_CHECK_NEGATIVE=1)
+endif()
+
 
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

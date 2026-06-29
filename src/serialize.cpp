@@ -550,6 +550,12 @@ simplifyAndSerialize(const GRGPtr& grg, std::ostream& outStream, const GRGOutput
     RenumberAndWriteVisitor visitor(outStream, grg->numNodes(), allowSimplify);
     if (filter.isSpecified()) {
         if (filter.direction == TraversalDirection::DIRECTION_UP) {
+            // This could be supported in future, but it will add a lot of complexity to some already complex logic,
+            // and the two options given in the error message work well and are very efficient.
+            api_exc_check(grg->samplesAreOrdered(),
+                          "Cannot filter a GRG by samples when the samples are unordered;"
+                          "either save the GRG and then filter, or use setSamples().");
+
             header.sampleCount = visitor.setKeepSamples(grg, filter.seedList, true);
             grg->visitTopo(visitor, TraversalDirection::DIRECTION_UP, filter.seedList);
         } else {

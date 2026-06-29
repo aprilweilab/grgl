@@ -63,7 +63,9 @@ public:
 
     bool isSpecified() const { return !seedList.empty(); }
 
+    // Traverse UP or DOWN from the seeds.
     TraversalDirection direction;
+    // These are the nodes to start traversing from.
     NodeIDList seedList;
     std::pair<BpPosition, BpPosition> bpRange;
 };
@@ -114,8 +116,9 @@ public:
     /**
      * Is the given nodeID associated with a sample node?
      *
-     * The first numSamples node IDs are reserved for samples, so you can also just use
-     * `nodeId < grg.numSamples()`.
+     * In most GRGs, the first numSamples node IDs are reserved for samples,
+     * so you can also just use `nodeId < grg.numSamples()` _if_ you are using an
+     * immutable GRG (CSRGRG) or more generally if samplesAreOrdered() returns true.
      *
      * @param[in] nodeId The node ID to check.
      */
@@ -198,8 +201,16 @@ public:
     /**
      * Get all of the node IDs in topological order for the given direction (UP means do
      * the leaves first, DOWN means do the roots first).
+     *
+     * @param[in] direction Direction for the order.
+     * @param[in] allowSort Set to true to allow performing a topological sort to get the result,
+     *      if the nodes are not already ordered. This can impose a substantial performance hit
+     *      and is only necessary when the graph has been modified in ways that did not preserve
+     *      the topological order! It is almost always possible to modify the graph so that the
+     *      topological order is preserved, so this option should rarely (if ever) be used.
+     *      Default: false.
      */
-    virtual NodeIDList getOrderedNodes(TraversalDirection direction) = 0;
+    virtual NodeIDList getOrderedNodes(TraversalDirection direction, bool allowSort = false) = 0;
 
     /**
      * True if this graph stores up edges, false if only down edges are stored.
@@ -258,15 +269,14 @@ public:
      * to the (N-1)th sample, where N is the number of haplotypes).
      */
     virtual NodeIDList getSampleNodes() const {
-        NodeIDList result;
-        for (grgl::NodeID i = 0; i < this->numSamples(); i++) {
-            result.push_back(i);
-        }
+        NodeIDList result(this->numSamples());
+        std::iota(result.begin(), result.end(), 0);
         return std::move(result);
     }
 
     /**
      * Get the NodeIDList for all roots in the graph.
+     * Note: this is an O(numNodes) operation.
      */
     NodeIDList getRootNodes() {
         NodeIDList result;
@@ -387,14 +397,15 @@ public:
      * Mutation.
      *
      * @param[in] allowSort Allow the mutations-to-node mapping to be resorted; if false and the mapping is
-     *      not sorted then an exception will be thrown.
+     *      not sorted then an exception will be thrown. Sorting repeatedly is slow (obviously), so this flag
+     *      can help avoid/debug performance issues.
      *
      * @return An iterator over (NodeID, MutationId) pairs or (NodeID, MutationId, NodeID) tuples,
      *      depending on the function template argument.
      */
     template <typename T = NodeAndMut> NodeAndMutIterator<T> getNodesAndMutations(const bool allowSort = true) {
         if (!m_mutIdsByNodeIdSorted) {
-            api_exc_check(allowSort, "Mutation-to-node mapping needs to be sorted, but the user forbid it.");
+            api_exc_check(allowSort, "Mutation-to-node mapping needs to be sorted, but allowSort is false.");
             sortMutIdsByNodeID();
         }
         if (!m_mutIdsByNodeId.empty()) {
@@ -433,14 +444,15 @@ public:
      *
      * @param[in] nodeId The node to lookup.
      * @param[in] allowSort Allow the mutations-to-node mapping to be resorted; if false and the mapping is
-     *      not sorted then an exception will be thrown.
+     *      not sorted then an exception will be thrown. Sorting repeatedly is slow (obviously), so this flag
+     *      can help avoid/debug performance issues.
      * @return A vector of either MutationId or GRG::MutAndNode (a std::pair), depending on the template
      *      parameter.
      */
     template <typename T = MutationId>
     std::vector<T> getMutationsForNode(const NodeID nodeId, const bool allowSort = true) {
         if (!m_mutIdsByNodeIdSorted) {
-            api_exc_check(allowSort, "Mutation-to-node mapping needs to be sorted, but the user forbid it.");
+            api_exc_check(allowSort, "Mutation-to-node mapping needs to be sorted, but allowSort is false.");
             sortMutIdsByNodeID();
         }
         std::vector<T> result;
@@ -472,12 +484,13 @@ public:
      *
      * @param[in] nodeId The node to lookup.
      * @param[in] allowSort Allow the mutations-to-node mapping to be resorted; if false and the mapping is
-     *      not sorted then an exception will be thrown.
+     *      not sorted then an exception will be thrown. Sorting repeatedly is slow (obviously), so this flag
+     *      can help avoid/debug performance issues.
      * @return true if the node has one or more Mutation.
      */
     bool nodeHasMutations(const NodeID nodeId, const bool allowSort = true) {
         if (!m_mutIdsByNodeIdSorted) {
-            api_exc_check(allowSort, "Mutation-to-node mapping needs to be sorted, but the user forbid it.");
+            api_exc_check(allowSort, "Mutation-to-node mapping needs to be sorted, but allowSort is false.");
             sortMutIdsByNodeID();
         }
         if (!m_mutIdsByNodeId.empty()) {
@@ -963,6 +976,7 @@ public:
                         bool useUpEdges = true)
         : GRG(numSamples, ploidy, phased),
           m_hasUpEdges(useUpEdges) {
+        api_exc_check(numSamples > 0, "Must have at least one sample.");
         if (initialNodeCapacity < numSamples) {
             initialNodeCapacity = numSamples * 2;
         }
@@ -971,24 +985,24 @@ public:
     }
 
     NodeIDSizeT numSamples() const override {
-        if (m_samplesMapping.empty()) {
+        if (m_orderedSampleList.empty()) {
             return GRG::numSamples();
         }
-        return m_samplesMapping.size();
+        return m_orderedSampleList.size();
     }
 
     bool isSample(const NodeID nodeId) const override {
-        if (m_samplesMapping.empty()) {
+        if (m_orderedSampleList.empty()) {
             return GRG::isSample(nodeId);
         }
         return m_sampleSet.find(nodeId) != m_sampleSet.end();
     }
 
     NodeIDList getSampleNodes() const override {
-        if (m_samplesMapping.empty()) {
+        if (m_orderedSampleList.empty()) {
             return std::move(GRG::getSampleNodes());
         }
-        return m_samplesMapping;
+        return m_orderedSampleList;
     }
 
     bool nodesAreOrdered() const override { return m_nodesAreOrdered && m_negativeNodes.empty(); }
@@ -1026,7 +1040,7 @@ public:
 
     bool edgesAreOrdered() const override { return false; }
 
-    NodeIDList getOrderedNodes(TraversalDirection direction) override;
+    NodeIDList getOrderedNodes(TraversalDirection direction, bool allowSort = false) override;
 
     /**
      * Create a new node in the GRG.
@@ -1054,7 +1068,11 @@ public:
         for (size_t i = 0; i < count; i++) {
             this->m_nodes.push_back(std::unique_ptr<GRGNode>(new GRGNode()));
             if (negative) {
-                m_negativeNodes.emplace_back(nextId + i);
+                const NodeID nextNode = nextId + i;
+                m_negativeNodes.emplace_back(nextNode);
+#ifdef GRGL_CHECK_NEGATIVE
+                m_isNegative.emplace(nextNode);
+#endif
             }
         }
         if (this->m_nodes.size() > this->m_numSamples) {
@@ -1146,16 +1164,17 @@ public:
      */
     void setSamples(const NodeIDList& sampleNodes) {
         api_exc_check(sampleNodes.size() < numNodes(), "Too many sample nodes");
-        m_samplesMapping.clear();
+        api_exc_check(!sampleNodes.empty(), "Must have at least one sample");
+        m_orderedSampleList.clear();
         m_sampleSet.clear();
-        m_samplesMapping.shrink_to_fit();
-        m_samplesMapping.reserve(sampleNodes.size());
+        m_orderedSampleList.shrink_to_fit();
+        m_orderedSampleList.reserve(sampleNodes.size());
         for (const NodeID node : sampleNodes) {
             api_exc_check(node < numNodes(), "Invalid sample node: " << node);
-            m_samplesMapping.emplace_back(node);
+            m_orderedSampleList.emplace_back(node);
             m_sampleSet.insert(node);
         }
-        api_exc_check(m_samplesMapping.size() == m_sampleSet.size(), "Sample nodes must be unique");
+        api_exc_check(m_orderedSampleList.size() == m_sampleSet.size(), "Sample nodes must be unique");
     }
 
     /**
@@ -1163,7 +1182,10 @@ public:
      *
      * @param[in] nodeId The ID of the node in question.
      */
-    GRGNode& getNode(const NodeID nodeId) const { return *this->m_nodes.at(nodeId); }
+    GRGNode& getNode(const NodeID nodeId) const {
+        api_exc_check(nodeId < this->m_nodes.size(), "Invalid NodeID: " << nodeId);
+        return *this->m_nodes[nodeId];
+    }
 
     std::vector<NodeIDSizeT> topologicalSort(TraversalDirection direction) override;
 
@@ -1180,13 +1202,13 @@ public:
 
     bool isMutable() const override { return true; }
 
-    bool samplesAreOrdered() const override { return m_samplesMapping.empty(); }
+    bool samplesAreOrdered() const override { return m_orderedSampleList.empty(); }
 
 private:
     // Empty, or the map from NodeIDs that correspond to the samples to the "sample ID"
     // (e.g., the NodeID that it will get when/if the GRG is written to disk).
     NodeIDSet m_sampleSet;
-    NodeIDList m_samplesMapping;
+    NodeIDList m_orderedSampleList;
 
     // The list of nodes. The node's position in this vector must match its ID.
     std::vector<std::unique_ptr<GRGNode>> m_nodes;
@@ -1195,6 +1217,11 @@ private:
 
     // Negative nodes in the order they were added to the GRG. See makeNode() for details.
     std::vector<NodeID> m_negativeNodes;
+    // In debug builds, sanity check the use of negative nodes. At large scale this can have
+    // non-trivial overhead, so only in debug builds.
+#ifdef GRGL_CHECK_NEGATIVE
+    NodeIDSet m_isNegative;
+#endif
 
     // True if the nodeId order matches the bottom-up topological order.
     bool m_nodesAreOrdered{true};
@@ -1207,7 +1234,9 @@ public:
     explicit CSRGRG(size_t numSamples, size_t nodeCount, uint16_t ploidy, bool loadUpEdges = true, bool phased = true)
         : GRG(numSamples, ploidy, phased),
           m_downEdges(nodeCount),
-          m_upEdges(loadUpEdges ? nodeCount : 0) {}
+          m_upEdges(loadUpEdges ? nodeCount : 0) {
+        api_exc_check(numSamples > 0, "Must have at least one sample.");
+    }
 
     bool nodesAreOrdered() const override { return true; }
 
@@ -1248,7 +1277,8 @@ public:
     // For CSRGRG, you can just iterate the nodes in order from 0...(numNodes-1). This function
     // only exists for the Python API, and also to have an agnostic function if you don't
     // know (or care) what kind of GRG you have.
-    NodeIDList getOrderedNodes(TraversalDirection direction) override {
+    NodeIDList getOrderedNodes(TraversalDirection direction, bool allowSort = false) override {
+        (void)allowSort;
         NodeIDList result(numNodes());
         if (direction == grgl::TraversalDirection::DIRECTION_DOWN) {
             std::iota(result.rbegin(), result.rend(), 0);

@@ -168,8 +168,9 @@ class TestGrgModify(unittest.TestCase):
         negative_new = grg.make_node(negative=True)
         grg.connect(-negative_new, 10)  # Break the order entirely
 
-        # FIXME: this will barf right now
         topo_list = pygrgl.get_topo_order(grg, pygrgl.TraversalDirection.UP, [])
+        # We have some arbitrary order that does not match the node ID order
+        self.assertNotEqual(list(sorted(topo_list)), topo_list)
 
     def test_regr_negnodes_matmul(self):
         """
@@ -265,6 +266,32 @@ class TestGrgModify(unittest.TestCase):
         product3 = pygrgl.matmul(grg, rand_input, pygrgl.TraversalDirection.DOWN)[0]
         numpy.testing.assert_allclose(orig_product, product3)
 
+        # save_subset() should reject us, but save_grg() should work fine.
+        with self.assertRaises(RuntimeError):
+            pygrgl.save_subset(grg, "not_created.grg", pygrgl.TraversalDirection.UP, below2[:10])
+        pygrgl.save_grg(grg, "test.throwaway.grg")
+
+    @unittest.skip("Requires pip installing pygrgl with GRGL_CHECK_NEGATIVE=1 in the environment")
+    def test_check_negative(self):
+        grg = pygrgl.load_mutable_grg(self.grg_filename, load_up_edges=True)
+
+        # Scenario 1: negative node, passed to connect() without negative sign
+        neg_i = grg.make_node(negative=True)
+        with self.assertRaises(RuntimeError):
+            grg.connect(0, neg_i)
+        with self.assertRaises(RuntimeError):
+            grg.connect(neg_i, 10)
+
+        # Scenario 2: positive node, passed to connect() with negative sign
+        pos_j = grg.make_node()
+        with self.assertRaises(RuntimeError):
+            grg.connect(0, -pos_j)
+        with self.assertRaises(RuntimeError):
+            grg.connect(-pos_j, 100)
+
+        # Correct signs for both cases.
+        grg.connect(0, -neg_i)
+        grg.connect(0, pos_j)
 
 if __name__ == "__main__":
     unittest.main()

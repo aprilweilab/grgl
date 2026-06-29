@@ -72,7 +72,7 @@ public:
     explicit RenumberAndWriteVisitor(std::ostream& outStream, NodeIDSizeT numNodes, bool allowSimplify);
     bool getChildren(const grgl::GRGPtr& grg, const grgl::NodeID nodeId, NodeIDList& result, NodeIDSizeT& parentCoals);
     bool shouldKeep(const grgl::GRGPtr& grg, const grgl::NodeID nodeId) const;
-    NodeIDSizeT setKeepSamples(const grgl::GRGPtr& grg, grgl::NodeIDList sampleIDList, bool warn);
+    NodeIDSizeT setKeepSamples(const grgl::GRGPtr& grg, grgl::NodeIDList sampleNodeList, bool warn);
     NodeIDList setKeepMutations(const grgl::GRGPtr& grg, const grgl::NodeIDList& mutationIDList);
     bool keepMutation(const MutationId mutId);
     bool visit(const grgl::GRGPtr& grg,

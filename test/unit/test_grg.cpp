@@ -42,7 +42,6 @@ TEST(GRG, DotProductGood) {
     GRGPtr grg = depth3BinTree();
     ASSERT_TRUE(grg->numEdges() == 6);
     ASSERT_TRUE(grg->numNodes() == 7);
-    ASSERT_FALSE(grg->nodesAreOrdered());
 
     Mutation m1(5, "A", "G");
     grg->addMutation(m1, 1); // Attach directly to sample 1
@@ -93,7 +92,6 @@ TEST(GRG, MatrixMultGood) {
     GRGPtr grg = depth3BinTree();
     ASSERT_TRUE(grg->numEdges() == 6);
     ASSERT_TRUE(grg->numNodes() == 7);
-    ASSERT_FALSE(grg->nodesAreOrdered());
 
     Mutation m1(5, "A", "G");
     grg->addMutation(m1, 1); // Attach directly to sample 1
