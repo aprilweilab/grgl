@@ -6,20 +6,20 @@
 # Genotype Representation Graphs
 
 A Genotype Representation Graph (GRG) is a compact way to store reference-aligned genotype data for large
-genetic datasets. Computations with GRG can either be performed in a "graph native" way ([DFS](https://grgl.readthedocs.io/en/stable/python_api.html#pygrgl.get_dfs_order),
-[BFS](https://grgl.readthedocs.io/en/stable/python_api.html#pygrgl.get_bfs_order), or [topological order](https://grgl.readthedocs.io/en/stable/python_api.html#pygrgl.get_topo_order) 
-traversals) or using [matrix multiplication](https://grgl.readthedocs.io/en/stable/python_api.html#pygrgl.matmul), which also supports the 
-standardized matrix and GRM through [LinearOperators](https://grgl.readthedocs.io/en/stable/tutorials/LinearOperators.html).
+genetic datasets. Computations with GRG can either be performed in a "graph native" way ([DFS](https://grgl.readthedocs.io/en/latest/python_api.html#pygrgl.get_dfs_order),
+[BFS](https://grgl.readthedocs.io/en/latest/python_api.html#pygrgl.get_bfs_order), or [topological order](https://grgl.readthedocs.io/en/latest/python_api.html#pygrgl.get_topo_order)
+traversals) or using [matrix multiplication](https://grgl.readthedocs.io/en/latest/python_api.html#pygrgl.matmul), which also supports the
+standardized matrix and GRM through [LinearOperators](https://grgl.readthedocs.io/en/latest/tutorials/LinearOperators.html).
 
-A GRG can be constructed from [.vcf.gz](https://grgl.readthedocs.io/en/stable/tutorials/VCFToGRG.html), [IGD](https://grgl.readthedocs.io/en/stable/tutorials/IGDToGRG.html),
-[tskit tree-sequence ARGs](https://grgl.readthedocs.io/en/stable/tutorials/WorkingWithSimData.html), or through
-Python APIs for [node](https://grgl.readthedocs.io/en/stable/python_api.html#pygrgl.MutableGRG.make_node) and 
-[edge](https://grgl.readthedocs.io/en/stable/python_api.html#pygrgl.MutableGRG.connect) creation.
+A GRG can be constructed from [.vcf.gz](https://grgl.readthedocs.io/en/latest/tutorials/VCFToGRG.html), [IGD](https://grgl.readthedocs.io/en/latest/tutorials/IGDToGRG.html),
+[tskit tree-sequence ARGs](https://grgl.readthedocs.io/en/latest/tutorials/WorkingWithSimData.html), or through
+Python APIs for [node](https://grgl.readthedocs.io/en/latest/python_api.html#pygrgl.MutableGRG.make_node) and
+[edge](https://grgl.readthedocs.io/en/latest/python_api.html#pygrgl.MutableGRG.connect) creation.
 
 A GRG contains Mutation nodes (representing variants) and Sample nodes (representing haploid samples), where there is a path from
 a Mutation node to a Sample node if-and-only-if that sample contains that mutation. These paths go through internal nodes that represent
 common ancestry between multiple samples, and this can result in significant compression **(25-50x smaller than
-.vcf.gz)**. Calculations on the whole dataset can be performed very quickly on GRG, using GRGL. 
+.vcf.gz)**. Calculations on the whole dataset can be performed very quickly on GRG, using GRGL.
 
 If you use GRG in your research, please cite the [initial paper](https://www.nature.com/articles/s43588-024-00739-9):
 
@@ -35,7 +35,7 @@ This preprint also describes improvements in GRGL v2.5: graphs are smaller, fast
 * Unlike other graph-based methods (e.g., ARG inference), GRG can be constructed very quickly from tabular datasets, similar to the cost of creating a PLINK2 PGEN file.
 * There is experimental support for unphased data, but it does not compress nearly as well as phased data.
 * Construction from `.vcf.gz` now supports tabix indexes, making that input format feasible for large datasets
-* Missing data is supported, see [the documentation](https://grgl.readthedocs.io/en/stable/)
+* Missing data is supported, see [the documentation](https://grgl.readthedocs.io/en/latest/)
 
 <a href="https://github.com/aprilweilab/grgl/blob/main/readme.fig.png"><img src="readme.fig.png" width="50%" alt="GRG possible workflows including PCA, GWAS, and arbitrary linear algebra operations"/></a>
 
