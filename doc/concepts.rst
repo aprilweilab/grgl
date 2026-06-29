@@ -94,7 +94,7 @@ Missing Data
 ------------
 
 Missing data is represented as a node-to-samples relationship, just like Mutations are. However, there is no Mutation
-object directly associated with the missing data. Instead, each Mutation is mapped to two (optional) ``NodeID``s: the
+object directly associated with the missing data. Instead, each Mutation is mapped to two (optional) ``NodeID``: the
 mutation's node, and the missingness node associated with the site (genetic position) of the Mutation.
 
 Obtaining the Missingness Node

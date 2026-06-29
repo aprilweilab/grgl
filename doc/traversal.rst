@@ -16,6 +16,6 @@ a bottom-up topological order of the entire graph, and iterating from ``(grg.num
 gives you the top-down topological order. This property should be ``True`` for any GRG that has
 been read from disk (until it is modified).
 
-In the Python API, often using :py:meth:`pygrgl.dot_product` is significantly faster than performing
-a traversal (even if you do not need to traverse the entire graph). See the `next section <dot_products.html>`_
+In the Python API, often using :py:meth:`pygrgl.matmul` is significantly faster than performing
+a traversal (even if you do not need to traverse the entire graph). See the `next section <matmul.html>`_
 for details on the dot product and when it is applicable.
