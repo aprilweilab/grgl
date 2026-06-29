@@ -332,6 +332,7 @@ install(
 
 if(ENABLE_TESTS)
   # https://github.com/google/googletest/tree/master/googletest#incorporating-into-an-existing-cmake-project
+  enable_testing()
 
   include(FetchContent)
   FetchContent_Declare(

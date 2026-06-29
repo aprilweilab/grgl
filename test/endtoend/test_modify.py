@@ -268,10 +268,14 @@ class TestGrgModify(unittest.TestCase):
 
         # save_subset() should reject us, but save_grg() should work fine.
         with self.assertRaises(RuntimeError):
-            pygrgl.save_subset(grg, "not_created.grg", pygrgl.TraversalDirection.UP, below2[:10])
+            pygrgl.save_subset(
+                grg, "not_created.grg", pygrgl.TraversalDirection.UP, below2[:10]
+            )
         pygrgl.save_grg(grg, "test.throwaway.grg")
 
-    @unittest.skip("Requires pip installing pygrgl with GRGL_CHECK_NEGATIVE=1 in the environment")
+    @unittest.skip(
+        "Requires pip installing pygrgl with GRGL_CHECK_NEGATIVE=1 in the environment"
+    )
     def test_check_negative(self):
         grg = pygrgl.load_mutable_grg(self.grg_filename, load_up_edges=True)
 
@@ -292,6 +296,7 @@ class TestGrgModify(unittest.TestCase):
         # Correct signs for both cases.
         grg.connect(0, -neg_i)
         grg.connect(0, pos_j)
+
 
 if __name__ == "__main__":
     unittest.main()

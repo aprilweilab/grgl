@@ -204,7 +204,7 @@ class TestTS2GRG(unittest.TestCase):
         #
         # The other site (site 1) has two recurrent mutations (not nested), which should be combined into
         # a single GRG mutation.
-         
+
         grg = pygrgl.grg_from_trees(ts_file)
         grg.sort_mutations()
         self.assertTrue(grg.mutations_are_unique())
@@ -220,4 +220,3 @@ class TestTS2GRG(unittest.TestCase):
         self.assertTrue(grg.is_phased)
         af = allele_frequencies(grg)
         numpy.testing.assert_allclose(af, [0.25, 0.0, 0.75])
-        

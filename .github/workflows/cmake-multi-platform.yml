@@ -83,3 +83,39 @@ jobs:
     - name: Check Format
       working-directory: ${{ github.workspace }}
       run: ${{ matrix.fcheck_command }}
+
+  build-py:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Checkout submodules # checkout rest
+      shell: bash
+      run: |
+        auth_header="$(git config --local --get http.https://github.com/.extraheader)"
+        git submodule sync --recursive
+        git -c "http.extraheader=$auth_header" -c protocol.version=2 submodule update --init --force --recursive --depth=1
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install black pytest
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Check code formatting (black)
+      run: |
+        black --check pygrgl/ test/ setup.py
+    - name: Build extension
+      run: |
+        python -m pip install .
+    - name: Test with pytest
+      run: |
+        pytest test/
