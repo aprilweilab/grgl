@@ -57,7 +57,9 @@ DAG_STYLE = [
 
 def grg_to_cyto(grg: GRG, start_from=[], show_mutations=True) -> CytoscapeWidget:
     """
-    Return a CytoscapeWidget that can be displayed in Jupyter.
+    Return a CytoscapeWidget that can be displayed in Jupyter. This is only practical with
+    small GRGs (maybe 100 samples and 100 variants at most?). Useful for illustration and/or
+    debugging on small tests.
     """
     if CytoscapeWidget is None:
         raise RuntimeError("Please install ipycytoscape")

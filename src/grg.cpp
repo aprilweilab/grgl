@@ -19,6 +19,8 @@
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
 #include "grgl/visitor.h"
+
+#include "common_visitors.h"
 #include "util.h"
 
 #include <algorithm>
@@ -302,6 +304,7 @@ void GRG::visitBfs(GRGVisitor& visitor,
                    TraversalDirection direction,
                    const NodeIDList& seedList,
                    ssize_t maxQueueWidth) {
+    api_exc_check(!seedList.empty(), "Cannot do a BFS from empty list of seeds");
     GRGPtr sharedThis = shared_from_this();
     std::deque<NodeID> fifo;
     for (const auto& nodeId : seedList) {
@@ -323,6 +326,7 @@ void GRG::visitBfs(GRGVisitor& visitor,
 }
 
 void GRG::visitDfs(GRGVisitor& visitor, TraversalDirection direction, const NodeIDList& seedList, bool forwardOnly) {
+    api_exc_check(!seedList.empty(), "Cannot do a DFS from empty list of seeds");
     GRGPtr sharedThis = shared_from_this();
     std::vector<bool> visitedForward(this->numNodes());
     // Stack with node IDs and which pass it is on (forward=1, backward=2)
@@ -357,8 +361,7 @@ void GRG::visitDfs(GRGVisitor& visitor, TraversalDirection direction, const Node
                     lifo.emplace_back(succId, 1);
                 }
             }
-            // Second (back up) pass.
-        } else {
+        } else { // Second (back up) pass.
             assert(visitedForward.at(nodeId));
             assert(nodeAndPass.second == 2);
             lifo.pop_back();
@@ -367,10 +370,24 @@ void GRG::visitDfs(GRGVisitor& visitor, TraversalDirection direction, const Node
     }
 }
 
-void MutableGRG::connect(const NodeID srcId, const NodeID tgtId) {
-    m_nodes.at(srcId)->addDownEdge(tgtId);
+void MutableGRG::connect(SignedNodeID srcId, SignedNodeID tgtId) {
+    const NodeID src = nodeStripNegative((NodeID)srcId);
+    const NodeID tgt = nodeStripNegative((NodeID)tgtId);
+#ifdef GRGL_CHECK_NEGATIVE
+    const bool srcNeg = m_isNegative.find(src) != m_isNegative.end();
+    api_exc_check(srcNeg || srcId >= 0, "Regular node passed as negative node to connect()");
+    api_exc_check(!srcNeg || srcId < 0, "Negative node passed as normal (positive) node to connect()");
+    const bool tgtNeg = m_isNegative.find(tgt) != m_isNegative.end();
+    api_exc_check(tgtNeg || tgtId >= 0, "Regular node passed as negative node to connect()");
+    api_exc_check(!tgtNeg || tgtId < 0, "Negative node passed as normal (positive) node to connect()");
+#endif
+    // Check topological order conditions before stripping off negative part of NodeID.
+    if (this->m_nodesAreOrdered && srcId <= tgtId) {
+        this->m_nodesAreOrdered = false;
+    }
+    m_nodes.at(src)->addDownEdge(tgt);
     if (m_hasUpEdges) {
-        m_nodes.at(tgtId)->addUpEdge(srcId);
+        m_nodes.at(tgt)->addUpEdge(src);
     }
 }
 
@@ -632,6 +649,45 @@ void MutableGRG::compact(NodeID nodeId) {
         m_nodes.at(nodeId)->m_downEdges.shrink_to_fit();
         m_nodes.at(nodeId)->m_upEdges.shrink_to_fit();
     }
+}
+
+NodeIDList MutableGRG::getOrderedNodes(TraversalDirection direction, const bool allowSort) {
+    if (!nodesAreTopo()) {
+        api_exc_check(allowSort, "Nodes are not in topological order, but allowSort is false.");
+        NodeNumberingVisitor iterator(grgl::DFS_PASS_NONE);
+        NodeIDList seeds;
+        if (direction == TraversalDirection::DIRECTION_UP) {
+            seeds = getSampleNodes();
+        } else {
+            seeds = getRootNodes();
+        }
+        this->visitTopo(iterator, direction, seeds);
+        return std::move(iterator.m_nodeIds);
+    }
+    // The "negative" nodes can be interleaved with regular positive nodes in m_nodes (any call
+    // sequence of make_node(negative=true) followed by make_node() yields interleaved IDs)
+    NodeIDList result;
+    result.reserve(numNodes());
+    const size_t numNegative = m_negativeNodes.size();
+    for (auto it = m_negativeNodes.crbegin(); it != m_negativeNodes.crend(); ++it) {
+        result.push_back(*it);
+    }
+    size_t nextNeg = 0;
+    // Positives in ASCENDING ID order (samples first, roots last), skipping negatives.
+    for (NodeID id = 0; id < numNodes(); id++) {
+        if (nextNeg < numNegative && m_negativeNodes[nextNeg] == id) {
+            nextNeg++;
+            continue;
+        }
+        result.push_back(id);
+    }
+    release_assert(nextNeg == numNegative); // We better have seen all of the negative nodes!
+    release_assert(result.size() == numNodes());
+    // The DOWN direction is just the reverse of the list that we created for UP
+    if (direction == grgl::TraversalDirection::DIRECTION_DOWN) {
+        vectReverse(result);
+    }
+    return std::move(result);
 }
 
 } // namespace grgl

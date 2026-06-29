@@ -10,6 +10,7 @@ import sys
 C_MODULE_NAME = "_grgl"
 
 env_debug = int(os.environ.get("GRGL_DEBUG", 0))
+env_check_neg = int(os.environ.get("GRGL_CHECK_NEGATIVE", 0))
 env_bgen = int(os.environ.get("GRGL_BGEN", 0))
 env_copy_bins = int(os.environ.get("GRGL_COPY_BINS", 0))
 env_cuda = os.environ.get("GRGL_CUDA", "off").lower()
@@ -57,6 +58,8 @@ if bool(env_debug):
     build_type = "Debug"
 if bool(env_bgen):
     extra_cmake_args.append("-DENABLE_BGEN=ON")
+if bool(env_check_neg):
+    extra_cmake_args.append("-DCHECK_NEGATIVE=ON")
 
 
 class CMakeExtension(Extension):

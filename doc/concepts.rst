@@ -148,3 +148,53 @@ identical to a phased GRG: all data is stored at the haploid level, and all samp
 only difference is that :cpp:func:`GRG::isPhased` (:py:attr:`GRG.is_phased`) returns false. It is up to the client code
 to ensure that all calculations are performed at the *individual* level (e.g., with the ``by_individual`` flag to
 :py:meth:`matmul`).
+
+Variations of GRGs
+------------------
+
+The typical GRG that most users/tools will interact with has the following properties:
+
+1. It is immutable (:py:meth:`pygrgl.load_immutable_grg`), meaning the edges and nodes cannot be changed.
+2. The nodes are numbered according to bottom-up topological order. That means a node with ID ``i`` is gauranteed to have all of it's children visited if you visit all nodes with IDs less than ``i``. This can be checked with :py:attr:`pygrgl.GRG.nodes_are_ordered`.
+3. The :py:class:`pygrgl.Mutation`s are numbered in ascending order of ``(position, ref_allele, allele)``. This can be checked with :py:attr:`pygrgl.GRG.mutations_are_ordered`.
+4. The Sample nodes are numbered ``0...(num_samples - 1)``, and are leaves of the graph. This can be checked with :py:attr:`pygrgl.GRG.samples_are_ordered`.
+
+The above are true for any immutable GRG that has been loaded. However, you can (optionally) break the above properties
+by performing modifications to the graph. For example:
+
+* An immutable GRG can still change it's Mutations (just not the nodes/edges of the graph). So if you call :py:meth:`pygrgl.GRG.add_mutation` or :py:meth:`pygrgl.GRG.remove_mutation` then :py:attr:`pygrgl.GRG.mutations_are_ordered` will become ``False``.
+* Changes to mutable GRGs can result in violating the above properties.
+  * :py:meth:`pygrgl.MutableGRG.connect` can affect the node topological ordering (see :py:meth:`pygrgl.MutableGRG.connect` for details). If :py:attr:`pygrgl.GRG.nodes_are_ordered` is ``False``, then you need to use :py:attr:`pygrgl.GRG.get_topo_order` (with ``seed_list=None``) to do the traversal.
+  * :py:meth:`pygrgl.MutableGRG.set_samples` will cause :py:attr:`pygrgl.GRG.samples_are_ordered` to become ``False``. You can no longer rely on the numbering of the samples, but this is not usually impactful, as :py:meth:`pygrgl.GRG.get_sample_nodes` and :py:meth:`pygrgl.GRG.is_sample` abstracts this away anyways.
+
+If you have modified a GRG, you can always get all of these properties back by writing it to disk and reloading it
+as an immutable GRG.
+
+Negative nodes
+~~~~~~~~~~~~~~
+
+"Negative" nodes are just regular nodes in the GRG that have been created with ``grg.make_node(negative=True)``. This tells the GRG
+that the node should be considered from the **bottom** of the graph for it's topological order. Regular nodes are always checked
+against the **top** of the graph. For example:
+
+* We create a regular node with ID ``A``. We attach ``A`` as a parent to an existing node ``B``. This maintains the topological order, because the NodeIDs increase in number, and that matched the topological order (``A`` is a parent of a node with a smaller ID)
+* We create a regular node with ID ``A``. We attach ``A`` as a **child** to an existing node ``B``. This breaks topological order! ``B`` is a smaller NodeID than ``A``, but is its parent.
+* We create a negative node with ID ``A``. We attach ``A`` as a child to an existing node ``B``. This maintains the topological order, as negative nodes are considered "less than" all regular nodes, for topological order.
+
+The actual NodeID returned by :py:meth:`pygrgl.GRG.make_node` is still a positive value. The only thing that makes a node negative is how
+the GRG tracks it internally. Also, when you connect a negative node to another node you must put a negative sign in front of it, like this:
+
+::
+
+    new_node = grg.make_node(negative=True)
+    grg.connect(old_node, -new_node)         # Passed the negation! This keeps the topological order
+    ...
+    grg.get_up_edges(new_node)               # All other GRG APIs use the positive node ID
+
+
+Advantages of immutable GRGs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+* An immutable GRG uses 2-3x less RAM than a mutable GRG. 
+* An immutable GRG has a faster matrix multiplication than a mutable GRG.
+* :py:attr:`pygrgl.GRG.nodes_are_ordered` and :py:attr:`pygrgl.GRG.samples_are_ordered` will *always* be true in an immutable GRG.

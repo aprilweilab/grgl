@@ -13,16 +13,17 @@ public:
                const grgl::TraversalDirection direction,
                const grgl::DfsPass dfsPass) override {
         if (dfsPass != grgl::DfsPass::DFS_PASS_THERE) {
-            const size_t base = nodeId * m_numRows;
             if (direction == DIRECTION_DOWN) {
+                const size_t base = nodeId * m_numRows;
                 for (const auto& child : grg->getDownEdges(nodeId)) {
                     const size_t cbase = child * m_numRows;
-                    vectorAdd<T, false>(&m_nodeValues[0], &m_nodeValues[0], base, cbase, m_numRows);
+                    vectorAdd<T, false>(m_nodeValues.data(), m_nodeValues.data(), base, cbase, m_numRows);
                 }
             } else {
+                const size_t base = nodeId * m_numRows;
                 for (const auto& parent : grg->getUpEdges(nodeId)) {
                     const size_t pbase = parent * m_numRows;
-                    vectorAdd<T, false>(&m_nodeValues[0], &m_nodeValues[0], base, pbase, m_numRows);
+                    vectorAdd<T, false>(m_nodeValues.data(), m_nodeValues.data(), base, pbase, m_numRows);
                 }
             }
         }

@@ -143,6 +143,26 @@ private:
     const NodeIDSizeT m_numSeeds;
 };
 
+class NodeNumberingVisitor : public GRGVisitor {
+public:
+    explicit NodeNumberingVisitor(DfsPass pass = DFS_PASS_NONE)
+        : m_dfsPass(pass) {}
+
+    bool
+    visit(const GRGPtr& grg, NodeID nodeId, TraversalDirection direction, DfsPass dfsPass = DFS_PASS_NONE) override {
+        (void)grg;
+        (void)direction;
+        if (dfsPass != m_dfsPass) {
+            return true;
+        }
+        m_nodeIds.push_back(nodeId);
+        return true;
+    }
+
+    grgl::NodeIDList m_nodeIds;
+    grgl::DfsPass m_dfsPass;
+};
+
 } // namespace grgl
 
 #endif /* GRG_COMMON_VISITORS_H */
