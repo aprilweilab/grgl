@@ -72,7 +72,7 @@ public:
     explicit RenumberAndWriteVisitor(std::ostream& outStream, NodeIDSizeT numNodes, bool allowSimplify);
     bool getChildren(const grgl::GRGPtr& grg, const grgl::NodeID nodeId, NodeIDList& result, NodeIDSizeT& parentCoals);
     bool shouldKeep(const grgl::GRGPtr& grg, const grgl::NodeID nodeId) const;
-    NodeIDSizeT setKeepSamples(const grgl::GRGPtr& grg, grgl::NodeIDList sampleIdList, bool warn);
+    NodeIDSizeT setKeepSamples(const grgl::GRGPtr& grg, const grgl::NodeIDList& sampleIdList, bool warn);
     NodeIDList setKeepMutations(const grgl::GRGPtr& grg, const grgl::NodeIDList& mutationIDList);
     bool keepMutation(const MutationId mutId);
     bool visit(const grgl::GRGPtr& grg,
@@ -144,6 +144,21 @@ GRGPtr loadImmutableGRG(const std::string& filename, bool loadUpEdges = false);
 
 std::pair<NodeIDSizeT, EdgeSizeT> saveGRG(const GRGPtr& theGRG, const std::string& filename, bool allowSimplify = true);
 
+/**
+ * Save a subset of the GRG, either by Mutations (downward traversal) or Samples (upward traversal).
+ *
+ * @param[in] theGRG The GRG object to save.
+ * @param[in] filename The output filename to use.
+ * @param[in] direction Subset by mutations (TraversalDirection::DIRECTION_DOWN) or samples
+ * (TraversalDirection::DIRECTION_UP)
+ * @param[in] seedList The list of MutationIDs or SampleIDs (NodeIDs of samples) to keep. For samples, the order of this
+ * list matters - it defines the order of the samples in the new GRG. For example, [0, 1, 2, 3] keeps the first four
+ * samples in their original order, but [3, 2, 1, 0] keeps the same samples but reverses their order in the new GRG.
+ * This means that the SampleIDs will change as 0->3, 1->2, 2->1, 3->0. The IndividualIDs mapped to individuals will be
+ * properly maintained if present.
+ * @param[in] byRange Just metadata about the range of base-pairs that this subset will cover. It does not have any
+ * effect on the actual filtering option, IT ONLY CHANGES METADATA.
+ */
 bool saveGRGSubset(const GRGPtr& theGRG,
                    const std::string& filename,
                    const TraversalDirection direction,

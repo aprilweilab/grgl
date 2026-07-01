@@ -982,7 +982,11 @@ PYBIND11_MODULE(_grgl, m) {
         :param direction: Downward means the seeds should be a list of MutationID that should be kept in
             the graph. Upward means the seeds should be a list of sample NodeID that should be kept.
         :type direction: pygrgl.TraversalDirection
-        :param seed_list: A list of MutationID or NodeID (see direction parameter).
+        :param seed_list: The list of MutationIDs or SampleIDs (NodeIDs of samples) to keep. For samples, the order of this list
+            matters - it defines the order of the samples in the new GRG. For example, [0, 1, 2, 3] keeps the first four samples in
+            their original order, but [3, 2, 1, 0] keeps the same samples but reverses their order in the new GRG. This means that
+            the SampleIDs will change as 0->3, 1->2, 2->1, 3->0. The IndividualIDs mapped to individuals will be properly maintained
+            if present.
         :type seed_list: List[int]
         :param bp_range: A pair of integers specifying the base-pair range that this GRG covers. This is just
             meta-data, and does not change the filtering behavior.
