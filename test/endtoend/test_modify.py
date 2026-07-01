@@ -26,7 +26,11 @@ class TestGrgModify(unittest.TestCase):
             os.remove(cls.grg_filename)
 
     def test_downsample(self):
+        self.assertTrue(self.grg.has_individual_ids)
+        self.assertEqual(self.grg.ploidy, 2)
         sub_grg_filename = "test.downsample.grg"
+
+        # This first downsampling does not maintain the diploid samples!
         saved = pygrgl.save_subset(
             self.grg,
             sub_grg_filename,
@@ -37,6 +41,10 @@ class TestGrgModify(unittest.TestCase):
         sub_grg = pygrgl.load_immutable_grg(sub_grg_filename)
         self.assertEqual(sub_grg.num_mutations, self.grg.num_mutations)
         self.assertEqual(sub_grg.num_samples, 20)
+        self.assertFalse(
+            sub_grg.has_individual_ids
+        )  # Individual IDs were broken by the filtering!
+        self.assertEqual(sub_grg.ploidy, 1)  # As was ploidy
 
         input_full = numpy.zeros((1, self.grg.num_samples), dtype=numpy.int32)
         for i in range(0, 200, 10):
@@ -50,6 +58,33 @@ class TestGrgModify(unittest.TestCase):
 
         self.assertEqual(acount_full.shape, acount_sub.shape)
         numpy.testing.assert_array_equal(acount_full, acount_sub)
+
+        # Now keep the individual IDs and reorder some samples.
+        orig_10 = self.grg.get_individual_id(5)
+        saved = pygrgl.save_subset(
+            self.grg,
+            sub_grg_filename,
+            pygrgl.TraversalDirection.UP,
+            [10, 11, 0, 1, 98, 99, 78, 79],
+        )
+        self.assertTrue(saved)
+        sub_grg = pygrgl.load_immutable_grg(sub_grg_filename)
+        self.assertEqual(sub_grg.num_mutations, self.grg.num_mutations)
+        self.assertEqual(sub_grg.num_samples, 8)
+        # Ploidy / individual mapping was retained!
+        self.assertEqual(sub_grg.num_individuals, 4)
+        self.assertTrue(sub_grg.has_individual_ids)
+        self.assertEqual(sub_grg.ploidy, 2)
+        self.assertEqual(orig_10, sub_grg.get_individual_id(0))
+
+        # Keep the same sample twice - should fail
+        with self.assertRaises(RuntimeError):
+            saved = pygrgl.save_subset(
+                self.grg,
+                sub_grg_filename,
+                pygrgl.TraversalDirection.UP,
+                [0, 1, 2, 3, 1],
+            )
 
     def test_downsample_fail(self):
         sub_grg_filename = "test.downsample.fail.grg"

@@ -280,4 +280,14 @@ template <typename T> inline void vectReverse(std::vector<T>& vect) {
     }
 }
 
+template <typename T> inline T vectMax(const std::vector<T>& vect) {
+    T maxElem = std::numeric_limits<T>::min();
+    for (size_t i = 0; i < vect.size(); i++) {
+        if (vect[i] > maxElem) {
+            maxElem = vect[i];
+        }
+    }
+    return maxElem;
+}
+
 #endif /* GRGL_UTIL_H */

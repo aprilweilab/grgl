@@ -240,44 +240,48 @@ std::vector<NodeIDSizeT> calculateCoalsForSamples(const GRGPtr& grg, const NodeI
 }
 
 // Set which samples we want to keep; if never called then we keep all samples.
-NodeIDSizeT RenumberAndWriteVisitor::setKeepSamples(const grgl::GRGPtr& grg, grgl::NodeIDList sampleIDList, bool warn) {
+// The ORDER OF THE SAMPLES in sampleIDList matters, as this will be the new order of those samples in
+// the resulting GRG.
+NodeIDSizeT
+RenumberAndWriteVisitor::setKeepSamples(const grgl::GRGPtr& grg, const grgl::NodeIDList& sampleIDList, bool warn) {
+    release_assert(grg->samplesAreOrdered());
+
     NodeIDSizeT numSamples = 0;
-    NodeID prevSampleId = INVALID_NODE_ID;
-    std::sort(sampleIDList.begin(), sampleIDList.end());
-    m_nodeIdMap.resize(sampleIDList.back() + 1, INVALID_NODE_ID);
+    const NodeID maxKept = vectMax(sampleIDList);
+    m_nodeIdMap.resize(maxKept + 1, INVALID_NODE_ID);
     release_assert(m_revIdMap.empty());
     const size_t ploidy = grg->getPloidy();
     NodeIDList fullIndividuals;
+    std::vector<bool> seen(grg->numSamples(), false);
     for (const auto sampleId : sampleIDList) {
         if (!grg->isSample(sampleId)) {
             throw ApiMisuseFailure("Not a valid sampleId");
         }
-        if (sampleId != prevSampleId) {
-            const NodeID newSampleId = numSamples++;
-            m_nodeIdMap.at(sampleId) = newSampleId;
-            m_revIdMap.push_back(sampleId);
-            release_assert(m_revIdMap.size() == newSampleId + 1);
+        api_exc_check(!seen.at(sampleId), "Duplicate sample in seed list; not allowed.");
+        seen[sampleId] = true;
+        const NodeID newSampleId = numSamples++;
+        m_nodeIdMap.at(sampleId) = newSampleId;
+        m_revIdMap.push_back(sampleId);
+        release_assert(m_revIdMap.size() == newSampleId + 1);
 
-            // Now check to see if we have this full individual. That means that nodeIdMap
-            // should have all PLOIDY consecutive haplotypes.
-            if ((sampleId % ploidy) == (ploidy - 1)) {
-                bool fullIndividual = true;
-                const NodeID individualId = sampleId / ploidy;
-                const NodeID firstIndivSampleId = individualId * ploidy;
-                for (NodeID c = 0; c < ploidy; c++) {
-                    if (m_nodeIdMap.at(firstIndivSampleId + c) == INVALID_NODE_ID) {
-                        fullIndividual = false;
-                        break;
-                    }
-                }
-                if (fullIndividual) {
-                    fullIndividuals.push_back(individualId);
+        // Now check to see if we have this full individual. That means that nodeIdMap
+        // should have all PLOIDY consecutive haplotypes, and they should be in order.
+        if ((sampleId % ploidy) == (ploidy - 1)) {
+            bool fullIndividual = true;
+            const NodeID individualId = sampleId / ploidy;
+            const NodeID firstIndivSampleId = individualId * ploidy;
+            for (NodeID c = 0; c < ploidy; c++) {
+                if (m_nodeIdMap.at(firstIndivSampleId + c) == INVALID_NODE_ID) {
+                    fullIndividual = false;
+                    break;
                 }
             }
+            if (fullIndividual) {
+                fullIndividuals.push_back(individualId);
+            }
         }
-        prevSampleId = sampleId;
     }
-    // Drop the individual IDs and (optionally) warn the user if we have filted by anything other
+    // Drop the individual IDs and (optionally) warn the user if we have filtered by anything other
     // than individuals (e.g., selecting specific haplotypes). The IDs no longer make sense in that case.
     if ((numSamples % ploidy != 0) || (fullIndividuals.size() != numSamples / ploidy)) {
         if (warn) {
