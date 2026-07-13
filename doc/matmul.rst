@@ -49,7 +49,7 @@ is the allele frequency for each mutation. Because ``matmul`` expects matrix inp
 	import numpy as np
 	import pygrgl
 
-	grg = pygrg.load_immutable_grg("test.grg")
+	grg = pygrgl.load_immutable_grg("test.grg")
 	input = np.ones( (1, grg.num_samples) ) / grg.num_samples
 	result = pygrgl.matmul(grg, input, pygrgl.TraversalDirection.UP)[0]
 
@@ -61,7 +61,7 @@ of every allele and then divide by ``grg.num_samples`` afterwards, which will be
 	import numpy as np
 	import pygrgl
 
-	grg = pygrg.load_immutable_grg("test.grg")
+	grg = pygrgl.load_immutable_grg("test.grg")
 	input = np.ones( (1, grg.num_samples), dtype=np.uint32 )
 	result = pygrgl.matmul(grg, input, pygrgl.TraversalDirection.UP)[0] / grg.num_samples
 
@@ -84,7 +84,7 @@ the Hamming distance between :math:`q` and all of :math:`S` we perform two ``mat
 	import numpy as np
 	import pygrgl
 
-	grg = pygrg.load_immutable_grg("test.grg")
+	grg = pygrgl.load_immutable_grg("test.grg")
 	q = 0  # Use the 0th haplotype as the query.
 
 	# Get q's haplotype
