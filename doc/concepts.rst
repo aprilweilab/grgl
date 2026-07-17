@@ -28,7 +28,7 @@ A GRG can be created from phased data (`IGD <https://github.com/aprilweilab/pico
 `VCF <https://samtools.github.io/>`_, or `BGEN <https://www.chg.ox.ac.uk/~gav/bgen_format/spec/latest.html>`_)
 or by converting an Ancestral Recombination Graph (in `tskit format <https://tskit.dev/tskit/docs/stable/introduction.html>`_) to a GRG.
 
-Unphased data is also supported, but the resulting graph is much less optimal than for phased data. 
+Unphased data is also supported, but the resulting graph is much less optimal than for phased data.
 
 The "down edges" in a GRG go from mutations to samples, and are what is stored on disk. When requested,
 the "up edges" are created during GRG load from disk, and allow bottom-up traversal of the graph in
@@ -101,7 +101,7 @@ Obtaining the Missingness Node
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You can obtain the missingness node for a Mutation the same way you obtain it's "regular" node: by iterating over all
-Mutations. In C++, this is via :cpp:func:`GRG::getNodesAndMutations` (ordered by Mutation node) or 
+Mutations. In C++, this is via :cpp:func:`GRG::getNodesAndMutations` (ordered by Mutation node) or
 :cpp:func:`GRG::getMutationsToNodeOrdered` (ordered by Mutation position/allele). In Python, this is via
 :py:meth:`get_node_mutation_miss` and :py:meth:`get_mutation_node_miss`.
 
@@ -149,6 +149,23 @@ only difference is that :cpp:func:`GRG::isPhased` (:py:attr:`GRG.is_phased`) ret
 to ensure that all calculations are performed at the *individual* level (e.g., with the ``by_individual`` flag to
 :py:meth:`matmul`).
 
+Individual "Coalescences"
+-------------------------
+
+In diploid data, GRG can capture homozygosity by tracking the number of "individual coalescences" that occur at each node.
+An individual coalescence occurs at the first node, when traversing from the bottom (samples) to the roots of the graph,
+where both haplotype of the same individual become descendants. The sum of the number of coalescences below a given node (e.g.,
+a mutation node representing a variant) is the homozygosity of that node.
+
+When a GRG is constructed from tabular data (e.g., VCF, IGD) the individual coalescences are computed during construction
+and stored in the graph for later use. When a GRG is constructed from a tskit tree-sequence, this information can be
+optionally computed (option ``--ts-coals``).
+
+The per-node coalescences can be retrieved from :py:meth:`pygrgl.GRG.get_num_individual_coals`. The most efficient way to
+get the homozygosity of all mutations is via :py:math:`pygrgl.matmul`, with the parameter ``init="xtx"`` and an input of
+all ``0``, which will just sum the coalesences in an upward traversal.
+
+
 Variations of GRGs
 ------------------
 
@@ -195,6 +212,6 @@ the GRG tracks it internally. Also, when you connect a negative node to another 
 Advantages of immutable GRGs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-* An immutable GRG uses 2-3x less RAM than a mutable GRG. 
+* An immutable GRG uses 2-3x less RAM than a mutable GRG.
 * An immutable GRG has a faster matrix multiplication than a mutable GRG.
 * :py:attr:`pygrgl.GRG.nodes_are_ordered` and :py:attr:`pygrgl.GRG.samples_are_ordered` will *always* be true in an immutable GRG.

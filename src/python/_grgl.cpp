@@ -143,8 +143,6 @@ inline py::array_t<IOType> dispatchMult(grgl::GRGPtr& grg,
 
     py::buffer_info missBuffer;
     if (!py::isinstance<py::none>(miss)) {
-        api_exc_check(nodeInitMode == grgl::GRG::NIE_ZERO,
-                      "The \"miss\" parameter cannot be mixed with the \"init\" parameter");
         api_exc_check(!emitAllNodes, "The \"miss\" parameter cannot be mixed with the \"emit_all_nodes\" parameter");
         py::array arr = py::array::ensure(miss, py::array::c_style | py::array::forcecast);
         api_exc_check(py::isinstance<py::array_t<IOType>>(miss),
