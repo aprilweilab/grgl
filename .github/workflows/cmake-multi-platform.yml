@@ -9,46 +9,9 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      # Set fail-fast to false to ensure that feedback is delivered for all matrix combinations. Consider changing this to true when your workflow is stable.
-      fail-fast: true
-
-      # Set up a matrix to run the following 3 configurations:
-      # 1. <Windows, Release, latest MSVC compiler toolchain on the default runner image, default generator>
-      # 2. <Linux, Release, latest GCC compiler toolchain on the default runner image, default generator>
-      # 3. <Linux, Release, latest Clang compiler toolchain on the default runner image, default generator>
-      #
-      # To add more build types (Release, Debug, RelWithDebInfo, etc.) customize the build_type list.
-      matrix:
-        os: [ubuntu-latest, macos-latest, macos-15-intel]
-        build_type: [Release]
-        c_compiler: [gcc, clang]
-        include:
-          - os: macos-latest
-            c_compiler: clang
-            cpp_compiler: clang++
-            fcheck_command: echo No clang-format on MacOS
-          - os: macos-15-intel
-            c_compiler: clang
-            cpp_compiler: clang++
-            fcheck_command: echo No clang-format on MacOS
-          - os: ubuntu-latest
-            c_compiler: gcc
-            cpp_compiler: g++
-            fcheck_command: echo ./format-check.sh disabled due to version changes
-          - os: ubuntu-latest
-            c_compiler: clang
-            cpp_compiler: clang++
-            fcheck_command: echo ./format-check.sh disabled due to version changes
-        exclude:
-          - os: macos-latest
-            c_compiler: gcc
-          - os: macos-15-intel
-            c_compiler: gcc
-
+  
+  conda_check:
+    runs-on: macos-15-intel
     steps:
     - uses: actions/checkout@v3
 
@@ -59,69 +22,33 @@ jobs:
         git submodule sync --recursive
         git -c "http.extraheader=$auth_header" -c protocol.version=2 submodule update --init --force --recursive --depth=1
 
-    - name: Set reusable strings
-      # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
-      id: strings
-      shell: bash
+    - name: set path
+      run: echo "/opt/mambaforge/bin" >> $GITHUB_PATH
+
+    - name: show dir
+      run: ls .
+
+    - name: Fetch conda install script
       run: |
-        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+        wget https://raw.githubusercontent.com/bioconda/bioconda-common/master/{install-and-set-up-conda,configure-conda,common}.sh
 
-    - name: Configure CMake
-      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
-      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
-      run: >
-        cmake -B ${{ steps.strings.outputs.build-output-dir }}
-        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
-        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
-        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-        -S ${{ github.workspace }}
+    - name: Set up bioconda-utils
+      run: bash install-and-set-up-conda.sh
 
-    - name: Build
-      # Build your program with the given configuration. Note that --config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+    # This script can be used to reconfigure conda to use the right channel setup.
+    - name: Configure conda
+      run: bash configure-conda.sh
 
-    - name: Test
-      working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      # Execute tests defined by the CMake configuration. Note that --build-config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
-      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
-      run: ctest -V --build-config ${{ matrix.build_type }}
-
-    - name: Check Format
-      working-directory: ${{ github.workspace }}
-      run: ${{ matrix.fcheck_command }}
-
-  build-py:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Checkout submodules # checkout rest
-      shell: bash
+    - name: Build and Test
+      env:
+        OSTYPE: "darwin"
+        CI: "true"
       run: |
-        auth_header="$(git config --local --get http.https://github.com/.extraheader)"
-        git submodule sync --recursive
-        git -c "http.extraheader=$auth_header" -c protocol.version=2 submodule update --init --force --recursive --depth=1
+        set -e
+        eval "$(conda shell.bash hook)"
+        conda activate bioconda
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install black
-        python -m pip install -r test/requirements.txt
-    - name: Check code formatting (black)
-      run: |
-        black --check pygrgl/ test/ setup.py
-    - name: Build extension
-      run: |
-        python -m pip install .
-    - name: Test with pytest
-      run: |
-        pytest test/
+        # Sets up OSX SDK
+        run_conda_forge_build_setup
+
+        cd bioc_recip_tmp && bioconda-utils build --packages pygrgl
