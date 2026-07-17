@@ -344,7 +344,6 @@ std::vector<std::string> IGDMutationIterator::getIndividualIds() { return std::m
 
 // Template for mutations that represent missing data.
 using AllelePair = std::pair<std::string, std::string>;
-static const AllelePair AP_FOR_MISSING = {Mutation::ALLELE_MISSING, Mutation::ALLELE_MISSING};
 
 void IGDMutationIterator::buffer_next(size_t& totalSamples) {
     static std::random_device randDevice;
