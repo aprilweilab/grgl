@@ -28,6 +28,10 @@ jobs:
     - name: show dir
       run: ls .
 
+    - name: build sdist
+      run: pip install setuptools && python setup.py sdist && mkdir tmp && cd tmp && tar -xf ../dist/pygrgl-2.10.tar.gz && cd ..
+
+
     - name: Fetch conda install script
       run: |
         wget https://raw.githubusercontent.com/bioconda/bioconda-common/master/{install-and-set-up-conda,configure-conda,common}.sh
