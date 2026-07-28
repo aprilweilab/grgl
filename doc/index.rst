@@ -24,33 +24,12 @@ in one spot. If you want detailed API documentation, they can be found at:
 
 
 .. toctree::
-  :caption: Concepts and APIs
   :maxdepth: 1
 
-  Installation <installation>
-  Concepts <concepts>
-  Constructing GRGs <construct>
-  Converting Tree-Sequences <ts_convert>
-  Graph Traversals <traversal>
-  Matrix multiplication <matmul>
-  python_api
-  cpp_api
-  Examples and applications <examples_and_applications>
-  Command-line Recipes <cli_recipes>
-
-.. toctree::
-  :caption: Tutorials
-  :maxdepth: 1
-
-  tutorials/GWAS
-  tutorials/GWASCovariates
-  tutorials/PCA
-  tutorials/LinearOperators
-  tutorials/WorkingWithRealData
-  tutorials/WorkingWithSimData
-  tutorials/SimulatingPhenotypes
-  tutorials/IGDToGRG
-  tutorials/VCFToGRG
+  overview/index
+  howto/index
+  tutorials/index
+  reference/index
 
 
 Simple Usage Examples
