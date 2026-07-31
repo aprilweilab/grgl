@@ -90,6 +90,22 @@ Mutation Time
 Mutations can optionally have a time associated with them, indicating how old the mutation is. Units are unspecified,
 and depend on the use-case.
 
+Up Edges
+~~~~~~~~
+
+By default, a GRG opened via :py:meth:`pygrgl.load_immutable_grg` only has "down edges": the directed edges that go from
+"parent" to "child", i.e. the roots of the graph are mutations (though not every mutation is a root) and the leaves of the
+graph are samples. You can pass ``load_up_edges=True`` when loading a GRG, in which case there are both down and up edges.
+For immutable GRGs (see below), up edges are rarely needed, as the topological order of the graph plus down edges is
+sufficient for all whole-graph calculations (such as :py:meth:`pygrgl.matmul`). For mutable graphs, the up edges are often
+needed, because a lot of editing operations require traversal in both directions.
+
+.. warning::
+    Only down edges are stored on disk. Loading a GRG with up edges requires inverting all of the edges, which is very
+    computationally expensive. ``load_up_edges=True`` doubles the size of an immutable GRG in RAM, and increases the
+    load time from disk by ``10-30x``.
+
+
 Missing Data
 ------------
 

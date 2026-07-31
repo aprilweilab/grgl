@@ -926,7 +926,8 @@ PYBIND11_MODULE(_grgl, m) {
 
     m.def("load_mutable_grg", &grgl::loadMutableGRG, py::arg("filename"), py::arg("load_up_edges") = true, R"^(
         Load a GRG file from disk. Mutable GRGs can have nodes and edges added/removed
-        from them.
+        from them. Mutable GRGs are less efficient to traverse, and can use substantially
+        (``3x`` or more) more RAM than immutable GRGs.
 
         :param filename: The file to load.
         :type filename: str
@@ -942,6 +943,11 @@ PYBIND11_MODULE(_grgl, m) {
         Load a GRG file from disk. Immutable GRGs are much faster to traverse than mutable
         GRGs and take up less RAM, so this is the preferred method if you are using a GRG
         for calculation or annotation, and not modifying the graph structure itself.
+
+        .. warning::
+            Only down edges are stored on disk. Loading a GRG with up edges requires inverting all of the edges, which is very
+            computationally expensive. ``load_up_edges=True`` doubles the size of an immutable GRG in RAM, and increases the
+            load time from disk by ``10-30x`` (or more).
 
         :param filename: The file to load.
         :type filename: str
