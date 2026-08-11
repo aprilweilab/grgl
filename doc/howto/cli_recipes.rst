@@ -37,6 +37,10 @@ View info about GRG
 
     grg process stats my_input.grg
 
+.. code:: bash
+
+    grapp show -i my_input.grg
+
 
 Split GRG into pieces
 ~~~~~~~~~~~~~~~~~~~~~
@@ -52,7 +56,7 @@ Perform GWAS
 
 .. code:: bash
 
-    grg assoc -p my_phenotype.phen my_input.grg -o my_input.assoc.tsv
+    grapp assoc -p my_phenotype.phen my_input.grg -o my_input.assoc.tsv
 
 
 Perform PCA
@@ -61,7 +65,7 @@ Perform PCA
 .. code:: bash
 
     # Get the top 20 PCs
-    grg pca -d 20 my_input.grg
+    grapp pca -d 20 my_input.grg
 
 
 Filter by list of individual IDs
@@ -72,6 +76,16 @@ Filter by list of individual IDs
     # list_of_individuals.txt has one ID per line
     grapp filter -S list_of_individuals.txt my_input.grg my_input.filtered.grg
 
+Filter bi-allelic SNPs with frequency
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Frequency :math:`\ge 0.01`, bi-allelic SNPs only. Command flags are similar to ``bcftools``.
+
+.. code:: bash
+
+    # list_of_individuals.txt has one ID per line
+    grapp filter -q 0.01 -v snps -m 2 -M 2 my_input.grg my_input.filtered.grg
+
 
 Show the individual IDs
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -80,6 +94,29 @@ Show the individual IDs
 
     grapp show -S my_input.grg
 
+Show variants with allele frequencies
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code:: bash
+
+    grapp show -c my_input.grg
+
+Show variants with HWE p-values
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code:: bash
+
+    grapp show -j 4 -H my_input.grg
+
+
+Simulate phenotypes with h^2=0.4
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code:: bash
+
+    grapp pheno -e 0.4 my_input.grg
+
+
 GRG to IGD
 ~~~~~~~~~~
 
@@ -87,4 +124,3 @@ GRG to IGD
 
     # This can be slow! Use more threads (-j) if possible
     grapp export -j 4 my_input.grg --igd exported.igd
-
