@@ -167,6 +167,7 @@ set(GRGL_PUBLIC_HEADERS
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/csr_storage.h
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/file_vector.h
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/grg.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/grgl/grg2ts.h
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/grgnode.h
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/internal_mult.h
     ${CMAKE_CURRENT_LIST_DIR}/include/grgl/map_mutations.h
@@ -187,6 +188,7 @@ set(GRGL_CORE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/fast_build.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/hap_index.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/grg.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/grg2ts.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/grg_merge.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/map_mutations.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/mut_iterator.cpp

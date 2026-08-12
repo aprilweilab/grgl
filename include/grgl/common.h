@@ -66,6 +66,15 @@ public:
         : std::runtime_error(message) {}
 };
 
+/**
+ * Exception thrown when a call to Tskit fails unexpectedly.
+ */
+class TskitApiFailure : public std::runtime_error {
+public:
+    explicit TskitApiFailure(char const* const message)
+        : std::runtime_error(message) {}
+};
+
 // Represents an [inclusive, exlusive) range in integer positions.
 class IntRange {
 public:
