@@ -493,8 +493,10 @@ MutableGRGPtr convertTreeSeqToGRG(const tsk_treeseq_t* treeSeq,
     TsToGrgContext constructionContext(initialNodeCount, grg);
 
     if (treeRange.first == treeRange.second) {
-        treeRange.second = std::numeric_limits<size_t>::max();
+        treeRange.first = 0;
+        treeRange.second = (BpPosition)tsk_treeseq_get_sequence_length(treeSeq);
     }
+    grg->setSpecifiedBPRange({treeRange.first, treeRange.second});
 
     // Copy over the population data from the samples.
     const tsk_size_t numPopulations = tsk_treeseq_get_num_populations(treeSeq);
