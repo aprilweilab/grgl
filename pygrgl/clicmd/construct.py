@@ -163,6 +163,11 @@ def add_options(subparser):
         action="store_true",
         help="Force the use of the MapMutations algorithm (debug feature).",
     )
+    subparser.add_argument(
+        "--no-simplify",
+        action="store_true",
+        help="Do not simplify the GRG at any point in the algorithm.",
+    )
 
 
 grgl_exe = which("grgl")
@@ -241,6 +246,8 @@ def build_shape(
         command.extend(["--reduce", str(args.reduce)])
     if args.force_map_muts:
         command.append("--no-tree-map")
+    if args.no_simplify:
+        command.append("--no-simplify")
     shape_filename = out_filename(output_file, part)
     command.extend(
         [
@@ -278,6 +285,8 @@ def build_grg(
             command.append("--ignore-missing")
         if args.force:
             command.append("--force")
+        if args.no_simplify:
+            command.append("--no-simplify")
         command.extend(
             [
                 "-r",
@@ -457,6 +466,8 @@ def from_tabular(args):
         ]
         if slow_merge:
             command.append("--use-samples")
+        if args.no_simplify:
+            command.append("--no-simplify")
         command.extend(
             map(lambda part: out_filename(final_filename, part), range(0, args.parts))
         )

@@ -897,7 +897,7 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
         }
         const std::string treeFilename = getTreeGRGName(filePrefix, 0);
         CANNOT_EXIST(treeFilename);
-        saveGRG(tree, treeFilename);
+        saveGRG(tree, treeFilename, /*allowSimplify=*/!hasBSFlag(buildFlags, GBF_NO_SIMPLIFY));
         treeFiles.push_back(treeFilename);
 
         remainingMuts = totalMuts - handledSoFar;
@@ -930,7 +930,7 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
         }
         const std::string treeFilename = getTreeGRGName(filePrefix, treeNum++);
         CANNOT_EXIST(treeFilename);
-        saveGRG(tree, treeFilename);
+        saveGRG(tree, treeFilename, /*allowSimplify=*/!hasBSFlag(buildFlags, GBF_NO_SIMPLIFY));
         treeFiles.push_back(treeFilename);
     }
     FAST_GRG_OUTPUT("Final tree count of " << treeNum << "\n");

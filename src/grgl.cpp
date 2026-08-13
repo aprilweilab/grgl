@@ -294,6 +294,9 @@ int main(int argc, char** argv) {
         if (noTreeMap) {
             buildFlags |= grgl::GBF_NO_TREE_MAP;
         }
+        if (noSimplify) {
+            buildFlags |= grgl::GBF_NO_SIMPLIFY;
+        }
         size_t treeCount = 0;
         if (treesArg) {
             if (*treesArg == "optimal") {
