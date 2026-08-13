@@ -43,7 +43,7 @@
         if (tskit_ok_val != 0) {                                                                                       \
             std::stringstream errMsg;                                                                                  \
             errMsg << (msg) << ": " << tsk_strerror(tskit_ok_val);                                                     \
-            throw TskitApiFailure(msg);                                                                                \
+            throw TskitApiFailure(errMsg.str().c_str());                                                               \
         }                                                                                                              \
     } while (0)
 
