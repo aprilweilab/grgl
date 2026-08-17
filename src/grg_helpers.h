@@ -22,6 +22,7 @@
 
 #include "common_visitors.h"
 #include "grgl/grg.h"
+#include "grgl/grg2ts.h"
 #include "grgl/grgnode.h"
 #include "grgl/mutation.h"
 #include "grgl/ts2grg.h"
@@ -251,6 +252,13 @@ inline MutableGRGPtr grgFromTrees(const std::string& filename,
     }
 
     return grgl::convertTreeSeqToGRG(&treeSeq, binaryMutations, useNodeTimes, maintainTopology, computeCoals);
+}
+
+inline void grgToTrees(GRGPtr& grg, const std::string& filename) {
+    tsk_treeseq_t treeSeq;
+    grgl::convertGRGToTreeSeq(grg, &treeSeq);
+    tsk_treeseq_dump(&treeSeq, filename.c_str(), 0);
+    tsk_treeseq_free(&treeSeq);
 }
 
 /**

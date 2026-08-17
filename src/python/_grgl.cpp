@@ -23,6 +23,7 @@
 #include "grg_helpers.h"
 #include "grgl/common.h"
 #include "grgl/grg.h"
+#include "grgl/grg2ts.h"
 #include "grgl/grgnode.h"
 #include "grgl/map_mutations.h"
 #include "grgl/mutation.h"
@@ -1028,6 +1029,23 @@ PYBIND11_MODULE(_grgl, m) {
         :type compute_coals: bool
         :return: The GRG.
         :rtype: pygrgl.GRG
+    )^");
+
+    m.def("grg_to_trees",
+          &grgl::grgToTrees,
+          py::arg("grg"),
+          py::arg("filename"),
+          R"^(
+        Convert a GRG to a .trees (TSKit tree-sequence) file. Will throw RuntimeException on failure.
+
+        .. warning::
+            Experimental functionality. The interface and behavior of this function is likely to change
+            frequently.
+
+        :param grg: The GRG object to convert to tree-sequence.
+        :type grg: pygrgl.GRG
+        :param filename: The tree-sequence (.trees) file to write.
+        :type filename: str
     )^");
 
     m.def(

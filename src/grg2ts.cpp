@@ -1,5 +1,5 @@
 /* Genotype Representation Graph Library (GRGL)
- * Copyright (C) 2024 April Wei
+ * Copyright (C) 2026 April Wei
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,7 +17,6 @@
 #include "grgl/grg2ts.h"
 #include "grgl/common.h"
 #include "grgl/grg.h"
-#include "grgl/grgnode.h"
 #include "grgl/mutation.h"
 #include "tskit/core.h"
 #include "tskit/tables.h"
@@ -27,6 +26,7 @@
 
 #include <cassert>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <tskit.h>
@@ -337,22 +337,13 @@ static tsk_id_t addMutationToTree(GrgToTsContext& context,
                                   GRGPtr& grg,
                                   const NodeID grgNodeId,
                                   const BpPosition position,
-                                  const tsk_id_t tsParentId = TSK_NULL,
-                                  const bool debug = false,
-                                  const std::string indent = "") {
+                                  const tsk_id_t tsParentId = TSK_NULL) {
     tsk_id_t tsNodeId = context.getCurrentNode(grgNodeId);
     // If the node is new to this tree (or was invalidated for this tree), then we need to recursively
     // call this function. Otherwise, we can stop after processing this single node.
     const bool recurse = (tsNodeId == TSK_NULL);
     if (recurse) {
         tsNodeId = context.createTsNode(grgNodeId);
-        if (debug) {
-            std::cout << indent << "[NEW] " << tsParentId << " --> " << tsNodeId << "\n";
-        }
-    } else {
-        if (debug) {
-            std::cout << indent << "[OLD] " << tsParentId << " --> " << tsNodeId << "\n";
-        }
     }
     if (tsParentId != TSK_NULL) {
         // First, check for other parents. If we already have a parent, delete it and add the edge
@@ -360,9 +351,6 @@ static tsk_id_t addMutationToTree(GrgToTsContext& context,
         const tsk_id_t tsOtherParent = context.getTreeParent(tsNodeId);
         if (tsOtherParent != tsParentId) {
             if (tsOtherParent != TSK_NULL) {
-                if (debug) {
-                    std::cout << indent << "[DROP] " << tsOtherParent << " --> " << tsNodeId << "\n";
-                }
                 // First, make sure our current tree is properly rooted, because when we delete the
                 // edge (next step) it might start a _NEW_ tree.
                 context.rootTheTree(position);
@@ -379,7 +367,7 @@ static tsk_id_t addMutationToTree(GrgToTsContext& context,
     }
     if (recurse) {
         for (NodeID child : grg->getDownEdges(grgNodeId)) {
-            addMutationToTree(context, grg, child, position, tsNodeId, debug, indent + "  ");
+            addMutationToTree(context, grg, child, position, tsNodeId);
         }
     }
     return tsNodeId;
@@ -411,15 +399,7 @@ void convertGRGToTreeSeq(GRGPtr& grg, tsk_treeseq_t* outTS, std::pair<size_t, si
 
         // Update the tree topology to reflect this mutation, and return the tskit node that is
         // immediately below the mutation.
-        bool debug = false;
-#if GRG2TS_VALIDATION
-        if (mut.getPosition() == 4683595) {
-            std::cout << "Roots at " << mut.getPosition() << ": " << context.numRoots() << "\n";
-            std::cout << "DEBUG\n";
-            debug = true;
-        }
-#endif
-        const tsk_id_t tsNode = addMutationToTree(context, grg, grgNode, mut.getPosition(), TSK_NULL, debug);
+        const tsk_id_t tsNode = addMutationToTree(context, grg, grgNode, mut.getPosition(), TSK_NULL);
 #if GRG2TS_VALIDATION
         // This is very slow, so we only use it optionally when testing code changes.
         release_assert(context.validateRoots());

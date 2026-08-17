@@ -504,13 +504,10 @@ int main(int argc, char** argv) {
     } else if (outfile) {
         if (ends_with(*outfile, ".trees")) {
             START_TIMING_OPERATION();
-            tsk_treeseq_t treeSeq;
-            grgl::convertGRGToTreeSeq(theGRG, &treeSeq);
-            tsk_treeseq_dump(&treeSeq, outfile->c_str(), 0);
+            grgToTrees(theGRG, *outfile);
             if (verbose) {
                 EMIT_TIMING_MESSAGE("Wrote tskit TreeSequence to " << *outfile << " in ");
             }
-            tsk_treeseq_free(&treeSeq);
         } else {
             START_TIMING_OPERATION();
             auto counts = saveGRG(theGRG, *outfile, !noSimplify);

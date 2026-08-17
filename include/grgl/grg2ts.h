@@ -17,10 +17,7 @@
 #ifndef GRG2TS_H
 #define GRG2TS_H
 
-#include <functional>
-#include <list>
 #include <memory>
-#include <stdexcept>
 #include <tskit.h>
 
 namespace grgl {

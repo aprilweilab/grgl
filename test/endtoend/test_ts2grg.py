@@ -220,3 +220,29 @@ class TestTS2GRG(unittest.TestCase):
         self.assertTrue(grg.is_phased)
         af = allele_frequencies(grg)
         numpy.testing.assert_allclose(af, [0.25, 0.0, 0.75])
+
+    def test_simple_ts_roundtrip(self):
+        """
+        A round trip is TS->GRG->TS->GRG. Obviously the tree-sequences will look very different, but the
+        sample-to-mutation mapping should be identical.
+        """
+        ts_file = "test.roundtrip.trees"
+        TEST_TS.dump(ts_file)
+        # XXX not ideal - we have to convert to GRG then serialize/deserialize the GRG
+        # to get the ordered nodes we need. A better way would be for grg_from_trees to
+        # take a outfile=... argument optionally that writes it to file.
+        grg1 = pygrgl.grg_from_trees(ts_file)
+        pygrgl.save_grg(grg1, "test.roundtrip.grg")
+        grg1 = pygrgl.load_immutable_grg("test.roundtrip.grg")
+
+        ts_file2 = "test.roundtrip.2.trees"
+        pygrgl.grg_to_trees(grg1, ts_file2)
+        grg2 = pygrgl.grg_from_trees(ts_file2)
+        self.assertEqual(grg1.num_mutations, grg2.num_mutations)
+        self.assertEqual(grg1.num_samples, grg2.num_samples)
+        self.assertEqual(grg1.ploidy, grg2.ploidy)
+
+        inmat = numpy.random.standard_normal((10, grg1.num_mutations))
+        result1 = pygrgl.matmul(grg1, inmat, pygrgl.TraversalDirection.DOWN)
+        result2 = pygrgl.matmul(grg2, inmat, pygrgl.TraversalDirection.DOWN)
+        numpy.testing.assert_allclose(result1, result2)
