@@ -47,10 +47,13 @@ namespace grgl {
 
 inline bool hasBSFlag(GrgBuildFlags flags, GrgBuildFlags flag) { return (bool)(flags & flag); }
 
+// NOTE: sampleToPop can be either individual indices or individual IDs. The build flags determine which
+// to look for, or individual indices are used if the GRG has no individual IDs.
 void addExtraInfoToGRG(MutableGRGPtr& grg,
                        grgl::MutationIterator& mutationIterator,
                        GrgBuildFlags buildFlags,
-                       const std::map<std::string, std::string>& indivIdToPop) {
+                       const std::map<std::string, std::string>& sampleToPop,
+                       const std::vector<std::string>& orderedPops) {
 #define GRGBS_LOG_OUTPUT(msg)                                                                                          \
     do {                                                                                                               \
         if (static_cast<bool>(buildFlags & GBF_VERBOSE_OUTPUT)) {                                                      \
@@ -58,10 +61,20 @@ void addExtraInfoToGRG(MutableGRGPtr& grg,
         }                                                                                                              \
     } while (0)
 
+    // If the ordered populations were provided, add them first so we're gauranteed to get the
+    // same order in the GRG.
+    std::map<std::string, size_t> popDescriptionMap;
+    if (!orderedPops.empty()) {
+        for (size_t i = 0; i < orderedPops.size(); i++) {
+            auto insertPair = popDescriptionMap.emplace(orderedPops[i], i);
+            api_exc_check(insertPair.second, "Duplicate population description provided");
+            grg->addPopulation(orderedPops[i]);
+        }
+    }
+
     // Population mapping.
     std::vector<std::string> indivIds;
-    if (!indivIdToPop.empty()) {
-        std::map<std::string, size_t> popDescriptionMap;
+    if (!sampleToPop.empty()) {
         // Get the numeric ID for the population description
         auto getPopId = [&](const std::string& popDescription) {
             const size_t nextPopId = popDescriptionMap.size();
@@ -81,12 +94,15 @@ void addExtraInfoToGRG(MutableGRGPtr& grg,
         bool isPhased = false;
         mutationIterator.getMetadata(ploidy, numIndividuals, isPhased);
         indivIds = mutationIterator.getIndividualIds();
-        if (!indivIds.empty()) {
-            release_assert(indivIds.size() == numIndividuals);
+        api_exc_check(sampleToPop.size() == numIndividuals,
+                      "You must specify a population for every individual (either by ID or index).");
+        if (!indivIds.empty() && !hasBSFlag(buildFlags, GBF_POPMAP_IS_SAMPLES)) {
+            api_exc_check(indivIds.size() == numIndividuals,
+                          "Malformed input: individual IDs do not match the number of individuals");
             for (NodeID individual = 0; individual < indivIds.size(); individual++) {
                 const auto& stringId = indivIds[individual];
-                const auto& findIt = indivIdToPop.find(stringId);
-                if (findIt == indivIdToPop.end()) {
+                const auto& findIt = sampleToPop.find(stringId);
+                if (findIt == sampleToPop.end()) {
                     std::stringstream ssErr;
                     ssErr << "Could not find population mapping for individual " << stringId;
                     throw std::runtime_error(ssErr.str());
@@ -100,15 +116,20 @@ void addExtraInfoToGRG(MutableGRGPtr& grg,
                 }
             }
         } else {
-            for (const auto& idAndPop : indivIdToPop) {
-                NodeID sampleId = INVALID_NODE_ID;
-                if (!parseExactUint32(idAndPop.first, sampleId)) {
+            release_assert(grg->samplesAreOrdered()); // We're constructing a new GRG - this should always be true
+            for (const auto& idAndPop : sampleToPop) {
+                NodeID indivIndex = INVALID_NODE_ID;
+                if (!parseExactUint32(idAndPop.first, indivIndex)) {
                     throw ApiMisuseFailure(
-                        "GRG does not have individual IDs; population mapping must be based on sample index");
+                        "Population mapping must be based on individual indices (because the GRG has no "
+                        "individual IDs or you specified a JSON input)");
                 }
-                api_exc_check(sampleId < grg->numSamples(), "Invalid sample index: " << sampleId);
+                api_exc_check(indivIndex < grg->numIndividuals(), "Invalid individual index: " << indivIndex);
                 const auto popId = getPopId(idAndPop.second);
-                grg->setPopulationId(sampleId, popId);
+                for (NodeIDSizeT hap = 0; hap < grg->getPloidy(); hap++) {
+                    const NodeID sampleNodeId = (indivIndex * grg->getPloidy()) + hap;
+                    grg->setPopulationId(sampleNodeId, popId);
+                }
             }
         }
     }
@@ -787,7 +808,9 @@ std::string getTreeGRGName(const std::string& totalOutputName, size_t treeNumber
  * @param[in] noTreeBelowThreshold Don't both trying to create tree hierarchy for mutations that have
  *      a count or frequency below this threshold. If this threshold is less than 1.0 then this is
  *      treated as a frequency. Otherwise it is treated as a count.
- * @param[in] indivIdToPop Map from individual identifier (string) to population identifier (string).
+ * @param[in] sampleToPop Map from either individual identifier (string) to population identifier (string),
+ *      or sample index (string parseable as an int) to population identifier (string). You can use the
+ *      build flag GBF_POPMAP_IS_SAMPLES to force this latter situation.
  * @param[in] rebuildProportion When the proportion of deleted nodes in the BK-Tree reaches this
  *      threshold, rebuild the BK-Tree.
  */
@@ -798,7 +821,8 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
                                  MutationIteratorFlags itFlags,
                                  const size_t treeCount,
                                  double noTreeBelowThreshold,
-                                 const std::map<std::string, std::string>& indivIdToPop,
+                                 const std::map<std::string, std::string>& sampleToPop,
+                                 const std::vector<std::string>& orderedPops,
                                  const double rebuildProportion) {
     // TODO:
     // 1. Make the datatype for these haplotype segments a fixed size array. Now that we are using
@@ -973,7 +997,7 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
                                        << " ms\n");
 
     const auto infoStartTime = std::chrono::high_resolution_clock::now();
-    addExtraInfoToGRG(result, *mutIterator, buildFlags, indivIdToPop);
+    addExtraInfoToGRG(result, *mutIterator, buildFlags, sampleToPop, orderedPops);
     FAST_GRG_OUTPUT("Added GRG metadata (info) in " << std::chrono::duration_cast<std::chrono::milliseconds>(
                                                            std::chrono::high_resolution_clock::now() - infoStartTime)
                                                            .count()

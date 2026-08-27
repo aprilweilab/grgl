@@ -18,6 +18,7 @@
 #include <chrono>
 #include <exception>
 #include <iostream>
+#include <json.hpp>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -46,6 +47,29 @@
 inline bool supportedInputFormat(const std::string& filename) {
     return ends_with(filename, ".vcf") || ends_with(filename, ".vcf.gz") || ends_with(filename, ".igd") ||
            ends_with(filename, ".bgen");
+}
+
+void loadMrpastPopMap(const std::string& filename,
+                      std::map<std::string, std::string>& sampleToPop,
+                      std::vector<std::string>& orderedPops) {
+    nlohmann::json input;
+    std::ifstream inStream(filename);
+    inStream >> input;
+    api_exc_check(input.contains("mapping"),
+                  "JSON population maps must have 'mapping' key "
+                  "(https://mrpast.readthedocs.io/en/latest/overview/concepts.html#population-maps)");
+    api_exc_check(input.contains("names"),
+                  "JSON population maps must have 'names' key "
+                  "(https://mrpast.readthedocs.io/en/latest/overview/concepts.html#population-maps)");
+    api_exc_check(input["names"].size() == input["mapping"].size(),
+                  "Malformed population map: 'names' and 'mapping' must have the same number of populations");
+    orderedPops = input["names"];
+    for (grgl::NodeIDSizeT popIdx = 0; popIdx < input["mapping"].size(); popIdx++) {
+        const std::string& popDesc = orderedPops.at(popIdx);
+        for (const nlohmann::json& indivIndex : input["mapping"][popIdx]) {
+            sampleToPop.emplace(indivIndex.dump(), popDesc);
+        }
+    }
 }
 
 int main(int argc, char** argv) {
@@ -141,7 +165,8 @@ int main(int argc, char** argv) {
         parser,
         "population-ids",
         "Format: \"filename:sample_field:pop_field\". Read population ids from the given "
-        "tab-separate file, using the given fieldname.",
+        "tab-separate file, using the given fieldnames. Alternatively, if the filename ends with .json "
+        " then read it as a mrpast-style population map.",
         {"population-ids"});
     args::ValueFlag<size_t> reduce(
         parser,
@@ -216,14 +241,21 @@ int main(int argc, char** argv) {
         restrictRange = grgl::FloatRange(gStart, gEnd);
     }
 
-    std::map<std::string, std::string> indivIdToPop;
+    uint64_t buildFlags = verbose ? grgl::GBF_VERBOSE_OUTPUT : grgl::GBF_EMPTY;
+    std::vector<std::string> orderedPops;
+    std::map<std::string, std::string> sampleToPop;
     if (populationIds) {
         std::vector<std::string> parts = split(*populationIds, ':');
-        if (parts.size() != 3) {
-            std::cerr << "Must specify \"filename:sample_field:pop_field\" for --population-ids" << std::endl;
+        if (parts.size() == 3) {
+            sampleToPop = loadMapFromTSV(parts[0], parts[1], parts[2]);
+        } else if (parts.size() == 1 && ends_with(parts.front(), ".json")) {
+            loadMrpastPopMap(parts[0], sampleToPop, orderedPops);
+            buildFlags |= grgl::GBF_POPMAP_IS_SAMPLES;
+        } else {
+            std::cerr << "Must specify \"filename:sample_field:pop_field\" for --population-ids, or \"filename.json\""
+                      << std::endl;
             return 1;
         }
-        indivIdToPop = loadMapFromTSV(parts[0], parts[1], parts[2]);
     }
 
 #define UNSUPPORTED_FOR_INPUT(parameter, parameterName)                                                                \
@@ -287,7 +319,6 @@ int main(int argc, char** argv) {
             return 0;
         }
 
-        uint64_t buildFlags = verbose ? grgl::GBF_VERBOSE_OUTPUT : grgl::GBF_EMPTY;
         if (noIndividualIds) {
             buildFlags |= grgl::GBF_NO_INDIVIDUAL_IDS;
         }
@@ -323,7 +354,8 @@ int main(int argc, char** argv) {
                                                                   itFlags,
                                                                   treeCount,
                                                                   lfNoTree ? *lfNoTree : 0.0,
-                                                                  indivIdToPop);
+                                                                  sampleToPop,
+                                                                  orderedPops);
         theGRG = createdGRG;
     } else {
         std::cerr << "Unsupported/undetected filetype for " << *infile << std::endl;

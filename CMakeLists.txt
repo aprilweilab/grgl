@@ -216,6 +216,7 @@ include_directories(${CMAKE_CURRENT_LIST_DIR}/include/
                     ${CMAKE_CURRENT_LIST_DIR}/third-party/picovcf/
                     ${CMAKE_CURRENT_LIST_DIR}/third-party/pybind11/
                     ${CMAKE_CURRENT_LIST_DIR}/third-party/bgen/include/
+                    ${CMAKE_CURRENT_LIST_DIR}/third-party/nlohmann/
                     ${CMAKE_BINARY_DIR}/third-party/bgen/
                     ${CMAKE_CURRENT_LIST_DIR}/src/
                     )

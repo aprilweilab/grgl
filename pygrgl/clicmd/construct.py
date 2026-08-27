@@ -86,8 +86,9 @@ def add_options(subparser):
     subparser.add_argument(
         "--population-ids",
         default=None,
-        help='Format: "filename:sample_field:pop_field". Read population ids from the given '
-        "tab-separate file, using the given fieldname.",
+        help="Format: 'filename:sample_field:pop_field'. Read population ids from the given "
+        "tab-separate file, using the given fieldnames. Alternatively, if the filename ends with .json "
+        " then read it as a mrpast-style population map.",
     )
     subparser.add_argument(
         "--out-file",
