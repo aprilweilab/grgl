@@ -37,9 +37,10 @@ enum {
     GBF_NO_INDIVIDUAL_IDS = 0x1U,
     GBF_VERBOSE_OUTPUT = 0x2U,
     GBF_NO_TREE_MAP = 0x4U,
-    GBF_TREES_FASTER1 = 0x8U,  // Build more trees than optimal, for speed
-    GBF_TREES_FASTER2 = 0x10U, // Build even more trees than optimal, for speed
-    GBF_NO_SIMPLIFY = 0x20U,   // Don't simplify the graphs at any point
+    GBF_TREES_FASTER1 = 0x8U,      // Build more trees than optimal, for speed
+    GBF_TREES_FASTER2 = 0x10U,     // Build even more trees than optimal, for speed
+    GBF_NO_SIMPLIFY = 0x20U,       // Don't simplify the graphs at any point
+    GBF_POPMAP_IS_SAMPLES = 0x40U, // The population mapping is in terms of sample indexes, not individual IDs
 };
 using GrgBuildFlags = uint64_t;
 
@@ -53,7 +54,8 @@ constexpr size_t FIXED_HAP_LENGTH = 254;
 void addExtraInfoToGRG(MutableGRGPtr& grg,
                        grgl::MutationIterator& mutationIterator,
                        GrgBuildFlags buildFlags,
-                       const std::map<std::string, std::string>& indivIdToPop);
+                       const std::map<std::string, std::string>& sampleToPop,
+                       const std::vector<std::string>& orderedPops);
 
 /**
  * Given an input file, and a genome range, construct a GRG for that range that simultaneously
@@ -80,7 +82,8 @@ MutableGRGPtr fastGRGFromSamples(const std::string& filePrefix,
                                  MutationIteratorFlags itFlags,
                                  size_t treeCount,
                                  double noTreeBelowThreshold,
-                                 const std::map<std::string, std::string>& indivIdToPop,
+                                 const std::map<std::string, std::string>& sampleToPop,
+                                 const std::vector<std::string>& orderedPops = {},
                                  double rebuildProportion = 0.10);
 
 } // namespace grgl
