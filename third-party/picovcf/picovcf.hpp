@@ -1397,7 +1397,7 @@ public:
             m_contigHandling = PVCH_SPECIFIC;
             m_contig = contig;
         }
-        if (!m_contig.empty() && getContig(m_contig, length, ignore)) {
+        if (!m_contig.empty() && getContig(m_contig, length, ignore) && length != INTERNAL_VALUE_NOT_SET) {
             m_genomeRange.first = 0;
             m_genomeRange.second = length;
         }
@@ -1480,7 +1480,7 @@ public:
                         PICOVCF_THROW_ERROR(MalformedFile, "Invalid contig length: " << lenStr);
                     }
                 } else {
-                    length = 0;
+                    length = INTERNAL_VALUE_NOT_SET;
                 }
                 found = true;
                 break;
@@ -2415,7 +2415,8 @@ public:
         const SampleT numSamples = phased ? (m_header.ploidy * m_header.numIndividuals) : m_header.numIndividuals;
         const VariantT variantIndex = m_header.numVariants;
         assert(sampleList.size() <= numSamples);
-        assert(phased || numCopies > 0);
+        // XXX missingness has numCopies=0 for unphased data, which is weird. Not sure if I like it or not.
+        assert(phased || isMissing || numCopies > 0);
         assert(phased || numCopies <= m_header.ploidy);
 
         m_referenceAlleles.emplace_back(referenceAllele);
@@ -2865,21 +2866,28 @@ inline void vcfToIGD(const std::string& vcfFilename,
                         continue;
                     }
                     const SampleT gtIndex = (indivIndex * iPloidy) + i;
-                    const AlleleT allele = genotypes[gtIndex];
+                    const AlleleT allele = genotypes.at(gtIndex);
                     const SampleT sampleIndex = (indivIndex * usePloidy) + i;
                     if (allele == MISSING_VALUE) {
                         missingData.push_back(sampleIndex);
                     } else if (allele == MIXED_PLOIDY) {
+                        PICOVCF_RELEASE_ASSERT(i > 0); // VCF parser should not allow this without throwing exception
+                        const AlleleT firstAllele = genotypes.at(indivIndex * iPloidy);
                         if (forceToPloidy == 0) {
-                            throw ApiMisuse("Will not convert VCF with mixed ploidy unless forceToPloidy is used");
+                            PICOVCF_THROW_ERROR(ApiMisuse,
+                                                "Will not convert VCF with mixed ploidy unless forceToPloidy is used."
+                                                " Position="
+                                                    << position << ", individualNum=" << indivIndex);
                         } else {
                             PICOVCF_ASSERT_OR_MALFORMED(gtIndex % iPloidy != 0,
                                                         "Ploidy=0 individual found at variant @ pos = " << position);
                             // This option just replaces all "not found ploidy" alleles with a copy of the first allele
                             // from the individual.
-                            const AlleleT firstAllele = genotypes.at(indivIndex * iPloidy);
-                            if (firstAllele > 0) {
+                            if (firstAllele > 0 && firstAllele < iPloidy) {
                                 variantGtData.at(firstAllele - 1).push_back(sampleIndex);
+                            } else {
+                                PICOVCF_RELEASE_ASSERT(firstAllele == MISSING_VALUE);
+                                missingData.push_back(sampleIndex);
                             }
                         }
                     } else if (allele > 0) {
@@ -2895,20 +2903,26 @@ inline void vcfToIGD(const std::string& vcfFilename,
                 }
             } else {
                 if (iPloidy > 2) {
-                    throw ApiMisuse("VCF to IGD (unphased) only supports ploidy up to 2 currently.");
+                    PICOVCF_THROW_ERROR(ApiMisuse,
+                                        "VCF to IGD (unphased) only supports ploidy up to 2 currently. Saw ploidy "
+                                            << iPloidy << " at position=" << position);
                 }
                 if (forceToPloidy > 0) {
-                    throw ApiMisuse(
-                        "Will not convert VCF with mixed ploidy for unphased data, even with forceToPloidy");
+                    PICOVCF_THROW_ERROR(ApiMisuse,
+                                        "Will not convert VCF with mixed ploidy for unphased data."
+                                            << " Position=" << position << ", individualNum=" << indivIndex);
                 }
                 bool isMissing = false;
                 std::vector<size_t> counts(altAlleles.size());
-                for (size_t i = 0; i < iPloidy; i++) {
+                for (size_t i = 0; (i < iPloidy) && !isMissing; i++) {
                     const AlleleT allele = genotypes.at((indivIndex * iPloidy) + i);
                     switch (allele) {
                     case MISSING_VALUE: isMissing = true; break;
                     case MIXED_PLOIDY:
-                        throw ApiMisuse("Will not convert VCF with mixed ploidy for unphased data");
+                        PICOVCF_RELEASE_ASSERT(i > 0); // VCF parser should not allow this without throwing exception
+                        PICOVCF_THROW_ERROR(ApiMisuse,
+                                            "Will not convert VCF with mixed ploidy for unphased data."
+                                                << " Position=" << position << ", individualNum=" << indivIndex);
                         break;
                     case 0: break;
                     default:
