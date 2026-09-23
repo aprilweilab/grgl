@@ -177,10 +177,6 @@ public:
             // representable by a single tree. This is obviously problematic for the TS representation,
             // and we need to figure out a way to detect and represent it.
             if (parent < m_grgNodeUsed.size() && m_grgNodeUsed[parent] >= m_currentTreeStart) {
-                const bool firstBreakingChange = (m_currentTreeStart == m_previousTreeStart);
-                if (firstBreakingChange) {
-                    m_previousRoots = m_currentRoots;
-                }
                 m_currentTreeStart = m_grgNodeUsed[parent] + 1;
             }
 
@@ -231,8 +227,9 @@ public:
             release_assert(insertIt.first->second.parent == tsParentId);
             release_assert(m_currentRoots.find(tsChildId) == m_currentRoots.end());
         } else {
+            const bool implicit = (startPos == INVALID_POSITION);
             DEBUG_OUT("addTreeParent(" << tsParentId << "-->" << tsChildId << " @ tree_pos="
-                                       << ((startPos == INVALID_POSITION) ? m_currentTreeStart : startPos) << ")");
+                                       << (implicit ? m_currentTreeStart : startPos) << (implicit ? "i" : "") << ")");
             // By default, edges are added eagerly to the current tree, but we won't know where they start until
             // we complete the previous tree, so we defer the setting of the start position.
             if (startPos == INVALID_POSITION) {
@@ -250,15 +247,22 @@ public:
         return nodeId;
     }
 
+    // Save the current roots in case we have a breaking change.
+    void saveRoots() { m_previousRoots = m_currentRoots; }
+
     // If needed, add this node to the roots.
     void checkAddRoot(const tsk_id_t nodeId) {
         // Add to roots if applicable.
         if (m_currentEdges.find(nodeId) == m_currentEdges.end()) {
+            DEBUG_OUT("Adding root " << nodeId);
             m_currentRoots.emplace(nodeId);
         }
     }
 
-    void removeRoot(const tsk_id_t nodeId) { m_currentRoots.erase(nodeId); }
+    void removeRoot(const tsk_id_t nodeId) {
+        DEBUG_OUT("Removing root " << nodeId);
+        m_currentRoots.erase(nodeId);
+    }
 
     void finalize(BpPosition position) {
         DEBUG_OUT("FINALIZE: roots are: ");
@@ -391,8 +395,9 @@ public:
 
         DEBUG_OUT("Flushing added edges:");
         for (const auto& childId : m_pendingChildren) {
-            m_currentEdges.at(childId).start = m_currentTreeStart;
-            DEBUG_OUT(">" << childId << " starts at " << m_currentTreeStart);
+            auto& edge = m_currentEdges.at(childId);
+            edge.start = m_currentTreeStart;
+            DEBUG_OUT(">" << edge.parent << "-->" << edge.child << " starts at " << m_currentTreeStart);
         }
         m_pendingChildren.clear();
     }
@@ -521,6 +526,8 @@ static tsk_id_t addHierarchyToTree(GrgToTsContext& context,
 static tsk_id_t
 addMutationToTree(GrgToTsContext& context, GRGPtr& grg, const NodeID grgNodeId, const BpPosition position) {
     DEBUG_OUT("\naddMutationToTree(" << grgNodeId << ", position=" << position << ") {");
+
+    context.saveRoots();
 
     // This constructs a subtree rooted at (the tskit equivalent of) grgNodeId by following
     // all down edges in the GRG, by modifying the current marginal tree in the TreeSequence.
