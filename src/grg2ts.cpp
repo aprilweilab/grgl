@@ -58,6 +58,18 @@
         }                                                                                                              \
     } while (0)
 
+static bool s_debugging = false;
+static size_t s_indent = 0;
+
+std::string indentStr(size_t amount) { return std::string(amount, ' '); }
+
+#define DEBUG_OUT(msg)                                                                                                 \
+    do {                                                                                                               \
+        if (s_debugging) {                                                                                             \
+            std::cerr << indentStr(s_indent) << msg << "\n";                                                           \
+        }                                                                                                              \
+    } while (0)
+
 namespace grgl {
 
 class GrgToTsContext {
@@ -65,6 +77,7 @@ public:
     explicit GrgToTsContext(tsk_table_collection_t* tsTables, GRGPtr& grg)
         : m_tables(tsTables),
           m_grgNodeValid(grg->numNodes(), false),
+          m_grgNodeUsed(grg->numNodes(), 0),
           m_currentChildren(grg->numNodes(), 0),
           m_numSamples(grg->numSamples()) {
         TSKIT_OK_OR_THROW(tsk_node_table_init(&tsTables->nodes, 0), "Node table init");
@@ -100,13 +113,17 @@ public:
     }
 
     // Return TSK_NULL if the GRG node is not in the current coalescent tree, otherwise return the
-    // tsk_id_t (which will always be identifical to the grgNodeId)
-    inline tsk_id_t getCurrentNode(const NodeID grgNodeId) const {
+    // tsk_id_t (which will always be identical to the grgNodeId)
+    inline tsk_id_t getAndUpdateCurrentNode(const NodeID grgNodeId, const BpPosition position) {
         // Samples exist in EVERY tree
         if (grgNodeId < m_numSamples) {
             return (tsk_id_t)grgNodeId;
         }
-        return m_grgNodeValid.at(grgNodeId) ? (tsk_id_t)grgNodeId : TSK_NULL;
+        if (!m_grgNodeValid.at(grgNodeId)) {
+            return TSK_NULL;
+        }
+        m_grgNodeUsed[grgNodeId] = position; // Update that we have used this node at the given position.
+        return (tsk_id_t)grgNodeId;
     }
 
     tsk_id_t getTreeParent(tsk_id_t tsNodeId) const {
@@ -118,17 +135,13 @@ public:
     }
 
     // Add to the table collection and delete from the current tree.
-    void finalizeTreeEdge(const tsk_id_t tsParentId, const tsk_id_t tsChildId, const BpPosition endPos) {
+    void finalizeTreeEdge(const tsk_id_t tsParentId, const tsk_id_t tsChildId) {
+        DEBUG_OUT("finalizeTreeEdge(" << tsParentId << ", " << tsChildId << ")");
         auto findIt = m_currentEdges.find(tsChildId);
         release_assert(findIt != m_currentEdges.end());
         const TSEdge& edge = findIt->second;
         release_assert(edge.parent == tsParentId);
-
-        TSKIT_ID_OR_THROW(
-            tsk_edge_table_add_row(&m_tables->edges, edge.start, (double)endPos, edge.parent, edge.child, nullptr, 0),
-            TSK_NULL,
-            "Failed to add edge");
-
+        m_edgePendingDeletion.push_back(edge);
         m_currentEdges.erase(findIt);
 
         NodeIDSizeT& parentsChildren = currentChildren(tsParentId);
@@ -138,10 +151,13 @@ public:
 
     // Clear out the edges above a particular node -- this is only called after orphaning the node, which created
     // the root node, so no additional roots are created.
+    // Returns true if a new tree was started.
     void invalidateTreeAbove(const tsk_id_t tsNodeId, const BpPosition position) {
         // We start out by terminating edges, because the first edge is always terminated (it is the one
         // that has started the whole invalidation process).
         bool terminateEdges = true;
+
+        std::vector<std::pair<tsk_id_t, tsk_id_t>> edgesToDelete;
 
         auto findIt = m_currentEdges.find(tsNodeId);
         while (findIt != m_currentEdges.end()) {
@@ -153,21 +169,24 @@ public:
             // Move to next edge, so we can reason about it below.
             findIt = m_currentEdges.find(parent);
 
+            // Edges are [left, right) - so if we terminate an edge at right then the next tree
+            // starts at [right, ...). grgNodeUsed[] reflects a value <right if that usage happened
+            // within the edge [left, right)
+
+            // XXX there is no guarantee that two mutations at the same position in a GRG will be
+            // representable by a single tree. This is obviously problematic for the TS representation,
+            // and we need to figure out a way to detect and represent it.
+            if (parent < m_grgNodeUsed.size() && m_grgNodeUsed[parent] >= m_currentTreeStart) {
+                const bool firstBreakingChange = (m_currentTreeStart == m_previousTreeStart);
+                if (firstBreakingChange) {
+                    m_previousRoots = m_currentRoots;
+                }
+                m_currentTreeStart = m_grgNodeUsed[parent] + 1;
+            }
+
             // Terminate the edge, if requested.
             if (terminateEdges) {
-                finalizeTreeEdge(parent, child, position);
-
-                // If the child node has children, then it is now a root because we deleted its parent.
-                // If it has no children, then it is an orphaned node, and is only a root if it is a sample.
-                if (currentChildren(child) > 0 || child < m_numSamples) {
-                    release_assert(m_currentRoots.emplace(child).second);
-                }
-
-                // If we are at the root of the path, and we are terminating edges, then this parent node
-                // was a tree root, and it is no longer.
-                if (findIt == m_currentEdges.end() && currentChildren(parent) == 0) {
-                    release_assert(m_currentRoots.erase(parent) == 1);
-                }
+                edgesToDelete.emplace_back(parent, child);
             }
 
             // Invalidate the node: samples beneath no longer match the GRG's samples beneath.
@@ -177,48 +196,90 @@ public:
 
             // If the parent has other children, then we don't want to terminate the edges above the parent,
             // but we need to invalidate all the of the nodes on the path to the root.
-            if (terminateEdges && currentChildren(parent) == 1) {
+            if (terminateEdges && currentChildren(parent) > 1) {
                 terminateEdges = false;
+            }
+        }
+
+        // FIXME: do we still need this separate, now that we don't decide the right position of the edge
+        // until later?
+        for (const auto& edge : edgesToDelete) {
+            release_assert(m_currentTreeStart >= 1);
+            finalizeTreeEdge(edge.first, edge.second);
+
+            // If the child node has children, then it is now a root because we deleted its parent.
+            // If it has no children, then it is an orphaned node, and is only a root if it is a sample.
+            if (currentChildren(edge.second) > 0 || edge.second < m_numSamples) {
+                release_assert(m_currentRoots.emplace(edge.second).second);
+            }
+
+            // If we are at the root of the path, and we are terminating edges, then this parent node
+            // was a tree root, and it is no longer.
+            if (currentChildren(edge.first) == 0) {
+                auto findIt = m_currentRoots.find(edge.first);
+                if (findIt != m_currentRoots.end()) {
+                    m_currentRoots.erase(findIt);
+                }
             }
         }
     }
 
-    void addTreeParent(tsk_id_t tsChildId, tsk_id_t tsParentId, BpPosition startPos) {
-        // Edges are always added to start at the current tree. This can result in some slightly wonky stuff
-        // where you get a path new1->new2-> <dangling> in tree i, and then in tree i+1 we finish the path
-        // because we had to perform a deletion of an edge in the previous tree before we could add the new edge(s).
-        // However, it makes the trees much easier to understand, and it makes it easier for us to add intervals
-        // for synthetic edges that we create when adding roots to trees.
-        release_assert(startPos >= m_currentTreeStart);
-        const auto insertIt = m_currentEdges.emplace(tsChildId, TSEdge({tsParentId, tsChildId, m_currentTreeStart}));
+    void addTreeParent(tsk_id_t tsParentId, tsk_id_t tsChildId, BpPosition startPos = INVALID_POSITION) {
+        const auto insertIt = m_currentEdges.emplace(tsChildId, TSEdge({tsParentId, tsChildId, startPos}));
         if (!insertIt.second) {
+            api_exc_check(false, "TODO: checking whether existing edges are ever duplicated");
             release_assert(insertIt.first->second.parent == tsParentId);
             release_assert(m_currentRoots.find(tsChildId) == m_currentRoots.end());
         } else {
-            m_currentRoots.erase(tsChildId);
+            DEBUG_OUT("addTreeParent(" << tsParentId << "-->" << tsChildId << " @ tree_pos="
+                                       << ((startPos == INVALID_POSITION) ? m_currentTreeStart : startPos) << ")");
+            // By default, edges are added eagerly to the current tree, but we won't know where they start until
+            // we complete the previous tree, so we defer the setting of the start position.
+            if (startPos == INVALID_POSITION) {
+                m_pendingChildren.emplace_back(tsChildId);
+            }
             NodeIDSizeT& numChildren = currentChildren(tsParentId);
             numChildren++;
         }
     }
 
-    tsk_id_t createTsNode(NodeID grgNodeId) {
+    tsk_id_t createTsNode(const NodeID grgNodeId, const BpPosition position) {
         const tsk_id_t nodeId = (tsk_id_t)grgNodeId;
         m_grgNodeValid.at(grgNodeId) = true;
+        m_grgNodeUsed.at(grgNodeId) = position;
+        return nodeId;
+    }
+
+    // If needed, add this node to the roots.
+    void checkAddRoot(const tsk_id_t nodeId) {
         // Add to roots if applicable.
         if (m_currentEdges.find(nodeId) == m_currentEdges.end()) {
             m_currentRoots.emplace(nodeId);
         }
-        return nodeId;
     }
 
+    void removeRoot(const tsk_id_t nodeId) { m_currentRoots.erase(nodeId); }
+
     void finalize(BpPosition position) {
-        rootTheTree(position);
+        DEBUG_OUT("FINALIZE: roots are: ");
+        for (auto root : m_currentRoots) {
+            DEBUG_OUT("   root=" << root);
+        }
+        m_currentTreeStart = position;
+        m_previousRoots = m_currentRoots;
+        m_currentRoots.clear();
+        flushPendingEdges(/*force=*/true);
         for (auto& edgePair : m_currentEdges) {
             const TSEdge& edge = edgePair.second;
-            TSKIT_ID_OR_THROW(tsk_edge_table_add_row(
-                                  &m_tables->edges, edge.start, (double)position, edge.parent, edge.child, nullptr, 0),
-                              TSK_NULL,
-                              "Failed to add edge");
+            if (edge.start < position) {
+                DEBUG_OUT("Finalizing edge " << edge.parent << "-->" << edge.child << " (" << edge.start << "-"
+                                             << position << ")");
+                TSKIT_ID_OR_THROW(
+                    tsk_edge_table_add_row(
+                        &m_tables->edges, edge.start, (double)position, edge.parent, edge.child, nullptr, 0),
+                    TSK_NULL,
+                    "Failed to add edge");
+            }
         }
         // Clear all the tree metadata so we can't accidentally use it again.
         m_currentEdges.clear();
@@ -226,31 +287,47 @@ public:
         m_currentRoots.clear();
     }
 
-    // If there is more than one root, add a new node that is the root of the tree!
-    void rootTheTree(BpPosition nextTreeStart) {
-        // If we have multiple edge deletions due to the same mutation, then we don't need to re-root
-        // the (previous) tree multiple times.
-        if (nextTreeStart == m_currentTreeStart) {
-            return;
-        }
-        if (m_currentRoots.size() > 1) {
+    // If there is more than one root, add a new node that is the root of the tree. This is kind of
+    // tricky to do as we move from left-to-right, since nodes that are roots in the previous tree
+    // may be children in the current tree. We handle both cases:
+    // 1. If the root is a root in both trees, add the edge and do not terminate it.
+    // 2. If it is only a root in the previous tree, just add the edge spanning (prevStart - curStart)
+    void rootTheTree() {
+        if (m_previousRoots.size() > 1) {
+            DEBUG_OUT("Rooting the tree that starts at " << m_previousTreeStart << " and ends at "
+                                                         << m_currentTreeStart);
             // Create a single new node, add an edge to it from each previous root.
             const tsk_id_t newRoot = m_nextTsId++;
-            auto rootListCopy = m_currentRoots;
-            for (tsk_id_t oldRoot : rootListCopy) {
-                // Add an edge from the new root to the old root, with the same genomic start position as the
-                // minimum start position of edges beneath the old root.
-                addTreeParent(oldRoot, newRoot, m_currentTreeStart);
+            for (tsk_id_t oldRoot : m_previousRoots) {
+                // If this root is _not_ a root in the current tree, then we just add the edge to
+                // the TreeSequence, not to the current tree.
+                if (m_currentRoots.find(oldRoot) == m_currentRoots.end()) {
+                    DEBUG_OUT("Root edge: " << newRoot << "-->" << oldRoot << " (" << m_previousTreeStart << "-"
+                                            << m_currentTreeStart << ")");
+                    TSKIT_ID_OR_THROW(tsk_edge_table_add_row(&m_tables->edges,
+                                                             (double)m_previousTreeStart,
+                                                             (double)m_currentTreeStart,
+                                                             newRoot,
+                                                             oldRoot,
+                                                             nullptr,
+                                                             0),
+                                      TSK_NULL,
+                                      "Failed to add edge");
+                } else {
+                    DEBUG_OUT("Continuing root edge: " << newRoot << "-->" << oldRoot << " (" << m_previousTreeStart
+                                                       << "-?)");
+                    addTreeParent(newRoot, oldRoot, m_previousTreeStart);
+                    removeRoot(oldRoot);
+                    m_currentRoots.emplace(newRoot);
+                }
             }
             TSKIT_ID_OR_THROW(
                 tsk_node_table_add_row(&m_tables->nodes, 0, (double)newRoot, TSK_NULL, TSK_NULL, nullptr, 0),
                 newRoot,
                 "Failed to add node");
 
-            currentChildren(newRoot) = rootListCopy.size();
-            m_currentRoots = {newRoot};
+            m_previousRoots = {newRoot};
         }
-        m_currentTreeStart = nextTreeStart;
     }
 
     BpPosition currentTreeStart() const { return m_currentTreeStart; }
@@ -289,6 +366,37 @@ public:
     }
 #endif
 
+    // Flushing the edges produces a new tree, which started at m_previousTreeStart and ended
+    // at m_currentTreeStart.
+    void flushPendingEdges(bool force = false) {
+        if (m_previousTreeStart != m_currentTreeStart || force) {
+            rootTheTree();
+            m_previousTreeStart = m_currentTreeStart;
+        }
+
+        DEBUG_OUT("Flushing deleted edges:");
+        for (const auto& edge : m_edgePendingDeletion) {
+            release_assert(edge.start <= m_currentTreeStart);
+            if (edge.start < m_currentTreeStart) {
+                DEBUG_OUT(">" << edge.parent << "-->" << edge.child << " (" << edge.start << "-" << m_currentTreeStart
+                              << ")");
+                TSKIT_ID_OR_THROW(
+                    tsk_edge_table_add_row(
+                        &m_tables->edges, edge.start, (double)m_currentTreeStart, edge.parent, edge.child, nullptr, 0),
+                    TSK_NULL,
+                    "Failed to add edge");
+            }
+        }
+        m_edgePendingDeletion.clear();
+
+        DEBUG_OUT("Flushing added edges:");
+        for (const auto& childId : m_pendingChildren) {
+            m_currentEdges.at(childId).start = m_currentTreeStart;
+            DEBUG_OUT(">" << childId << " starts at " << m_currentTreeStart);
+        }
+        m_pendingChildren.clear();
+    }
+
 protected:
     NodeIDSizeT& currentChildren(tsk_id_t tsNode) {
         if (tsNode >= m_currentChildren.size()) {
@@ -300,10 +408,15 @@ protected:
     // The table collection representing our TreeSequence.
     tsk_table_collection_t* m_tables;
 
-    // If true, the node n in GRG G is represented in the current coalescent tree T in the same way as
-    // in G: i.e., samples below T{S(n)} = G{S(n)} is the same in both structures. When false, the node
-    // is either not in T, or T{S(n)} is a subset of G{S(n)}.
+    // At what position (left-to-right) was the node last used. "Used" means that the meaning of the GRG
+    // node was relied upon w.r.t. the samples beneath it. When edges are deleted from the current tree,
+    // the node below which an edge was deleted no longer has the same meaning (samples-beneath changes),
+    // and becomes invalid.
+    // 1. Only GRG-derived nodes can be "used", by this definition. Synthetic nodes cannot be.
+    // 2. A value of INVALID_POSITION means that the node is invalid. The next time a copy of a mutation
+    //    from the GRG needs to use this node, the edges will have to be reconstructed.
     std::vector<bool> m_grgNodeValid;
+    std::vector<BpPosition> m_grgNodeUsed;
 
     struct TSEdge {
         tsk_id_t parent;
@@ -311,66 +424,112 @@ protected:
         BpPosition start;
     };
 
+    std::vector<TSEdge> m_edgePendingDeletion;
+    std::vector<tsk_id_t> m_pendingChildren;
+
     // The edges in the current tree (mapped from child -> edge).
     std::unordered_map<tsk_id_t, TSEdge> m_currentEdges;
     // The set of root nodes in the current tree. Note: all other nodes in the tree
     // will have edges associated with them, only the roots have no (up) edge.
     std::unordered_set<tsk_id_t> m_currentRoots;
+    std::unordered_set<tsk_id_t> m_previousRoots;
     // Map from tskit ID to the number of children beneath the node, _in the current tree_
     std::vector<NodeIDSizeT> m_currentChildren;
     // Start position (BP) of the current tree. Defined as the position of the most recent
     // edge deletion, which delineates the previous tree from the current tree.
-    BpPosition m_currentTreeStart{};
+    BpPosition m_currentTreeStart{0};
+    BpPosition m_previousTreeStart{0};
 
     // Counter for tskit nodes
-    tsk_id_t m_nextTsId{};
+    tsk_id_t m_nextTsId{0};
 
     // Number of haplotypes in our dataset.
     NodeIDSizeT m_numSamples;
 };
 
+// This algorithm is a bit hard (for me, at least) to get your head around.
+// Consider the current tree that we are building, while we are processing mutation M at position P.
+// After processing M, we do not necessarily have the tree for locus P - we are only gauranteed that
+// the subtree below M is exactly how it will be. When processing subsequent mutations (e.g. M2 @ P2)
+// we may add or remove edges to the tree that we "backdate" to cover locus P in addition to P2.
+//
+// When we actually flush the pending deletions and additions, they will be at the same boundary between
+// trees:
+// 1. After applying those deletions and additions, the TreeSequence tables will match the "current tree"
+//    that we have in m_currentEdges (and which we do not yet know the end-range of)
+// 2. Therefore, we never really know which "current tree" (m_currentEdges set) will cover the range
+//     (m_previousTreeStart, m_currentTreeStart), unless we happened to save a copy of that tree.
+//
+// To root the tree covering (m_previousTreeStart, m_currentTreeStart), we then need to save a copy of
+// the current tree's roots periodically, whenever we get a new "high water mark" for where our deletions
+// and additions will be applied.
+
 /**
  * Given the context, which includes the current coalescent tree, add the given GRG node to the tree
  * by looking up if we already have a corresponding TS node (or creating one).
  */
-static tsk_id_t addMutationToTree(GrgToTsContext& context,
-                                  GRGPtr& grg,
-                                  const NodeID grgNodeId,
-                                  const BpPosition position,
-                                  const tsk_id_t tsParentId = TSK_NULL) {
-    tsk_id_t tsNodeId = context.getCurrentNode(grgNodeId);
+static tsk_id_t addHierarchyToTree(GrgToTsContext& context,
+                                   GRGPtr& grg,
+                                   const NodeID grgNodeId,
+                                   const BpPosition position,
+                                   const tsk_id_t tsParentId = TSK_NULL,
+                                   size_t indent = 0) {
+    s_indent = indent;
+    DEBUG_OUT("addHierarchyToTree(" << grgNodeId << ", parent=" << tsParentId << ")");
+    tsk_id_t tsNodeId = context.getAndUpdateCurrentNode(grgNodeId, position);
     // If the node is new to this tree (or was invalidated for this tree), then we need to recursively
     // call this function. Otherwise, we can stop after processing this single node.
     const bool recurse = (tsNodeId == TSK_NULL);
     if (recurse) {
-        tsNodeId = context.createTsNode(grgNodeId);
+        tsNodeId = context.createTsNode(grgNodeId, position);
+        DEBUG_OUT("new node = " << tsNodeId);
     }
     if (tsParentId != TSK_NULL) {
         // First, check for other parents. If we already have a parent, delete it and add the edge
         // to the table (terminating now).
         const tsk_id_t tsOtherParent = context.getTreeParent(tsNodeId);
+        DEBUG_OUT("new parent = " << tsParentId << ", old parent = " << tsOtherParent);
         if (tsOtherParent != tsParentId) {
             if (tsOtherParent != TSK_NULL) {
-                // First, make sure our current tree is properly rooted, because when we delete the
-                // edge (next step) it might start a _NEW_ tree.
-                context.rootTheTree(position);
-
-                // We also need to invalidate the entire upward path in our tree, because it no longer reaches
+                // We need to invalidate the entire upward path in our tree, because it no longer reaches
                 // the list of samples that it did, so cannot reuse any of those nodes.
                 context.invalidateTreeAbove(tsNodeId, position);
             }
 
-            // Next, add in our new parent to the tree, and associate the position with the start of the
-            // new edge.
-            context.addTreeParent(tsNodeId, tsParentId, position);
+            // Next, add in our new parent to the current tree.
+            context.addTreeParent(tsParentId, tsNodeId);
+            context.removeRoot(tsNodeId);
         }
     }
     if (recurse) {
         for (NodeID child : grg->getDownEdges(grgNodeId)) {
-            addMutationToTree(context, grg, child, position, tsNodeId);
+            addHierarchyToTree(context, grg, child, position, tsNodeId, indent + 2);
         }
     }
+
     return tsNodeId;
+}
+
+/**
+ * Given the context, which includes the current coalescent tree, add the given GRG node to the tree
+ * by looking up if we already have a corresponding TS node (or creating one). This algorithm has the
+ * following properties:
+ * 1. Adding a single mutation can both add and remove edges from the tree. All added edges will have
+ *    the same start position (the start of the tree) and all removed edges will have the same
+ *    end position.
+ */
+static tsk_id_t
+addMutationToTree(GrgToTsContext& context, GRGPtr& grg, const NodeID grgNodeId, const BpPosition position) {
+    DEBUG_OUT("\naddMutationToTree(" << grgNodeId << ", position=" << position << ") {");
+
+    // This constructs a subtree rooted at (the tskit equivalent of) grgNodeId by following
+    // all down edges in the GRG, by modifying the current marginal tree in the TreeSequence.
+    const tsk_id_t mutNode = addHierarchyToTree(context, grg, grgNodeId, position);
+    context.checkAddRoot(mutNode);
+    context.flushPendingEdges();
+
+    DEBUG_OUT("}\n");
+    return mutNode;
 }
 
 using MutAndTSNode = std::pair<Mutation, tsk_id_t>;
@@ -386,9 +545,29 @@ void convertGRGToTreeSeq(GRGPtr& grg, tsk_treeseq_t* outTS, std::pair<size_t, si
 
     GrgToTsContext context(&tsTables, grg);
 
+    MutationId debugMut = INVALID_MUTATION_ID;
+    if (std::getenv("DEBUG_MUT") != nullptr) {
+        debugMut = std::atoi(std::getenv("DEBUG_MUT"));
+        std::cerr << "Debugging MutationId=" << debugMut << "\n";
+    }
+
+    MutationId stopAtMut = INVALID_MUTATION_ID;
+    if (std::getenv("STOP_AT_MUT") != nullptr) {
+        stopAtMut = std::atoi(std::getenv("STOP_AT_MUT"));
+        std::cerr << "Stopping at MutationId=" << stopAtMut << "\n";
+    }
+
     tsk_id_t lastSiteId = TSK_NULL;
     grgl::BpPosition prevPos = INVALID_POSITION;
     for (auto& mutAndNode : grg->getMutationsToNodeOrdered()) {
+        if (mutAndNode.first == stopAtMut) {
+            break;
+        }
+        if (mutAndNode.first == debugMut) {
+            s_debugging = true;
+        } else {
+            s_debugging = false;
+        }
         const Mutation& mut = grg->getMutationById(mutAndNode.first);
         api_exc_check(!mut.isMissing(), "GRG has missing data; not supported for GRG->TS conversion");
         const NodeID grgNode = mutAndNode.second;
@@ -399,7 +578,7 @@ void convertGRGToTreeSeq(GRGPtr& grg, tsk_treeseq_t* outTS, std::pair<size_t, si
 
         // Update the tree topology to reflect this mutation, and return the tskit node that is
         // immediately below the mutation.
-        const tsk_id_t tsNode = addMutationToTree(context, grg, grgNode, mut.getPosition(), TSK_NULL);
+        const tsk_id_t tsNode = addMutationToTree(context, grg, grgNode, mut.getPosition());
 #if GRG2TS_VALIDATION
         // This is very slow, so we only use it optionally when testing code changes.
         release_assert(context.validateRoots());
