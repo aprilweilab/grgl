@@ -61,7 +61,7 @@ def convert_command(arguments):
     if is_grg(arguments.output_file):
         if not is_trees(arguments.input_file):
             print(
-                f'"grg convert" only supports .trees -> .grg conversion. If you '
+                f'"grg convert" only supports .trees <-> .grg conversion. If you '
                 ' want to construct a .grg from something else try "grg construct"'
             )
             exit(2)
@@ -82,6 +82,17 @@ def convert_command(arguments):
             command_args.append("--no-maintain-topo")
         if arguments.ts_coals:
             command_args.append("--ts-coals")
+    elif is_trees(arguments.output_file):
+        if not is_grg(arguments.input_file):
+            print(
+                f'"grg convert" only supports .trees <-> .grg conversion. If you '
+                ' want to construct a .trees from something else try "grg construct" first'
+            )
+            exit(2)
+        command_args = [GRGL, arguments.input_file, "-o", arguments.output_file]
+        if arguments.no_simplify:
+            command_args.append("--no-simplify")
+
     elif is_igd(arguments.output_file):
         if is_trees(arguments.input_file):
             print("Can only convert .trees files to GRGs", file=sys.stderr)
@@ -90,5 +101,5 @@ def convert_command(arguments):
             subprocess.check_call([GINDEX, arguments.input_file])
         command_args = [GCONVERT, arguments.input_file, arguments.output_file]
     else:
-        assert False, "Unexpected output file type (only .grg/.igd supported)"
+        assert False, "Unexpected output file type (only .grg/.igd/.trees supported)"
     subprocess.check_call(command_args)
