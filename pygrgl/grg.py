@@ -25,11 +25,9 @@ def grg_to_cyto_json(grg: GRG, start_from=[], show_mutations=True) -> Dict[str, 
 
     def label(node_id: int) -> str:
         label = f"id={node_id}"
-        if grg.is_sample(node_id):
-            label += f", S"
         mutations = grg.get_mutations_for_node(node_id)
         if show_mutations and mutations:
-            label += f", mutations({set(mutations)})"
+            label += f", muts({','.join(map(str, mutations))})"
         return label
 
     nodeset = start_from if start_from else list(range(0, grg.num_nodes))
