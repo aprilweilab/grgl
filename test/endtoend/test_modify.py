@@ -332,6 +332,26 @@ class TestGrgModify(unittest.TestCase):
         grg.connect(0, -neg_i)
         grg.connect(0, pos_j)
 
+    def test_dup_edges(self):
+        """
+        Test that GRG rejects when duplicate edges are added.
+        """
+        grg = pygrgl.MutableGRG(20, 2)
+        new_node = grg.make_node()
+        grg.connect(new_node, 19)
+        with self.assertRaises(RuntimeError):
+            grg.connect(new_node, 19)
+
+        # Now, if we add a duplicate node out-of-order then it won't complain
+        # until we try to serialize the GRG
+        grg.connect(new_node, 17)
+        grg.connect(new_node, 19)
+
+        grg.add_mutation(pygrgl.Mutation(100, "A", "G"), new_node)
+
+        with self.assertRaises(RuntimeError):
+            pygrgl.save_grg(grg, "test_dup_edges.grg")
+
 
 if __name__ == "__main__":
     unittest.main()
