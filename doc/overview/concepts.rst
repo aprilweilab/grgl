@@ -113,6 +113,12 @@ Missing data is represented as a node-to-samples relationship, just like Mutatio
 object directly associated with the missing data. Instead, each Mutation is mapped to two (optional) ``NodeID``: the
 mutation's node, and the missingness node associated with the site (genetic position) of the Mutation.
 
+.. note::
+    Missing data in GRG is represented **per-site**, not **per-variant** (or "row") like VCF and IGD. This means you can
+    input data that causes the intersection of "samples with missing alleles" and "samples that have variant X" to
+    be non-empty, which can have downstream consequences for calculations. Users should properly filter/QC their
+    data in a GRG just like they would in other formats.
+
 Obtaining the Missingness Node
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

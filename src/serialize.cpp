@@ -448,6 +448,9 @@ bool RenumberAndWriteVisitor::visit(const grgl::GRGPtr& grg,
                 assert(m_revIdMap.size() == newNodeId + 1);
 
                 std::sort(children.begin(), children.end());
+                const auto endOfUnique = std::unique(children.begin(), children.end());
+                api_exc_check(endOfUnique == children.end(),
+                              "Multiple edges from a parent to the same child; GRG constructed incorrectly.");
                 m_edgeCounter += children.size();
                 m_bytesWritten += m_edgeCSR.setData(newNodeId, children);
 

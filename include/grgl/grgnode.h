@@ -25,6 +25,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "grgl/common.h"
 #include "mutation.h"
 
 #define PERFORM_DUP_EDGE_CHECKS 0
@@ -153,6 +154,8 @@ protected:
     }
 
     void addDownEdge(const NodeID target) {
+        // This is not an exhaustive check - that happens during serialization of the graph to disk.
+        api_exc_check(this->m_downEdges.empty() || this->m_downEdges.back() != target, "Duplicate edge added!");
         this->m_downEdges.push_back(target);
         CHECK_DUP_EDGES(this->m_downEdges);
     }

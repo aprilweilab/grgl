@@ -267,6 +267,14 @@ void VCFMutationIterator::buffer_next(size_t& totalSamples) {
 
         // If we have missing data, always emit it first (m_alreadyLoaded is a stack, so the end will emit first).
         if (emitMissingData() && !missingSamples.empty()) {
+            // Sort and uniquify missingness. Missing samples can come from multiple "rows" of a VCF depending
+            // on whether it is normalized or not, and missingness info (sample lists) may overlap between
+            // these variants. We take the _union_ of missingness: VCF allows somewhat arbitrary encoding
+            // of variants, so this may not match what is "expected."
+            std::sort(missingSamples.begin(), missingSamples.end());
+            auto endOfUnique = std::unique(missingSamples.begin(), missingSamples.end());
+            missingSamples.erase(endOfUnique, missingSamples.end());
+
             m_alreadyLoaded.push_back(
                 {Mutation(position, Mutation::ALLELE_MISSING, refAllele), std::move(missingSamples)});
         }
@@ -367,8 +375,8 @@ void IGDMutationIterator::buffer_next(size_t& totalSamples) {
                     if (emitMissingData()) {
                         api_exc_check(numCopies != 1,
                                       "Unphased IGD files do not support partial missingness at the individual level");
-                        const bool needsSort = !missingSamples.empty();
                         auto sampleSet = m_igd->getSamplesWithAlt(m_currentVariant);
+                        const bool needsSort = !missingSamples.empty();
                         for (auto sampleId : sampleSet) {
                             if (m_igd->isPhased()) {
                                 missingSamples.emplace_back(sampleId);
@@ -380,13 +388,16 @@ void IGDMutationIterator::buffer_next(size_t& totalSamples) {
                             }
                         }
                         if (needsSort) {
+                            // See comment in VCFMutationIterator about uniqueness of missing samples.
                             std::sort(missingSamples.begin(), missingSamples.end());
+                            auto endOfUnique = std::unique(missingSamples.begin(), missingSamples.end());
+                            missingSamples.erase(endOfUnique, missingSamples.end());
                         }
                     }
                 } else {
                     AllelePair alleles = {m_igd->getRefAllele(m_currentVariant), m_igd->getAltAllele(m_currentVariant)};
 
-                    // We collection sample sets by alleles
+                    // We collect sample sets by alleles
                     bool needsSort = false;
                     size_t loadedIndex = std::numeric_limits<size_t>::max();
                     auto findIt = seenMap.find(alleles);
@@ -411,9 +422,13 @@ void IGDMutationIterator::buffer_next(size_t& totalSamples) {
                             m_alreadyLoaded[loadedIndex].samples.push_back(sampleId);
                         }
                     }
+                    // Certain inputs can have the same REF,ALT combo with overlapping (same?) sample sets. This
+                    // is certainly a data-quality issue, or some encoding of non-SNP VCF data that is confusing.
                     if (needsSort) {
-                        std::sort(m_alreadyLoaded[loadedIndex].samples.begin(),
-                                  m_alreadyLoaded[loadedIndex].samples.end());
+                        auto& sampleList = m_alreadyLoaded[loadedIndex].samples;
+                        std::sort(sampleList.begin(), sampleList.end());
+                        const auto endOfUnique = std::unique(sampleList.begin(), sampleList.end());
+                        sampleList.erase(endOfUnique, sampleList.end());
                     }
                 }
                 m_currentVariant++;
