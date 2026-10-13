@@ -94,7 +94,7 @@ template <typename T> static inline void writeScalar(const T& intValue, std::ost
 
 static inline size_t writeVarInt32(uint32_t value, std::ostream& outStream) {
     static constexpr size_t maxSize32 = 5;
-    static uint8_t buffer[maxSize32];
+    uint8_t buffer[maxSize32];
     const std::streamsize written = static_cast<std::streamsize>(vbyte_write_uint32(&buffer[0], value));
     release_assert(written <= maxSize32);
     outStream.write(reinterpret_cast<const char*>(&buffer[0]), written);
@@ -103,7 +103,7 @@ static inline size_t writeVarInt32(uint32_t value, std::ostream& outStream) {
 
 static inline size_t writeVarInt64(uint64_t value, std::ostream& outStream) {
     static constexpr size_t maxSize64 = 10;
-    static uint8_t buffer[maxSize64];
+    uint8_t buffer[maxSize64];
     const std::streamsize written = static_cast<std::streamsize>(vbyte_write_uint64(&buffer[0], value));
     release_assert(written <= maxSize64);
     outStream.write(reinterpret_cast<const char*>(&buffer[0]), written);
@@ -112,7 +112,7 @@ static inline size_t writeVarInt64(uint64_t value, std::ostream& outStream) {
 
 static inline void writeString(const std::string& value, std::ostream& outStream) {
     static constexpr size_t maxSize32 = 5;
-    static uint8_t buffer[maxSize32];
+    uint8_t buffer[maxSize32];
     const std::streamsize written = static_cast<std::streamsize>(vbyte_write_uint32(&buffer[0], value.size()));
     release_assert(written <= maxSize32);
     outStream.write(reinterpret_cast<const char*>(&buffer[0]), written);
@@ -685,7 +685,7 @@ template <typename T> static inline T readScalar(std::istream& inStream) {
 // FIXME this is janky, mostly because vbyte_read_uint32 doesn't provide a file-based read.
 static inline std::string readString(std::istream& inStream) {
     std::string result;
-    static uint8_t buffer[5];
+    uint8_t buffer[5];
     inStream.read(reinterpret_cast<char*>(&buffer[0]), sizeof(buffer));
     uint32_t length = 0;
     size_t readBytes = vbyte_read_uint32(&buffer[0], &length);
