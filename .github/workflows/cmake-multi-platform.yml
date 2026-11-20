@@ -84,12 +84,13 @@ jobs:
       working-directory: ${{ github.workspace }}
       run: ${{ matrix.fcheck_command }}
 
+  # We use 24.04 instead of "latest" to maintain build-ability with Python 3.9
   build-py:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
 
     steps:
     - uses: actions/checkout@v4
